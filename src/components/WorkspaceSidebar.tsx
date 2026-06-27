@@ -6,7 +6,6 @@ type Props = {
   workspaces: Workspace[]
   activeWorkspaceId: string | null
   onSelect: (id: string) => void
-  onAddWorkspace: () => void
   onEdit: (id: string, name: string, path: string) => void
   onRemove: (id: string) => void
 }
@@ -15,7 +14,6 @@ export default function WorkspaceSidebar({
   workspaces,
   activeWorkspaceId,
   onSelect,
-  onAddWorkspace,
   onEdit,
   onRemove,
 }: Props) {
@@ -40,18 +38,12 @@ export default function WorkspaceSidebar({
     <aside className="sidebar">
       <div className="sidebar-header">
         <h2 className="sidebar-title">Workspaces</h2>
-        <button className="btn btn-primary btn-xs" onClick={onAddWorkspace}>
-          Add Workspace
-        </button>
       </div>
 
       <div className="sidebar-list">
         {workspaces.length === 0 ? (
           <div className="sidebar-empty">
             <p>No workspaces yet</p>
-            <button className="btn btn-primary btn-sm" onClick={onAddWorkspace} style={{ marginTop: 12 }}>
-              + Add Workspace
-            </button>
           </div>
         ) : (
           workspaces.map(w => (

@@ -160,6 +160,29 @@ function App() {
     }
   }, [])
 
+  const actionsRef = useRef({ handleAddWorkspace, promptForName })
+  actionsRef.current = { handleAddWorkspace, promptForName }
+
+  useEffect(() => {
+    window.electronAPI?.onMenuAction?.(action => {
+      const { handleAddWorkspace, promptForName } = actionsRef.current
+      switch (action) {
+        case 'open-folder':
+          handleAddWorkspace()
+          break
+        case 'new-workspace':
+          promptForName('')
+          break
+        case 'save-workspace':
+          console.log('[app] save-workspace — not yet implemented')
+          break
+        case 'load-workspace':
+          console.log('[app] load-workspace — not yet implemented')
+          break
+      }
+    })
+  }, [])
+
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) ?? null
   const activePanels = panels.filter(p => p.workspaceId === activeWorkspaceId)
 
@@ -176,7 +199,6 @@ function App() {
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspaceId}
         onSelect={setActiveWorkspaceId}
-        onAddWorkspace={handleAddWorkspace}
         onEdit={editWorkspace}
         onRemove={removeWorkspace}
       />

@@ -51,6 +51,13 @@ async function findFirstFile(
   return null
 }
 
+let menuCallback: ((action: string) => void) | null = null
+
+ipcRenderer.on('menu-action', (_event, action: string) => {
+  console.log('[preload] menu-action:', action)
+  menuCallback?.(action)
+})
+
 contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () => {
     console.log('[preload] selectDirectory called')
@@ -68,6 +75,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return new Promise<string | null>(resolve => {
       dropResolve = resolve
     })
+  },
+
+  onMenuAction: (callback: (action: string) => void) => {
+    menuCallback = callback
   },
 })
 
