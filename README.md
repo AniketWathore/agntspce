@@ -1,6 +1,6 @@
-# AgntSpce
+# CodingAgentsWorkspace
 
-AgntSpce is a ai workspace software for coding agents with built in terminal output compression layer, prompt optimisation, auto model routing, onboard small agentic model and many more functionalities to reduce overall tokens consumption.
+CodingAgentsWorkspace is a workspace software for coding ai agents with built in terminal output compression layer, prompt optimisation, auto model routing, onboard small agentic model and many more functionalities to reduce overall tokens consumption.
 
 ## React + TypeScript + Vite
 
@@ -8,7 +8,7 @@ This template provides a minimal setup to get React working in Vite with HMR and
 
 Currently, two official plugins are available:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/p  ackages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
 - [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
 ## React Compiler

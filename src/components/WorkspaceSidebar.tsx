@@ -1,91 +1,100 @@
-import { useState } from 'react'
-import type { Workspace } from '../App'
-import './WorkspaceSidebar.css'
+import type { WorkspaceInfo, SessionState } from '../types'
 
-type Props = {
-  workspaces: Workspace[]
-  activeWorkspaceId: string | null
+interface Props {
+  workspaces: WorkspaceInfo[]
+  sessions: Record<string, SessionState>
+  activeWorkspace: WorkspaceInfo | null
   onSelect: (id: string) => void
+  onAdd: (name: string, path: string) => void
   onEdit: (id: string, name: string, path: string) => void
   onRemove: (id: string) => void
+  onDelete: (id: string) => void
+  showModal: (title: string, onSubmit: (value: string) => void, defaultValue?: string) => void
+  closeModal: () => void
 }
 
-export default function WorkspaceSidebar({
-  workspaces,
-  activeWorkspaceId,
-  onSelect,
-  onEdit,
-  onRemove,
-}: Props) {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editName, setEditName] = useState('')
-  const [editPath, setEditPath] = useState('')
+function getSessionCount(ws: WorkspaceInfo): number {
+  if (Array.isArray(ws.terminals)) return ws.terminals.length
+  return ws.terminals?.pairs ? ws.terminals.pairs * 2 : 0
+}
 
-  function startEdit(w: Workspace) {
-    setEditingId(w.id)
-    setEditName(w.name)
-    setEditPath(w.path)
-  }
+function getActiveCount(sessions: Record<string, SessionState>): number {
+  return Object.values(sessions).filter(s => s.status === 'busy' || s.status === 'waiting').length
+}
 
-  function saveEdit() {
-    if (editingId && editName.trim() && editPath.trim()) {
-      onEdit(editingId, editName.trim(), editPath.trim())
-    }
-    setEditingId(null)
+export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, onSelect, onAdd, onRemove, onDelete, showModal, closeModal }: Props) {
+  const activeCount = getActiveCount(sessions)
+
+  function handleAdd() {
+    showModal('Workspace name:', (name) => {
+      const doCreate = async () => {
+        let path = '/tmp'
+        try {
+          if (window.electronAPI) {
+            const selected = await window.electronAPI.selectDirectory()
+            if (selected) path = selected
+          } else {
+            const fallback = prompt('Workspace directory:', path)
+            if (fallback && fallback.trim()) path = fallback.trim()
+          }
+        } catch {}
+        onAdd(name, path)
+        closeModal()
+      }
+      doCreate()
+    })
   }
 
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <h2 className="sidebar-title">Workspaces</h2>
+        <h2>Workspaces</h2>
+        <button className="add-btn" onClick={handleAdd}>+</button>
       </div>
 
-      <div className="sidebar-list">
-        {workspaces.length === 0 ? (
-          <div className="sidebar-empty">
-            <p>No workspaces yet</p>
-          </div>
-        ) : (
-          workspaces.map(w => (
-            <div
-              key={w.id}
-              className={`sidebar-item ${w.id === activeWorkspaceId ? 'active' : ''}`}
-              onClick={() => onSelect(w.id)}
-            >
-              {editingId === w.id ? (
-                <div className="sidebar-edit-form" onClick={e => e.stopPropagation()}>
-                  <input
-                    className="sidebar-input"
-                    value={editName}
-                    onChange={e => setEditName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && saveEdit()}
-                    autoFocus
-                  />
-                  <input
-                    className="sidebar-input"
-                    value={editPath}
-                    onChange={e => setEditPath(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && saveEdit()}
-                  />
-                  <div className="sidebar-form-actions">
-                    <button className="btn btn-sm btn-primary" onClick={saveEdit}>Save</button>
-                    <button className="btn btn-sm btn-ghost" onClick={() => setEditingId(null)}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="sidebar-item-content">
-                    <span className="sidebar-item-name">{w.name}</span>
-                    <span className="sidebar-item-path">{w.path}</span>
-                  </div>
-                  <div className="sidebar-item-actions" onClick={e => e.stopPropagation()}>
-                    <button className="btn btn-icon-sm" onClick={() => startEdit(w)} title="Edit" aria-label={`Edit ${w.name}`}>✎</button>
-                    <button className="btn btn-icon-sm" onClick={() => onRemove(w.id)} title="Remove" aria-label={`Remove ${w.name}`}>✕</button>
-                  </div>
-                </>
-              )}
+      <div className="sidebar-stats">
+        <span className="stat">{Object.keys(sessions).length} terminals</span>
+        {activeCount > 0 && <span className="stat active">{activeCount} active</span>}
+      </div>
+
+      <div className="workspace-list">
+        {workspaces.map(ws => (
+          <div
+            key={ws.id}
+            className={`workspace-item ${activeWorkspace?.id === ws.id ? 'active' : ''}`}
+            onClick={() => onSelect(ws.id)}
+          >
+            <div className="workspace-item-header">
+              <span className="workspace-icon">{ws.icon || '📁'}</span>
+              <span className="workspace-name">{ws.name}</span>
+              <span className="workspace-session-count">{getSessionCount(ws)}</span>
             </div>
-          ))
+            <div className="workspace-item-actions">
+              <button
+                className="action-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                }}
+                title="Rename"
+              >✏️</button>
+              <button
+                className="action-btn danger"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (confirm(`Delete workspace "${ws.name}"?`)) onDelete(ws.id)
+                }}
+                title="Delete"
+              >🗑</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="sidebar-footer">
+        {activeWorkspace && (
+          <button className="remove-btn" onClick={() => {
+            if (confirm(`Remove workspace "${activeWorkspace.name}" from view?`)) onRemove(activeWorkspace.id)
+          }}>Remove Active</button>
         )}
       </div>
     </aside>

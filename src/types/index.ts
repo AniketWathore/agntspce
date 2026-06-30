@@ -1,0 +1,96 @@
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  workspaceType?: string
+  icon?: string
+  description?: string
+  repository?: {
+    path: string
+    type: string
+    masterBranch?: string
+  }
+  worktrees?: {
+    enabled: boolean
+    count: number
+    namingPattern: string
+    autoCreate: boolean
+  }
+  terminals?: any
+  lastAccess?: string
+}
+
+export interface SessionState {
+  id: string
+  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'server' | 'shell'
+  worktreeId: string
+  repositoryName?: string
+  repositoryType?: string
+  status: 'idle' | 'busy' | 'waiting' | 'exited'
+  branch: string
+  lastActivity: number
+}
+
+export interface TerminalOutput {
+  sessionId: string
+  data: string
+}
+
+export interface StatusChange {
+  sessionId: string
+  status: string
+}
+
+export interface BranchChange {
+  sessionId: string
+  branch: string
+  worktreeId: string
+}
+
+export interface WorkspaceChange {
+  workspace: WorkspaceInfo
+  sessions: Record<string, SessionState>
+}
+
+export interface AgentMode {
+  id: string
+  name: string
+  description: string
+}
+
+export interface AgentFlag {
+  id: string
+  flag: string
+  description: string
+  label: string
+  category: string
+  default: boolean
+}
+
+export interface AgentConfig {
+  id: string
+  name: string
+  icon: string
+  description: string
+  modes: AgentMode[]
+  flags: AgentFlag[]
+  defaultMode: string
+}
+
+export interface AgentStartConfig {
+  agentId: string
+  mode: string
+  flags: string[]
+  model?: string
+  reasoning?: string
+  verbosity?: string
+  resumeId?: string
+}
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      selectDirectory: () => Promise<string | null>
+      getServerPort: () => Promise<number>
+    }
+  }
+}

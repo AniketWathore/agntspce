@@ -1,104 +1,142 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import './TerminalPane.css'
 import '@xterm/xterm/css/xterm.css'
+import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
+import StatusDot from './StatusDot'
+import StartupUI from './StartupUI'
 
-type Props = {
-  id: string
-  workspaceName: string
-  workspacePath: string
-  onClose: () => void
+interface Props {
+  session: SessionState
+  onInput: (sessionId: string, data: string) => void
+  onResize: (sessionId: string, cols: number, rows: number) => void
+  onRestart: (sessionId: string) => void
+  onStartAgent: (sessionId: string, config: AgentStartConfig) => void
+  onShowAgentModal: (sessionId: string) => void
+  writeData: string
+  agentConfigs: AgentConfig[]
 }
 
-const theme = {
-  background: '#1a1b26',
-  foreground: '#a9b1d6',
-  cursor: '#c0caf5',
-  selectionBackground: '#2e304a',
-  black: '#1d202f',
-  red: '#f7768e',
-  green: '#9ece6a',
-  yellow: '#e0af68',
-  blue: '#7aa2f7',
-  magenta: '#bb9af7',
-  cyan: '#7dcfff',
-  white: '#a9b1d6',
-  brightBlack: '#414868',
-  brightRed: '#f7768e',
-  brightGreen: '#9ece6a',
-  brightYellow: '#e0af68',
-  brightBlue: '#7aa2f7',
-  brightMagenta: '#bb9af7',
-  brightCyan: '#7dcfff',
-  brightWhite: '#c0caf5',
-}
-
-export default function TerminalPane({ id, workspaceName, workspacePath, onClose }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, writeData, agentConfigs }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
-  const termRef = useRef<Terminal | null>(null)
+  const termInstance = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const [showStartup, setShowStartup] = useState(false)
+
+  const isAgentType = session.type === 'claude' || session.type === 'codex' || session.type === 'opencode' || session.type === 'gemini'
+  const shouldShowStartup = isAgentType && session.status === 'waiting' && showStartup
 
   useEffect(() => {
-    const el = terminalRef.current
-    if (!el) return
+    if (session.status === 'waiting' && isAgentType) {
+      setShowStartup(true)
+    } else {
+      setShowStartup(false)
+    }
+  }, [session.status, session.id])
+
+  useEffect(() => {
+    if (!terminalRef.current) return
 
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
       fontSize: 13,
-      fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace",
-      theme,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      theme: {
+        background: '#1a1b1e',
+        foreground: '#e4e4e7',
+        cursor: '#e4e4e7',
+        selectionBackground: '#3b3f54',
+        black: '#1a1b1e',
+        red: '#f87171',
+        green: '#4ade80',
+        yellow: '#fbbf24',
+        blue: '#60a5fa',
+        magenta: '#c084fc',
+        cyan: '#22d3ee',
+        white: '#e4e4e7',
+        brightBlack: '#3f3f46',
+        brightRed: '#fca5a5',
+        brightGreen: '#86efac',
+        brightYellow: '#fde68a',
+        brightBlue: '#93c5fd',
+        brightMagenta: '#d8b4fe',
+        brightCyan: '#67e8f9',
+        brightWhite: '#f4f4f5',
+      },
+      allowTransparency: false,
     })
-
-    termRef.current = term
 
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
-    term.open(el)
-    fitAddon.fit()
+    fitAddonRef.current = fitAddon
 
-    term.writeln(`\x1b[1;36m── ${workspaceName} ── ${workspacePath}\x1b[0m`)
-    term.writeln('')
-    term.writeln(`\x1b[90mShell: /bin/zsh  |  CWD: ${workspacePath}\x1b[0m`)
-    term.writeln('')
+    term.open(terminalRef.current)
 
-    const ro = new ResizeObserver(() => fitAddon.fit())
-    ro.observe(el)
+    setTimeout(() => {
+      try { fitAddon.fit() } catch { }
+    }, 100)
+
+    term.onData((data) => {
+      onInput(session.id, data)
+    })
+
+    term.onResize(({ cols, rows }) => {
+      onResize(session.id, cols, rows)
+    })
+
+    termInstance.current = term
 
     return () => {
-      ro.disconnect()
-      termRef.current = null
       term.dispose()
+      termInstance.current = null
     }
-  }, [id])
+  }, [session.id])
+
+  const lastWriteLenRef = useRef(0)
+  useEffect(() => {
+    if (writeData.length > lastWriteLenRef.current && termInstance.current) {
+      const newData = writeData.slice(lastWriteLenRef.current)
+      lastWriteLenRef.current = writeData.length
+      if (newData) termInstance.current.write(newData)
+    }
+  }, [writeData])
+
+  useEffect(() => {
+    if (!fitAddonRef.current) return
+    const observer = new ResizeObserver(() => {
+      try { fitAddonRef.current?.fit() } catch { }
+    })
+    if (terminalRef.current) {
+      observer.observe(terminalRef.current)
+    }
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <div className="terminal-pane">
-      <div className="pane-header">
-        <span className="pane-title">Terminal</span>
-        <span className="pane-cwd">{workspacePath}</span>
-        <div className="pane-header-spacer" />
-        <button className="btn btn-icon-sm" onClick={onClose} title="Close panel">✕</button>
+      <div className="terminal-header">
+        <StatusDot status={session.status} />
+        <span className="terminal-title">{session.type.toUpperCase()}</span>
+        {session.branch && session.branch !== 'unknown' && (
+          <span className="terminal-branch">{session.branch}</span>
+        )}
+        <span className="terminal-session-id">{session.id}</span>
+        <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>
       </div>
-      <div className="pane-terminal" ref={terminalRef} />
-      <div className="pane-input-bar">
-        <span className="pane-prompt">❯</span>
-        <input
-          className="pane-input"
-          type="text"
-          placeholder={`$PWD: ${workspacePath} — type a command...`}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              const value = (e.target as HTMLInputElement).value
-              if (value.trim() && termRef.current) {
-                termRef.current.writeln(`\x1b[1;33m❯\x1b[0m ${value}`)
-                termRef.current.writeln(`\x1b[90m→ (sent to shell at ${workspacePath})\x1b[0m`)
-                termRef.current.writeln('')
-                ;(e.target as HTMLInputElement).value = ''
-              }
-            }
-          }}
-        />
+      <div className="terminal-body">
+        <div ref={terminalRef} className="terminal-instance" />
+        {shouldShowStartup && (
+          <div className="terminal-startup-overlay">
+            <StartupUI
+              sessionId={session.id}
+              agentConfigs={agentConfigs}
+              onStart={onStartAgent}
+              onAdvanced={() => onShowAgentModal(session.id)}
+              onDismiss={() => setShowStartup(false)}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

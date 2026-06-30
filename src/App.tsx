@@ -1,222 +1,245 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import Header from './components/Header'
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
-import NamePrompt from './components/NamePrompt'
+import ShellSidebar from './components/ShellSidebar'
+import InputModal from './components/InputModal'
+import AgentModal from './components/AgentModal'
+import { useSocket } from './hooks/useSocket'
+import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
 import './App.css'
 
-export type Workspace = {
-  id: string
-  name: string
-  path: string
-}
+const FALLBACK_AGENTS: AgentConfig[] = [
+  {
+    id: 'claude', name: 'Claude Code', icon: '🤖', description: 'Anthropic Claude Code CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Resume conversation' }, { id: 'resume', name: 'Resume', description: 'Restore interrupted session' }],
+    flags: [{ id: 'skipPermissions', flag: '--dangerously-skip-permissions', label: '🚀 YOLO Mode', description: 'YOLO Mode (skip permissions)', category: 'permissions', default: true }],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'opencode', name: 'Opencode', icon: '🔧', description: 'AI-powered coding agent CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'codex', name: 'Codex', icon: '⚡', description: 'OpenAI Codex CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue most recent session' }, { id: 'resume', name: 'Resume', description: 'Resume interrupted session' }],
+    flags: [{ id: 'yolo', flag: '--dangerously-bypass-approvals-and-sandbox', label: '🚀 YOLO Mode', description: 'No approvals + no sandboxing', category: 'sandbox', default: true }],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'gemini', name: 'Gemini', icon: '✨', description: 'Google Gemini CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+]
 
-export type Panel = {
-  id: string
-  workspaceId: string
-}
-
-function getNextDefaultName(workspaces: Workspace[]): string {
-  const count = workspaces.filter(w => w.name.startsWith('Workspace')).length + 1
-  return `Workspace${count}`
+interface ModalState {
+  open: boolean
+  title: string
+  defaultValue?: string
+  onSubmit: (value: string) => void
 }
 
 function App() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const {
+    connected, sessions, workspaces, activeWorkspace,
+    onTerminalOutput, sendTerminalInput, sendTerminalResize,
+    restartSession, switchWorkspace, createWorkspace,
+    deleteWorkspace, closeTab, startAgent, fetchAgentConfigs, createRawSession,
+  } = useSocket()
+  const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
-  const [panels, setPanels] = useState<Panel[]>([])
-  const [sidebarWidth, setSidebarWidth] = useState(260)
-  const [isDragging, setIsDragging] = useState(false)
-  const [pendingFolder, setPendingFolder] = useState<string | null>(null)
-  const resizing = useRef(false)
-  const dragCounter = useRef(0)
-  const workspacesRef = useRef(workspaces)
-  workspacesRef.current = workspaces
+  const [modal, setModal] = useState<ModalState | null>(null)
+  const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
+  const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
+  const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
 
-  const addWorkspace = useCallback((name: string, path: string) => {
-    console.log('[app] addWorkspace:', name, path)
-    const current = workspacesRef.current
-    const existing = current.find(w => w.path === path)
-    if (existing) {
-      setActiveWorkspaceId(existing.id)
-      return
-    }
-    const id = String(Date.now())
-    setWorkspaces(prev => [...prev, { id, name, path }])
-    setActiveWorkspaceId(id)
+  useEffect(() => {
+    fetchAgentConfigs().then(configs => {
+      if (configs.length > 0) setAgentConfigs(configs)
+      else setAgentConfigs(FALLBACK_AGENTS)
+    }).catch(() => setAgentConfigs(FALLBACK_AGENTS))
   }, [])
 
-  const editWorkspace = useCallback((id: string, name: string, path: string) => {
-    setWorkspaces(prev => prev.map(w => w.id === id ? { ...w, name, path } : w))
+  const showModal = useCallback((title: string, onSubmit: (value: string) => void, defaultValue?: string) => {
+    setModal({ open: true, title, onSubmit, defaultValue })
   }, [])
 
-  const removeWorkspace = useCallback((id: string) => {
-    setWorkspaces(prev => {
-      const next = prev.filter(w => w.id !== id)
-      setPanels(prevPanels => prevPanels.filter(p => p.workspaceId !== id))
-      setActiveWorkspaceId(prevId => prevId === id ? (next.length > 0 ? next[0].id : null) : prevId)
-      return next
-    })
+  const closeModal = useCallback(() => {
+    setModal(null)
   }, [])
 
-  const addPanel = useCallback(() => {
-    if (!activeWorkspaceId) return
-    const id = String(Date.now())
-    setPanels(prev => [...prev, { id, workspaceId: activeWorkspaceId }])
-  }, [activeWorkspaceId])
+  function handleModalSubmit(value: string) {
+    modal?.onSubmit(value)
+  }
 
-  const removePanel = useCallback((id: string) => {
-    setPanels(prev => prev.filter(p => p.id !== id))
-  }, [])
+  function handleStartAgent(sessionId: string, config: AgentStartConfig) {
+    startAgent(sessionId, config)
+  }
 
-  const onNameConfirm = useCallback((name: string) => {
-    const folder = pendingFolder
-    setPendingFolder(null)
-    if (folder) addWorkspace(name, folder)
-  }, [pendingFolder, addWorkspace])
-
-  const onNameCancel = useCallback(() => {
-    setPendingFolder(null)
-  }, [])
-
-  const promptForName = useCallback((folderPath: string) => {
-    console.log('[app] promptForName:', folderPath)
-    setPendingFolder(folderPath)
-  }, [])
-
-  const handleAddWorkspace = useCallback(async () => {
-    console.log('[app] handleAddWorkspace, electronAPI:', window.electronAPI)
-    const api = window.electronAPI
-    if (api?.selectDirectory) {
-      const folder = await api.selectDirectory()
-      console.log('[app] selectDirectory returned:', folder)
-      if (folder) promptForName(folder)
-      return
-    }
-    const p = prompt('Enter workspace path:')
-    if (p?.trim()) promptForName(p.trim())
-  }, [promptForName])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounter.current++
-    setIsDragging(true)
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounter.current--
-    if (dragCounter.current <= 0) {
-      dragCounter.current = 0
-      setIsDragging(false)
-    }
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounter.current = 0
-    setIsDragging(false)
-
-    console.log('[app] drop event, electronAPI:', window.electronAPI)
-    const api = window.electronAPI
-    if (api?.getDropPath) {
-      const folder = await api.getDropPath()
-      console.log('[app] getDropPath returned:', folder)
-      if (folder) promptForName(folder)
-    }
-  }, [promptForName])
-
-  function handleResizeDown(e: React.MouseEvent) {
-    e.preventDefault()
-    resizing.current = true
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
+  function handleShowAgentModal(sessionId: string) {
+    setAgentModalSession(sessionId)
   }
 
   useEffect(() => {
-    function handleMouseMove(e: MouseEvent) {
-      if (!resizing.current) return
-      setSidebarWidth(Math.max(180, Math.min(window.innerWidth * 0.2, e.clientX)))
-    }
-    function handleMouseUp() {
-      if (resizing.current) {
-        resizing.current = false
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-      }
-    }
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [])
-
-  const actionsRef = useRef({ handleAddWorkspace, promptForName })
-  actionsRef.current = { handleAddWorkspace, promptForName }
+    const unsub = onTerminalOutput((data: TerminalOutput) => {
+      setWriteBuffers(prev => ({
+        ...prev,
+        [data.sessionId]: (prev[data.sessionId] || '') + data.data,
+      }))
+    })
+    return unsub
+  }, [onTerminalOutput])
 
   useEffect(() => {
-    window.electronAPI?.onMenuAction?.(action => {
-      const { handleAddWorkspace, promptForName } = actionsRef.current
-      switch (action) {
-        case 'open-folder':
-          handleAddWorkspace()
-          break
-        case 'new-workspace':
-          promptForName('')
-          break
-        case 'save-workspace':
-          console.log('[app] save-workspace — not yet implemented')
-          break
-        case 'load-workspace':
-          console.log('[app] load-workspace — not yet implemented')
-          break
+    if (activeWorkspace?.id && activeWorkspaceId !== activeWorkspace.id) {
+      setActiveWorkspaceId(activeWorkspace.id)
+    }
+  }, [activeWorkspace])
+
+  function addWorkspace(name: string, path: string) {
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    createWorkspace({
+      id,
+      name,
+      workspaceType: 'single-repo',
+      repository: { path, type: 'generic' },
+      worktrees: { enabled: false, count: 0, namingPattern: 'work{n}', autoCreate: false },
+    }).then((res: any) => {
+      if (res?.ok) {
+        switchWorkspace(id)
       }
     })
-  }, [])
+  }
 
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) ?? null
-  const activePanels = panels.filter(p => p.workspaceId === activeWorkspaceId)
+  function editWorkspace(_id: string, _name: string, _path: string) { }
+
+  function removeWorkspace(id: string) {
+    const wsSessions = Object.entries(sessions)
+      .filter(([, s]) => s.repositoryName === id || s.id.startsWith(id))
+      .map(([sid]) => sid)
+    if (wsSessions.length > 0) closeTab(wsSessions)
+    if (activeWorkspaceId === id) {
+      setActiveWorkspaceId(workspaces.length > 1 ? workspaces.find(w => w.id !== id)?.id ?? null : null)
+    }
+  }
+
+  const wsPath = activeWorkspace?.repository?.path
+
+  const agentSessions = useMemo(
+    () => Object.values(sessions).filter(s => s.type === 'claude' || s.type === 'codex' || s.type === 'opencode' || s.type === 'gemini').slice(0, 12),
+    [sessions]
+  )
+  const shellSessions = useMemo(
+    () => Object.values(sessions).filter(s => s.type === 'shell'),
+    [sessions]
+  )
+
+  const handleNewTerminal = useCallback((type?: string) => {
+    createRawSession(type, wsPath)
+  }, [createRawSession, wsPath])
+
+  function handleCreateWorkspace() {
+    showModal('Workspace name:', (name) => {
+      const doCreate = async () => {
+        let path = '/tmp'
+        try {
+          if (window.electronAPI) {
+            const selected = await window.electronAPI.selectDirectory()
+            if (selected) path = selected
+          } else {
+            const fallback = prompt('Workspace directory:', path)
+            if (fallback && fallback.trim()) path = fallback.trim()
+          }
+        } catch {}
+        addWorkspace(name, path)
+        setModal(null)
+      }
+      doCreate()
+    })
+  }
+
+  function handleSelectWorkspace(id: string) {
+    switchWorkspace(id)
+  }
+
+  function handleDeleteWorkspace(id: string) {
+    deleteWorkspace(id)
+    removeWorkspace(id)
+  }
+
+  function handleCloseShellSession(sessionId: string) {
+    closeTab([sessionId])
+  }
 
   return (
-    <div
-      className={`app${isDragging ? ' drag-over' : ''}`}
-      style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      <WorkspaceSidebar
+    <div className="app">
+      <Header
         workspaces={workspaces}
-        activeWorkspaceId={activeWorkspaceId}
-        onSelect={setActiveWorkspaceId}
-        onEdit={editWorkspace}
-        onRemove={removeWorkspace}
+        sessions={sessions}
+        activeWorkspace={activeWorkspace}
+        connected={connected}
+        onSwitchWorkspace={handleSelectWorkspace}
+        onCreateWorkspace={handleCreateWorkspace}
+        onNewTerminal={handleNewTerminal}
+        onToggleShellSidebar={() => setShellSidebarOpen(o => !o)}
+        shellCount={shellSessions.length}
       />
-      <div className="resize-handle" onMouseDown={handleResizeDown} />
-      <TerminalArea
-        workspace={activeWorkspace}
-        panels={activePanels}
-        onAddPanel={addPanel}
-        onRemovePanel={removePanel}
-        onAddWorkspace={handleAddWorkspace}
-      />
-      {pendingFolder && (
-        <NamePrompt
-          defaultName={getNextDefaultName(workspaces)}
-          onConfirm={onNameConfirm}
-          onCancel={onNameCancel}
+      <div className="app-body">
+        <WorkspaceSidebar
+          workspaces={workspaces}
+          sessions={sessions}
+          activeWorkspace={activeWorkspace}
+          onSelect={handleSelectWorkspace}
+          onAdd={addWorkspace}
+          onEdit={editWorkspace}
+          onRemove={removeWorkspace}
+          onDelete={handleDeleteWorkspace}
+          showModal={showModal}
+          closeModal={closeModal}
         />
-      )}
+        <main className="main-content">
+          <TerminalArea
+            sessions={agentSessions}
+            onInput={sendTerminalInput}
+            onResize={sendTerminalResize}
+            onRestart={restartSession}
+            onStartAgent={handleStartAgent}
+            onShowAgentModal={handleShowAgentModal}
+            onNewTerminal={handleNewTerminal}
+            writeBuffers={writeBuffers}
+            agentConfigs={agentConfigs}
+          />
+        </main>
+        {shellSidebarOpen && (
+          <ShellSidebar
+            sessions={shellSessions}
+            onInput={sendTerminalInput}
+            onResize={sendTerminalResize}
+            onRestart={restartSession}
+            onClose={handleCloseShellSession}
+            onNewShell={() => handleNewTerminal('shell')}
+            writeBuffers={writeBuffers}
+          />
+        )}
+      </div>
+      <InputModal
+        open={modal?.open || false}
+        title={modal?.title || ''}
+        defaultValue={modal?.defaultValue}
+        onSubmit={handleModalSubmit}
+        onCancel={closeModal}
+      />
+      <AgentModal
+        open={agentModalSession !== null}
+        sessionId={agentModalSession}
+        agentConfigs={agentConfigs}
+        onStart={handleStartAgent}
+        onClose={() => setAgentModalSession(null)}
+      />
     </div>
   )
 }
