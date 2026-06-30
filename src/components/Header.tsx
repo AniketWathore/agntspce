@@ -1,18 +1,19 @@
-import type { WorkspaceInfo, SessionState } from '../types'
+import type { WorkspaceInfo, SessionState, AgentConfig } from '../types'
 
 interface Props {
   workspaces: WorkspaceInfo[]
   sessions: Record<string, SessionState>
   activeWorkspace: WorkspaceInfo | null
   connected: boolean
+  agentConfigs: AgentConfig[]
   onSwitchWorkspace: (id: string) => void
   onCreateWorkspace: () => void
-  onNewTerminal: (type?: string) => void
+  onNewAgent: () => void
   onToggleShellSidebar: () => void
   shellCount: number
 }
 
-export default function Header({ workspaces, sessions, activeWorkspace, connected, onSwitchWorkspace, onCreateWorkspace, onNewTerminal, onToggleShellSidebar, shellCount }: Props) {
+export default function Header({ workspaces, sessions, activeWorkspace, connected, onSwitchWorkspace, onCreateWorkspace, onNewAgent, onToggleShellSidebar, shellCount }: Props) {
   const sessionCount = Object.keys(sessions).length
   const busyCount = Object.values(sessions).filter(s => s.status === 'busy').length
 
@@ -49,7 +50,7 @@ export default function Header({ workspaces, sessions, activeWorkspace, connecte
         </span>
         <div className="header-buttons">
           <button className="new-workspace-btn" onClick={onCreateWorkspace}>+ New Workspace</button>
-          <button className="new-terminal-btn" onClick={() => onNewTerminal('claude')}>+ Agent</button>
+          <button className="new-terminal-btn" onClick={onNewAgent}>+ Agent</button>
           <button className={`shell-toggle-btn${shellCount > 0 ? ' has-shells' : ''}`} onClick={onToggleShellSidebar} title="Toggle shell terminals">
             &gt;_ {shellCount > 0 && <span className="shell-count">{shellCount}</span>}
           </button>

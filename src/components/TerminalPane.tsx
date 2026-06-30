@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -15,9 +15,10 @@ interface Props {
   onShowAgentModal: (sessionId: string) => void
   writeData: string
   agentConfigs: AgentConfig[]
+  style?: CSSProperties
 }
 
-export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, writeData, agentConfigs }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, writeData, agentConfigs, style }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -114,7 +115,7 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
   }, [])
 
   return (
-    <div className="terminal-pane">
+    <div className="terminal-pane" style={style}>
       <div className="terminal-header">
         <StatusDot status={session.status} />
         <span className="terminal-title">{session.type.toUpperCase()}</span>

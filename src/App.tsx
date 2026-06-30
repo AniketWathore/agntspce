@@ -1,13 +1,21 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Header from './components/Header'
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
 import ShellSidebar from './components/ShellSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
+import AgentPicker from './components/AgentPicker'
 import { useSocket } from './hooks/useSocket'
 import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
 import './App.css'
+
+const AGENTS_LIST: { id: string, name: string, icon: string }[] = [
+  { id: 'claude', name: 'Claude Code', icon: '🤖' },
+  { id: 'opencode', name: 'Opencode', icon: '🔧' },
+  { id: 'codex', name: 'Codex', icon: '⚡' },
+  { id: 'gemini', name: 'Gemini', icon: '✨' },
+]
 
 const FALLBACK_AGENTS: AgentConfig[] = [
   {
@@ -56,6 +64,11 @@ function App() {
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
   const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
+  const [showAgentPicker, setShowAgentPicker] = useState(false)
+  const appBodyRef = useRef<HTMLDivElement>(null)
+  const [leftWidth, setLeftWidth] = useState(240)
+  const [rightWidth, setRightWidth] = useState(320)
+  const dragging = useRef<'left' | 'right' | null>(null)
 
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
@@ -175,6 +188,62 @@ function App() {
     closeTab([sessionId])
   }
 
+  function handleSelectAgent(agentId: string) {
+    setShowAgentPicker(false)
+    handleNewTerminal(agentId)
+  }
+
+  function handleAgentPickerBtnClick() {
+    setShowAgentPicker(o => !o)
+  }
+
+  // Resize drag handlers
+  function onResizerMouseDown(side: 'left' | 'right') {
+    return (e: React.MouseEvent) => {
+      e.preventDefault()
+      dragging.current = side
+      const startX = e.clientX
+      const startLeft = leftWidth
+      const startRight = rightWidth
+
+      function onMove(ev: MouseEvent) {
+        if (!appBodyRef.current) return
+        const bodyRect = appBodyRef.current.getBoundingClientRect()
+        const totalW = bodyRect.width
+        const maxPanel = totalW * 0.2
+
+        if (dragging.current === 'left') {
+          const dx = ev.clientX - startX
+          let newW = Math.max(180, startLeft + dx)
+          if (shellSidebarOpen) {
+            newW = Math.min(newW, maxPanel, totalW - rightWidth - 200)
+          } else {
+            newW = Math.min(newW, maxPanel)
+          }
+          setLeftWidth(newW)
+        } else if (dragging.current === 'right') {
+          const dx = startX - ev.clientX
+          let newW = Math.max(200, startRight + dx)
+          newW = Math.min(newW, maxPanel, totalW - leftWidth - 180)
+          setRightWidth(newW)
+        }
+      }
+
+      function onUp() {
+        dragging.current = null
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+      }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    }
+  }
+
   return (
     <div className="app">
       <Header
@@ -182,25 +251,29 @@ function App() {
         sessions={sessions}
         activeWorkspace={activeWorkspace}
         connected={connected}
+        agentConfigs={agentConfigs}
         onSwitchWorkspace={handleSelectWorkspace}
         onCreateWorkspace={handleCreateWorkspace}
-        onNewTerminal={handleNewTerminal}
+        onNewAgent={handleAgentPickerBtnClick}
         onToggleShellSidebar={() => setShellSidebarOpen(o => !o)}
         shellCount={shellSessions.length}
       />
-      <div className="app-body">
-        <WorkspaceSidebar
-          workspaces={workspaces}
-          sessions={sessions}
-          activeWorkspace={activeWorkspace}
-          onSelect={handleSelectWorkspace}
-          onAdd={addWorkspace}
-          onEdit={editWorkspace}
-          onRemove={removeWorkspace}
-          onDelete={handleDeleteWorkspace}
-          showModal={showModal}
-          closeModal={closeModal}
-        />
+      <div className="app-body" ref={appBodyRef}>
+        <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
+          <WorkspaceSidebar
+            workspaces={workspaces}
+            sessions={sessions}
+            activeWorkspace={activeWorkspace}
+            onSelect={handleSelectWorkspace}
+            onAdd={addWorkspace}
+            onEdit={editWorkspace}
+            onRemove={removeWorkspace}
+            onDelete={handleDeleteWorkspace}
+            showModal={showModal}
+            closeModal={closeModal}
+          />
+        </div>
+        <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
         <main className="main-content">
           <TerminalArea
             sessions={agentSessions}
@@ -209,21 +282,26 @@ function App() {
             onRestart={restartSession}
             onStartAgent={handleStartAgent}
             onShowAgentModal={handleShowAgentModal}
-            onNewTerminal={handleNewTerminal}
+            onNewAgent={() => setShowAgentPicker(true)}
             writeBuffers={writeBuffers}
             agentConfigs={agentConfigs}
           />
         </main>
         {shellSidebarOpen && (
-          <ShellSidebar
-            sessions={shellSessions}
-            onInput={sendTerminalInput}
-            onResize={sendTerminalResize}
-            onRestart={restartSession}
-            onClose={handleCloseShellSession}
-            onNewShell={() => handleNewTerminal('shell')}
-            writeBuffers={writeBuffers}
-          />
+          <>
+            <div className="resizer" onMouseDown={onResizerMouseDown('right')} />
+            <div className="panel-right" style={{ width: rightWidth, minWidth: rightWidth }}>
+              <ShellSidebar
+                sessions={shellSessions}
+                onInput={sendTerminalInput}
+                onResize={sendTerminalResize}
+                onRestart={restartSession}
+                onClose={handleCloseShellSession}
+                onNewShell={() => handleNewTerminal('shell')}
+                writeBuffers={writeBuffers}
+              />
+            </div>
+          </>
         )}
       </div>
       <InputModal
@@ -240,6 +318,13 @@ function App() {
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
       />
+      {showAgentPicker && (
+        <AgentPicker
+          agents={AGENTS_LIST}
+          onSelect={handleSelectAgent}
+          onClose={() => setShowAgentPicker(false)}
+        />
+      )}
     </div>
   )
 }
