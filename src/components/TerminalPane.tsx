@@ -13,12 +13,13 @@ interface Props {
   onRestart: (sessionId: string) => void
   onStartAgent: (sessionId: string, config: AgentStartConfig) => void
   onShowAgentModal: (sessionId: string) => void
+  onClose?: (sessionId: string) => void
   writeData: string
   agentConfigs: AgentConfig[]
   style?: CSSProperties
 }
 
-export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, writeData, agentConfigs, style }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -124,6 +125,9 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
         )}
         <span className="terminal-session-id">{session.id}</span>
         <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>
+        {onClose && (
+          <button className="terminal-close-btn" onClick={() => onClose(session.id)} title="Close">✕</button>
+        )}
       </div>
       <div className="terminal-body">
         <div ref={terminalRef} className="terminal-instance" />

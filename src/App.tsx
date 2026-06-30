@@ -8,6 +8,7 @@ import AgentModal from './components/AgentModal'
 import AgentPicker from './components/AgentPicker'
 import { useSocket } from './hooks/useSocket'
 import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
+import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
 const AGENTS_LIST: { id: string, name: string, icon: string }[] = [
@@ -65,6 +66,9 @@ function App() {
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
   const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
   const [showAgentPicker, setShowAgentPicker] = useState(false)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
+  const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(240)
   const [rightWidth, setRightWidth] = useState(320)
@@ -197,6 +201,85 @@ function App() {
     setShowAgentPicker(o => !o)
   }
 
+  // Auto-set active session when a new one is created
+  useEffect(() => {
+    if (!activeSessionId && agentSessions.length > 0) {
+      setActiveSessionId(agentSessions[0].id)
+    }
+  }, [agentSessions.length])
+
+  function handleCloseAgentTab(sessionId: string) {
+    closeTab([sessionId])
+    if (activeSessionId === sessionId) {
+      const remaining = agentSessions.filter(s => s.id !== sessionId)
+      setActiveSessionId(remaining.length > 0 ? remaining[0].id : null)
+    }
+  }
+
+  function handleNewShell() {
+    handleNewTerminal('shell')
+    setShellSidebarOpen(true)
+  }
+
+  function handleToggleWorkspaceSidebar() {
+    setWorkspaceSidebarOpen(o => !o)
+  }
+
+  // Native menu IPC
+  useEffect(() => {
+    const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
+      switch (action) {
+        case 'new-agent': handleAgentPickerBtnClick(); break
+        case 'new-shell': handleNewShell(); break
+        case 'new-workspace': handleCreateWorkspace(); break
+        case 'save-workspace': alert('Save workspace — feature coming soon'); break
+        case 'save-workspace-as': alert('Save workspace as — feature coming soon'); break
+        case 'load-workspace': alert('Load workspace — feature coming soon'); break
+        case 'duplicate-workspace': alert('Duplicate workspace — feature coming soon'); break
+        case 'toggle-shell-sidebar': setShellSidebarOpen(o => !o); break
+        case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
+        case 'set-layout': setLayoutPreset(data); break
+        case 'show-shortcuts': alert(
+          '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
+          '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
+          '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
+          '⌘B — Shell Sidebar\n⌘⇧B — Workspace Sidebar'
+        ); break
+        case 'show-about': alert('Agent Workspace v1.0\nElectron + React + TypeScript'); break
+      }
+    })
+    return () => unsub?.()
+  }, [])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMeta = e.metaKey || e.ctrlKey
+      if (!isMeta) return
+
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        const idx = agentSessions.findIndex(s => s.id === activeSessionId)
+        if (idx < 0) {
+          if (agentSessions.length > 0) setActiveSessionId(agentSessions[0].id)
+          return
+        }
+        const dir = e.shiftKey ? -1 : 1
+        const next = (idx + dir + agentSessions.length) % agentSessions.length
+        setActiveSessionId(agentSessions[next].id)
+        return
+      }
+
+      const num = parseInt(e.key)
+      if (num >= 1 && num <= 9 && num <= agentSessions.length) {
+        e.preventDefault()
+        setActiveSessionId(agentSessions[num - 1].id)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [activeSessionId, agentSessions])
+
   // Resize drag handlers
   function onResizerMouseDown(side: 'left' | 'right') {
     return (e: React.MouseEvent) => {
@@ -259,21 +342,25 @@ function App() {
         shellCount={shellSessions.length}
       />
       <div className="app-body" ref={appBodyRef}>
-        <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
-          <WorkspaceSidebar
-            workspaces={workspaces}
-            sessions={sessions}
-            activeWorkspace={activeWorkspace}
-            onSelect={handleSelectWorkspace}
-            onAdd={addWorkspace}
-            onEdit={editWorkspace}
-            onRemove={removeWorkspace}
-            onDelete={handleDeleteWorkspace}
-            showModal={showModal}
-            closeModal={closeModal}
-          />
-        </div>
-        <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
+        {workspaceSidebarOpen && (
+          <>
+            <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
+              <WorkspaceSidebar
+                workspaces={workspaces}
+                sessions={sessions}
+                activeWorkspace={activeWorkspace}
+                onSelect={handleSelectWorkspace}
+                onAdd={addWorkspace}
+                onEdit={editWorkspace}
+                onRemove={removeWorkspace}
+                onDelete={handleDeleteWorkspace}
+                showModal={showModal}
+                closeModal={closeModal}
+              />
+            </div>
+            <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
+          </>
+        )}
         <main className="main-content">
           <TerminalArea
             sessions={agentSessions}
@@ -283,8 +370,13 @@ function App() {
             onStartAgent={handleStartAgent}
             onShowAgentModal={handleShowAgentModal}
             onNewAgent={() => setShowAgentPicker(true)}
+            onCloseTab={handleCloseAgentTab}
+            onActiveSessionChange={setActiveSessionId}
+            activeSessionId={activeSessionId}
             writeBuffers={writeBuffers}
             agentConfigs={agentConfigs}
+            layoutPreset={layoutPreset}
+            onLayoutPresetChange={setLayoutPreset}
           />
         </main>
         {shellSidebarOpen && (

@@ -91,6 +91,7 @@ declare global {
     electronAPI?: {
       selectDirectory: () => Promise<string | null>
       getServerPort: () => Promise<number>
+      onMenuAction: (callback: (action: string, data?: any) => void) => () => void
     }
   }
 }

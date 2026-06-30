@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import path from 'node:path'
 import express from 'express'
 import { createServer } from 'http'
@@ -10,8 +10,172 @@ import { GitHelper } from './services/gitHelper'
 import { WorktreeHelper } from './services/worktreeHelper'
 import { AgentManager } from './services/agentManager'
 
+const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
 let mainWindow: BrowserWindow | null = null
+
+function sendMenuAction(action: string, data?: any) {
+  mainWindow?.webContents.send('menu-action', action, data)
+}
+
+function createNewWindow() {
+  const win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    title: 'Agent Workspace',
+    webPreferences: {
+      preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  if (isDev) {
+    win.loadURL(process.env.VITE_DEV_SERVER_URL!)
+    win.webContents.openDevTools()
+  } else {
+    win.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
+  }
+}
+
+function buildMenu() {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' as const },
+        { type: 'separator' as const },
+        { role: 'hide' as const },
+        { role: 'hideOthers' as const },
+        { role: 'unhide' as const },
+        { type: 'separator' as const },
+        { role: 'quit' as const },
+      ],
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow() },
+        { label: 'New Workspace', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenuAction('new-workspace') },
+        { label: 'New Agent', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendMenuAction('new-agent') },
+        { label: 'New Shell', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('new-shell') },
+        { type: 'separator' as const },
+        { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
+        { label: 'Load Workspace', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('load-workspace') },
+        { type: 'separator' as const },
+        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save-workspace') },
+        { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-workspace-as') },
+        { type: 'separator' as const },
+        { label: 'Close Window', accelerator: 'CmdOrCtrl+W', role: 'close' as const },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' as const },
+        { role: 'redo' as const },
+        { type: 'separator' as const },
+        { role: 'cut' as const },
+        { role: 'copy' as const },
+        { role: 'paste' as const },
+        { role: 'selectAll' as const },
+        { type: 'separator' as const },
+        { role: 'find' as const },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'zoomIn' as const },
+        { role: 'zoomOut' as const },
+        { role: 'resetZoom' as const },
+        { type: 'separator' as const },
+        {
+          label: 'Toggle Shell Sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => sendMenuAction('toggle-shell-sidebar'),
+        },
+        {
+          label: 'Toggle Workspace Sidebar',
+          accelerator: 'CmdOrCtrl+Shift+B',
+          click: () => sendMenuAction('toggle-workspace-sidebar'),
+        },
+        { type: 'separator' as const },
+        {
+          label: 'Layout',
+          submenu: [
+            { label: 'Auto', click: () => sendMenuAction('set-layout', 'auto') },
+            { label: '1×1', click: () => sendMenuAction('set-layout', '1x1') },
+            { label: '2×2', click: () => sendMenuAction('set-layout', '2x2') },
+            { label: '1+2', click: () => sendMenuAction('set-layout', '1+2') },
+            { label: '3×3', click: () => sendMenuAction('set-layout', '3x3') },
+          ],
+        },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' as const },
+        { role: 'zoom' as const },
+        {
+          label: 'Fill',
+          click: () => {
+            if (!mainWindow) return
+            const { width, height } = screen.getPrimaryDisplay().workAreaSize
+            mainWindow.setBounds({ x: 0, y: 0, width, height })
+          },
+        },
+        {
+          label: 'Center',
+          click: () => mainWindow?.center(),
+        },
+        { type: 'separator' as const },
+        {
+          label: 'Tile to Left',
+          click: () => {
+            if (!mainWindow) return
+            const { width, height } = screen.getPrimaryDisplay().workAreaSize
+            mainWindow.setBounds({ x: 0, y: 0, width: Math.floor(width / 2), height })
+          },
+        },
+        {
+          label: 'Tile to Right',
+          click: () => {
+            if (!mainWindow) return
+            const { width, height } = screen.getPrimaryDisplay().workAreaSize
+            mainWindow.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height })
+          },
+        },
+        { type: 'separator' as const },
+        { role: 'togglefullscreen' as const },
+        ...(isMac ? [
+          { type: 'separator' as const },
+          { role: 'front' as const },
+        ] : []),
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => sendMenuAction('show-shortcuts'),
+        },
+        { type: 'separator' as const },
+        {
+          label: 'About Agent Workspace',
+          click: () => sendMenuAction('show-about'),
+        },
+      ],
+    },
+  ]
+
+  const menu = Menu.buildFromTemplate(template)
+  Menu.setApplicationMenu(menu)
+}
 
 // Express + Socket.IO server
 const app_ = express()
@@ -183,6 +347,7 @@ async function startServer() {
 
 // Electron window
 function createWindow() {
+  buildMenu()
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,

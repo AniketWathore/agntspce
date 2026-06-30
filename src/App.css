@@ -305,12 +305,126 @@
   height: 100%;
 }
 
+.terminal-area-wrapper > .terminal-area {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .terminal-area-empty {
   flex: 1;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.terminal-area-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Tab bar */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  background: #18181b;
+  border-bottom: 1px solid #27272a;
+  min-height: 32px;
+}
+
+.tab-bar-tabs {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  gap: 1px;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #71717a;
+  cursor: pointer;
+  border-right: 1px solid #27272a;
+  white-space: nowrap;
+  user-select: none;
+  transition: background 0.1s, color 0.1s;
+}
+
+.tab-item:hover {
+  background: #27272a;
+  color: #a1a1aa;
+}
+
+.tab-item.active {
+  background: #1a1b1e;
+  color: #e4e4e7;
+  border-bottom: 2px solid #60a5fa;
+}
+
+.tab-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.tab-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.tab-count {
+  font-size: 10px;
+  color: #52525b;
+  background: #27272a;
+  border-radius: 8px;
+  padding: 0 5px;
+  min-width: 14px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.tab-item.active .tab-count {
+  color: #a1a1aa;
+  background: #3f3f46;
+}
+
+/* View presets */
+.view-presets {
+  display: flex;
+  gap: 2px;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
+.preset-btn {
+  padding: 3px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: #52525b;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s;
+}
+
+.preset-btn:hover {
+  color: #a1a1aa;
+  border-color: #3f3f46;
+}
+
+.preset-btn.active {
+  color: #60a5fa;
+  border-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
 }
 
 .terminal-pane {
@@ -363,6 +477,18 @@
   border-radius: 2px;
 }
 .terminal-restart-btn:hover { color: #e4e4e7; background: #3f3f46; }
+
+.terminal-close-btn {
+  background: none;
+  border: none;
+  color: #52525b;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  margin-left: 2px;
+}
+.terminal-close-btn:hover { color: #f87171; background: #3f3f46; }
 
 .terminal-instance {
   flex: 1;
