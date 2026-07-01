@@ -23,7 +23,7 @@ function getDefaultShell(): string {
 function buildShellArgs(commands: string | string[]): string[] {
   if (process.platform === 'win32') {
     const joined = Array.isArray(commands) ? commands.join('; ') : commands
-    return ['-NoProfile', '-Command', joined]
+    return ['-NoExit', '-NoProfile', '-Command', joined]
   }
   const joined = Array.isArray(commands) ? commands.join(' && ') : commands
   const keepOpen = joined && joined.trim() ? `${joined} && exec bash` : 'exec bash'

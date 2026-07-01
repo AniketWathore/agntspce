@@ -188,13 +188,16 @@ function App() {
         let path = ''
         try {
           if (window.electronAPI) {
+            if (!path) {
+              try { path = await window.electronAPI.getDefaultPath() || '' } catch {}
+            }
             const selected = await window.electronAPI.selectDirectory()
             if (selected) path = selected
           } else {
             const fallback = prompt('Workspace directory:', path)
             if (fallback && fallback.trim()) path = fallback.trim()
           }
-        } catch {}
+        } catch (e) { console.error('[handleCreateWorkspace]', e) }
         addWorkspace(name, path)
         setModal(null)
       }

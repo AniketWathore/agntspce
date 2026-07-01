@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import path from 'node:path'
+import os from 'node:os'
 import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
@@ -456,9 +457,14 @@ function createWindow() {
 
 // IPC handlers
 ipcMain.handle('select-directory', async () => {
-  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+  const result = await dialog.showOpenDialog({
+    parent: mainWindow || undefined,
+    properties: ['openDirectory'],
+  })
   return result.canceled ? null : result.filePaths[0]
 })
+
+ipcMain.handle('get-default-path', () => os.homedir())
 
 ipcMain.handle('get-server-port', () => SERVER_PORT)
 

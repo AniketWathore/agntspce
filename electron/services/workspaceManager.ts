@@ -214,6 +214,15 @@ export class WorkspaceManager {
 
   async createWorkspace(data: Workspace): Promise<Workspace> {
     if (this.workspaces.has(data.id)) throw new Error(`Workspace ID exists: ${data.id}`)
+    if (data.repository?.path) {
+      try {
+        if (!fsSync.existsSync(data.repository.path) || !fsSync.statSync(data.repository.path).isDirectory()) {
+          data.repository.path = os.homedir()
+        }
+      } catch {
+        data.repository.path = os.homedir()
+      }
+    }
     const filePath = path.join(CONFIG_DIR, 'workspaces', `${data.id}.json`)
     await fs.writeFile(filePath, JSON.stringify(data, null, 2))
     this.workspaces.set(data.id, data)
