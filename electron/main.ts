@@ -39,7 +39,54 @@ function createNewWindow() {
   }
 }
 
-function buildMenu() {
+// Express + Socket.IO server
+const app_ = express()
+const httpServer = createServer(app_)
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        callback(null, true)
+      } else {
+        callback(new Error('Not allowed by CORS'))
+      }
+    },
+  },
+})
+
+const SERVER_PORT = 9460
+
+// Initialize services
+const workspaceManager = WorkspaceManager.getInstance()
+const agentManager = new AgentManager()
+const sessionManager = new SessionManager(io, agentManager)
+const statusDetector = new StatusDetector()
+const gitHelper = new GitHelper()
+const worktreeHelper = new WorktreeHelper()
+
+sessionManager.setStatusDetector(statusDetector)
+sessionManager.setGitHelper(gitHelper)
+
+async function autoSaveSessions() {
+  const ws = sessionManager.getWorkspace()
+  if (!ws?.id) return
+  const sessions = sessionManager.getSessionSaveData()
+  await workspaceManager.saveSessionState(ws.id, sessions)
+}
+
+function rebuildMenu() {
+  const recent = workspaceManager.getRecentWorkspaces()
+  const recentItems: Electron.MenuItemConstructorOptions[] = recent.length > 0
+    ? [
+        { type: 'separator' as const },
+        { label: 'Recent Workspaces', enabled: false },
+        ...recent.map(r => ({
+          label: r.name,
+          click: () => sendMenuAction('switch-workspace', r.id),
+        })),
+      ]
+    : []
+
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(isMac ? [{
       label: app.name,
@@ -63,6 +110,7 @@ function buildMenu() {
         { type: 'separator' as const },
         { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
         { label: 'Load Workspace', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('load-workspace') },
+        ...recentItems,
         { type: 'separator' as const },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save-workspace') },
         { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-workspace-as') },
@@ -177,34 +225,6 @@ function buildMenu() {
   Menu.setApplicationMenu(menu)
 }
 
-// Express + Socket.IO server
-const app_ = express()
-const httpServer = createServer(app_)
-const io = new Server(httpServer, {
-  cors: {
-    origin: (origin, callback) => {
-      if (!origin || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
-        callback(null, true)
-      } else {
-        callback(new Error('Not allowed by CORS'))
-      }
-    },
-  },
-})
-
-const SERVER_PORT = 9460
-
-// Initialize services
-const workspaceManager = WorkspaceManager.getInstance()
-const agentManager = new AgentManager()
-const sessionManager = new SessionManager(io, agentManager)
-const statusDetector = new StatusDetector()
-const gitHelper = new GitHelper()
-const worktreeHelper = new WorktreeHelper()
-
-sessionManager.setStatusDetector(statusDetector)
-sessionManager.setGitHelper(gitHelper)
-
 app_.use((_req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
@@ -270,6 +290,7 @@ io.on('connection', (socket) => {
       await worktreeHelper.ensureWorktreesExist(newWs)
       const { sessions } = await sessionManager.switchWorkspacePreservingSessions(newWs)
       socket.emit('workspace-changed', { workspace: newWs, sessions })
+      rebuildMenu()
     } catch (error: any) {
       socket.emit('error', { message: 'Failed to switch workspace', error: error.message })
     }
@@ -298,32 +319,35 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('create-raw-session', ({ type, workspacePath }) => {
+  socket.on('create-raw-session', async ({ type, workspacePath }) => {
     const t = String(type || '').trim().toLowerCase() || 'shell'
     const result = sessionManager.createRawSession(t, workspacePath)
     if (result) {
       const states = sessionManager.getSessionStates()
       socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
+      await autoSaveSessions()
     } else {
       socket.emit('error', { message: 'Failed to create session - check main process console for details' })
     }
   })
 
-  socket.on('start-agent', ({ sessionId, config }) => {
+  socket.on('start-agent', async ({ sessionId, config }) => {
     try {
       sessionManager.startAgentWithConfig(sessionId, config)
       socket.emit('agent-started', { sessionId, config })
+      await autoSaveSessions()
     } catch (error: any) {
       socket.emit('error', { message: 'Failed to start agent', error: error.message })
     }
   })
 
-  socket.on('close-tab', ({ sessionIds }) => {
+  socket.on('close-tab', async ({ sessionIds }) => {
     const ids = Array.isArray(sessionIds) ? sessionIds : []
     for (const id of ids) {
       sessionManager.closeSession(id)
       io.emit('session-closed', { sessionId: id })
     }
+    await autoSaveSessions()
   })
 })
 
@@ -335,11 +359,16 @@ async function startServer() {
     if (activeWs) {
       sessionManager.setWorkspace(activeWs)
       await sessionManager.initializeSessions()
+      const savedSessions = await workspaceManager.loadSessionState(activeWs.id)
+      if (savedSessions.length > 0) {
+        await sessionManager.restoreSessions(savedSessions)
+      }
     }
   } catch (e) {
     console.error('Failed to initialize workspace system:', e)
   }
 
+  rebuildMenu()
   httpServer.listen(SERVER_PORT, '127.0.0.1', () => {
     console.log(`Server running on http://127.0.0.1:${SERVER_PORT}`)
   })
@@ -347,7 +376,7 @@ async function startServer() {
 
 // Electron window
 function createWindow() {
-  buildMenu()
+  rebuildMenu()
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -376,6 +405,39 @@ ipcMain.handle('select-directory', async () => {
 })
 
 ipcMain.handle('get-server-port', () => SERVER_PORT)
+
+ipcMain.handle('export-workspace', async () => {
+  const activeId = workspaceManager.getActiveWorkspace()?.id
+  if (!activeId) throw new Error('No active workspace')
+  const ws = workspaceManager.getWorkspace(activeId)
+  if (!ws) throw new Error('Workspace not found')
+  const result = await dialog.showSaveDialog({
+    defaultPath: `${ws.name}.workspace`,
+    filters: [{ name: 'Workspace Files', extensions: ['workspace'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+  await workspaceManager.exportWorkspace(activeId, result.filePath)
+  return result.filePath
+})
+
+ipcMain.handle('import-workspace', async () => {
+  const result = await dialog.showOpenDialog({
+    filters: [{ name: 'Workspace Files', extensions: ['workspace'] }],
+    properties: ['openFile'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  const ws = await workspaceManager.importWorkspace(result.filePaths[0])
+  rebuildMenu()
+  return { workspace: ws, path: result.filePaths[0] }
+})
+
+ipcMain.handle('duplicate-workspace', async (_event, newName: string) => {
+  const activeId = workspaceManager.getActiveWorkspace()?.id
+  if (!activeId) throw new Error('No active workspace')
+  const dup = await workspaceManager.duplicateWorkspace(activeId, newName)
+  rebuildMenu()
+  return dup
+})
 
 app.whenReady().then(async () => {
   createWindow()

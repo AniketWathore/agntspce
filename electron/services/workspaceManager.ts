@@ -2,7 +2,7 @@ import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import type { Workspace } from './types'
+import type { Workspace, SavedSessionData, WorkspaceExport } from './types'
 
 const CONFIG_DIR = path.join(os.homedir(), '.agent-workspace')
 
@@ -31,6 +31,7 @@ export class WorkspaceManager {
       CONFIG_DIR,
       path.join(CONFIG_DIR, 'workspaces'),
       path.join(CONFIG_DIR, 'deleted-workspaces'),
+      path.join(CONFIG_DIR, 'exports'),
     ]) {
       await fs.mkdir(dir, { recursive: true })
     }
@@ -43,7 +44,7 @@ export class WorkspaceManager {
       files = await fs.readdir(wsDir)
     } catch { return }
 
-    for (const file of files.filter(f => f.endsWith('.json'))) {
+    for (const file of files.filter((f: string) => f.endsWith('.json') && !f.endsWith('.sessions.json'))) {
       try {
         const content = await fs.readFile(path.join(wsDir, file), 'utf8')
         const ws = JSON.parse(content) as Workspace
@@ -63,9 +64,13 @@ export class WorkspaceManager {
       this.config = {
         version: '2.0.0',
         activeWorkspace: null,
+        recentWorkspaces: [],
         ui: { theme: 'dark', rememberLastWorkspace: true },
       }
       await this.saveConfig()
+    }
+    if (!Array.isArray(this.config.recentWorkspaces)) {
+      this.config.recentWorkspaces = []
     }
   }
 
@@ -95,6 +100,107 @@ export class WorkspaceManager {
     return this.activeWorkspace
   }
 
+  private sessionStatePath(workspaceId: string): string {
+    return path.join(CONFIG_DIR, 'workspaces', `${workspaceId}.sessions.json`)
+  }
+
+  async saveSessionState(workspaceId: string, sessions: SavedSessionData[]): Promise<void> {
+    try {
+      await fs.writeFile(this.sessionStatePath(workspaceId), JSON.stringify(sessions, null, 2))
+    } catch (e) {
+      console.error('Failed to save session state:', e)
+    }
+  }
+
+  async loadSessionState(workspaceId: string): Promise<SavedSessionData[]> {
+    try {
+      const content = await fs.readFile(this.sessionStatePath(workspaceId), 'utf8')
+      return JSON.parse(content) as SavedSessionData[]
+    } catch {
+      return []
+    }
+  }
+
+  async exportWorkspace(workspaceId: string, savePath: string): Promise<void> {
+    const ws = this.workspaces.get(workspaceId)
+    if (!ws) throw new Error(`Workspace not found: ${workspaceId}`)
+    let sessions: SavedSessionData[] = []
+    try {
+      sessions = await this.loadSessionState(workspaceId)
+    } catch {}
+    const exportData: WorkspaceExport = {
+      version: '1.0',
+      workspace: ws,
+      sessions,
+    }
+    await fs.writeFile(savePath, JSON.stringify(exportData, null, 2))
+  }
+
+  async importWorkspace(filePath: string): Promise<Workspace> {
+    const content = await fs.readFile(filePath, 'utf8')
+    const data = JSON.parse(content) as WorkspaceExport
+    if (!data.workspace || !data.workspace.id) throw new Error('Invalid workspace file')
+
+    const existing = this.workspaces.get(data.workspace.id)
+    const ws: Workspace = {
+      ...data.workspace,
+      lastAccess: new Date().toISOString(),
+    }
+
+    if (existing) {
+      await this.updateWorkspace(ws.id, ws)
+    } else {
+      await this.createWorkspace(ws)
+    }
+
+    if (data.sessions && data.sessions.length > 0) {
+      await this.saveSessionState(ws.id, data.sessions)
+    }
+
+    return ws
+  }
+
+  async duplicateWorkspace(workspaceId: string, newName: string): Promise<Workspace> {
+    const original = this.workspaces.get(workspaceId)
+    if (!original) throw new Error(`Workspace not found: ${workspaceId}`)
+    const newId = `${newName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`
+    const duplicate: Workspace = {
+      ...original,
+      id: newId,
+      name: newName,
+      lastAccess: new Date().toISOString(),
+    }
+    await this.createWorkspace(duplicate)
+
+    const sessions = await this.loadSessionState(workspaceId)
+    if (sessions.length > 0) {
+      await this.saveSessionState(newId, sessions)
+    }
+
+    return duplicate
+  }
+
+  async addRecentWorkspace(workspaceId: string): Promise<void> {
+    if (!Array.isArray(this.config.recentWorkspaces)) {
+      this.config.recentWorkspaces = []
+    }
+    this.config.recentWorkspaces = [
+      workspaceId,
+      ...this.config.recentWorkspaces.filter((id: string) => id !== workspaceId),
+    ].slice(0, 10)
+    await this.saveConfig()
+  }
+
+  getRecentWorkspaces(): { id: string; name: string }[] {
+    const ids: string[] = Array.isArray(this.config?.recentWorkspaces) ? this.config.recentWorkspaces : []
+    return ids
+      .map((id: string) => {
+        const ws = this.workspaces.get(id)
+        return ws ? { id: ws.id, name: ws.name } : null
+      })
+      .filter(Boolean) as { id: string; name: string }[]
+  }
+
   async switchWorkspace(workspaceId: string): Promise<Workspace> {
     if (!this.workspaces.has(workspaceId)) throw new Error(`Workspace not found: ${workspaceId}`)
     const ws = this.workspaces.get(workspaceId)!
@@ -102,6 +208,7 @@ export class WorkspaceManager {
     this.config.activeWorkspace = workspaceId
     await this.saveConfig()
     await this.updateWorkspace(workspaceId, { lastAccess: new Date().toISOString() })
+    await this.addRecentWorkspace(workspaceId)
     return ws
   }
 
@@ -110,6 +217,7 @@ export class WorkspaceManager {
     const filePath = path.join(CONFIG_DIR, 'workspaces', `${data.id}.json`)
     await fs.writeFile(filePath, JSON.stringify(data, null, 2))
     this.workspaces.set(data.id, data)
+    await this.addRecentWorkspace(data.id)
     return data
   }
 
@@ -132,6 +240,7 @@ export class WorkspaceManager {
       JSON.stringify({ deletedAt: new Date().toISOString(), workspace: ws }, null, 2)
     )
     await fs.unlink(filePath)
+    try { await fs.unlink(this.sessionStatePath(workspaceId)) } catch {}
     this.workspaces.delete(workspaceId)
     if (this.activeWorkspace?.id === workspaceId) this.activeWorkspace = null
   }

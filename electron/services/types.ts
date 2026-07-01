@@ -18,6 +18,7 @@ export interface Session {
   cwdState: CwdState
   autoStarted: boolean
   claudeLaunchState: string | null
+  agentStartConfig?: any
   inactivityTimer?: NodeJS.Timeout | null
   processMonitor?: NodeJS.Timeout | null
   workspace?: string | null
@@ -82,6 +83,23 @@ export interface GitBranchInfo {
     untracked: number
     total: number
   }
+}
+
+export interface SavedSessionData {
+  id: string
+  type: string
+  cwd: string
+  agentConfig?: {
+    agentId: string
+    mode: string
+    flags: string[]
+  }
+}
+
+export interface WorkspaceExport {
+  version: string
+  workspace: Workspace
+  sessions: SavedSessionData[]
 }
 
 export interface TerminalConfig {

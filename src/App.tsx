@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import Header from './components/Header'
+
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
 import ShellSidebar from './components/ShellSidebar'
@@ -54,7 +54,7 @@ interface ModalState {
 
 function App() {
   const {
-    connected, sessions, workspaces, activeWorkspace,
+    sessions, workspaces, activeWorkspace,
     onTerminalOutput, sendTerminalInput, sendTerminalResize,
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, closeTab, startAgent, fetchAgentConfigs, createRawSession,
@@ -217,8 +217,10 @@ function App() {
   }
 
   function handleNewShell() {
-    handleNewTerminal('shell')
-    setShellSidebarOpen(true)
+    if (shellSessions.length === 0) {
+      handleNewTerminal('shell')
+    }
+    setShellSidebarOpen(o => !o)
   }
 
   function handleToggleWorkspaceSidebar() {
@@ -232,10 +234,31 @@ function App() {
         case 'new-agent': handleAgentPickerBtnClick(); break
         case 'new-shell': handleNewShell(); break
         case 'new-workspace': handleCreateWorkspace(); break
-        case 'save-workspace': alert('Save workspace — feature coming soon'); break
-        case 'save-workspace-as': alert('Save workspace as — feature coming soon'); break
-        case 'load-workspace': alert('Load workspace — feature coming soon'); break
-        case 'duplicate-workspace': alert('Duplicate workspace — feature coming soon'); break
+        case 'save-workspace': alert('Workspace saved'); break
+        case 'save-workspace-as': {
+          window.electronAPI?.exportWorkspace().then(path => {
+            if (path) alert(`Workspace exported to ${path}`)
+          })
+          break
+        }
+        case 'load-workspace': {
+          window.electronAPI?.importWorkspace().then(result => {
+            if (result?.workspace) {
+              handleSelectWorkspace(result.workspace.id)
+            }
+          })
+          break
+        }
+        case 'duplicate-workspace': {
+          const name = prompt('New workspace name:')
+          if (name?.trim()) {
+            window.electronAPI?.duplicateWorkspace(name.trim()).then(dup => {
+              if (dup) handleSelectWorkspace(dup.id)
+            })
+          }
+          break
+        }
+        case 'switch-workspace': handleSelectWorkspace(data); break
         case 'toggle-shell-sidebar': setShellSidebarOpen(o => !o); break
         case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
         case 'set-layout': setLayoutPreset(data); break
@@ -329,18 +352,6 @@ function App() {
 
   return (
     <div className="app">
-      <Header
-        workspaces={workspaces}
-        sessions={sessions}
-        activeWorkspace={activeWorkspace}
-        connected={connected}
-        agentConfigs={agentConfigs}
-        onSwitchWorkspace={handleSelectWorkspace}
-        onCreateWorkspace={handleCreateWorkspace}
-        onNewAgent={handleAgentPickerBtnClick}
-        onToggleShellSidebar={() => setShellSidebarOpen(o => !o)}
-        shellCount={shellSessions.length}
-      />
       <div className="app-body" ref={appBodyRef}>
         {workspaceSidebarOpen && (
           <>
@@ -370,13 +381,13 @@ function App() {
             onStartAgent={handleStartAgent}
             onShowAgentModal={handleShowAgentModal}
             onNewAgent={() => setShowAgentPicker(true)}
+            onNewShell={handleNewShell}
             onCloseTab={handleCloseAgentTab}
             onActiveSessionChange={setActiveSessionId}
             activeSessionId={activeSessionId}
             writeBuffers={writeBuffers}
             agentConfigs={agentConfigs}
             layoutPreset={layoutPreset}
-            onLayoutPresetChange={setLayoutPreset}
           />
         </main>
         {shellSidebarOpen && (

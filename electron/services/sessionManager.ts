@@ -2,7 +2,7 @@ import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import type { Session, SessionConfig, Worktree, Workspace } from './types'
+import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
@@ -53,6 +53,10 @@ export class SessionManager extends EventEmitter {
 
   setStatusDetector(d: StatusDetector) { this.statusDetector = d }
   setGitHelper(g: GitHelper) { this.gitHelper = g }
+
+  getWorkspace(): Workspace | null {
+    return this.workspace
+  }
 
   setWorkspace(workspace: Workspace | null) {
     this.workspace = workspace
@@ -371,6 +375,39 @@ export class SessionManager extends EventEmitter {
     setTimeout(() => this.createSession(sessionId, config), 300)
   }
 
+  getSessionSaveData(): SavedSessionData[] {
+    const data: SavedSessionData[] = []
+    for (const [id, s] of this.sessions) {
+      data.push({
+        id,
+        type: s.type,
+        cwd: s.config?.cwd || '',
+        agentConfig: s.agentStartConfig
+          ? { agentId: s.agentStartConfig.agentId, mode: s.agentStartConfig.mode, flags: s.agentStartConfig.flags }
+          : undefined,
+      })
+    }
+    return data
+  }
+
+  async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
+    for (const saved of sessions) {
+      const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+      if (saved.type === 'shell') {
+        this.createRawSession('shell', cwd)
+      } else {
+        const result = this.createRawSession(saved.type, cwd)
+        if (result && saved.agentConfig) {
+          setTimeout(() => {
+            try {
+              this.startAgentWithConfig(result.sessionId, saved.agentConfig)
+            } catch {}
+          }, 300)
+        }
+      }
+    }
+  }
+
   startAgentWithConfig(sessionId: string, config: any) {
     const session = this.sessions.get(sessionId)
     if (!session || !this.agentManager) return
@@ -380,6 +417,7 @@ export class SessionManager extends EventEmitter {
     this.writeToSession(sessionId, command + '\n')
     session.autoStarted = true
     session.claudeLaunchState = 'launched'
+    session.agentStartConfig = config
     try {
       this.io.emit('agent-started', { sessionId, config })
     } catch {}

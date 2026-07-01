@@ -12,22 +12,14 @@ interface Props {
   onStartAgent: (sessionId: string, config: AgentStartConfig) => void
   onShowAgentModal: (sessionId: string) => void
   onNewAgent: () => void
+  onNewShell: () => void
   onCloseTab: (sessionId: string) => void
   onActiveSessionChange: (id: string | null) => void
   activeSessionId: string | null
   writeBuffers: Record<string, string>
   agentConfigs: AgentConfig[]
   layoutPreset: LayoutPreset
-  onLayoutPresetChange: (preset: LayoutPreset) => void
 }
-
-const PRESETS: { key: LayoutPreset; label: string }[] = [
-  { key: 'auto', label: 'Auto' },
-  { key: '1x1', label: '1×1' },
-  { key: '2x2', label: '2×2' },
-  { key: '1+2', label: '1+2' },
-  { key: '3x3', label: '3×3' },
-]
 
 const AGENT_TYPES = [
   { id: 'claude', label: 'Claude Code', icon: '🤖' },
@@ -74,9 +66,9 @@ function getItemStyle(index: number, count: number, preset: LayoutPreset, active
 
 export default function TerminalArea({
   sessions, onInput, onResize, onRestart, onStartAgent,
-  onShowAgentModal, onNewAgent, onCloseTab, onActiveSessionChange,
+  onShowAgentModal, onNewAgent, onNewShell, onCloseTab, onActiveSessionChange,
   activeSessionId, writeBuffers, agentConfigs,
-  layoutPreset, onLayoutPresetChange,
+  layoutPreset,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
 
@@ -114,9 +106,10 @@ export default function TerminalArea({
       <div className="terminal-area-empty">
         <div className="empty-state">
           <p>No agent terminals</p>
-          <p className="empty-hint">Click + Agent to add an AI coding agent</p>
+          <p className="empty-hint">Add an AI coding agent or open a shell</p>
           <div className="empty-actions">
             <button className="new-terminal-btn" onClick={onNewAgent}>+ Agent</button>
+            <button className="shell-btn" onClick={onNewShell}>&gt;_ Shell</button>
           </div>
         </div>
       </div>
@@ -129,6 +122,10 @@ export default function TerminalArea({
       .filter(t => typeCounts[t.id] > 0)
       .map(t => ({ id: t.id, label: t.label, icon: t.icon, count: typeCounts[t.id] })),
   ]
+
+  function handleShellBtn() {
+    onNewShell()
+  }
 
   const activeIdx = activeSessionId
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
@@ -154,16 +151,9 @@ export default function TerminalArea({
             )
           })}
         </div>
-        <div className="view-presets">
-          {PRESETS.map(p => (
-            <button
-              key={p.key}
-              className={`preset-btn ${layoutPreset === p.key ? 'active' : ''}`}
-              onClick={() => onLayoutPresetChange(p.key)}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="tab-bar-actions">
+          <button className="new-terminal-btn" onClick={onNewAgent}>+ Agent</button>
+          <button className="shell-btn" onClick={handleShellBtn}>&gt;_ Shell</button>
         </div>
       </div>
       <div className="terminal-area" style={tilingStyle}>
