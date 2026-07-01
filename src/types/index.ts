@@ -130,6 +130,7 @@ declare global {
   interface Window {
     electronAPI?: {
       selectDirectory: () => Promise<string | null>
+      getDefaultPath: () => Promise<string>
       getServerPort: () => Promise<number>
       exportWorkspace: () => Promise<string | null>
       importWorkspace: () => Promise<{ workspace: any; path: string } | null>

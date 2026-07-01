@@ -188,13 +188,18 @@ function App() {
         let path = ''
         try {
           if (window.electronAPI) {
+            const defaultPath = await window.electronAPI.getDefaultPath()
+            path = defaultPath
             const selected = await window.electronAPI.selectDirectory()
             if (selected) path = selected
           } else {
-            const fallback = prompt('Workspace directory:', path)
+            path = ''
+            const fallback = prompt('Workspace directory:', '')
             if (fallback && fallback.trim()) path = fallback.trim()
           }
-        } catch {}
+        } catch (e) {
+          console.error('Error selecting workspace directory:', e)
+        }
         addWorkspace(name, path)
         setModal(null)
       }
@@ -481,7 +486,7 @@ function App() {
               onRestart={restartSession}
               onStartAgent={handleStartAgent}
               onShowAgentModal={handleShowAgentModal}
-              onNewAgent={() => {}}
+              onNewAgent={() => handleNewTerminal('claude')}
               onSelectAgent={handleSelectAgent}
               onNewShell={handleNewShell}
               onCloseTab={handleCloseAgentTab}
