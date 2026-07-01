@@ -13,6 +13,8 @@ import { AgentManager } from './services/agentManager'
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
 let mainWindow: BrowserWindow | null = null
+app.setName('AgntSpce')
+app.name = 'AgntSpce'
 
 function sendMenuAction(action: string, data?: any) {
   mainWindow?.webContents.send('menu-action', action, data)
@@ -24,7 +26,7 @@ function createNewWindow() {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: 'Agent Workspace',
+    title: 'AgntSpce',
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
@@ -219,7 +221,7 @@ function rebuildMenu() {
         },
         { type: 'separator' as const },
         {
-          label: 'About Agent Workspace',
+          label: 'About AgntSpce',
           click: () => sendMenuAction('show-about'),
         },
       ],
@@ -412,7 +414,7 @@ function createWindow() {
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: 'Agent Workspace',
+    title: 'AgntSpce',
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,

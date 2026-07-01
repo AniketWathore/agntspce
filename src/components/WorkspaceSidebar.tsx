@@ -12,8 +12,6 @@ interface Props {
   sessions: Record<string, SessionState>
   activeWorkspace: WorkspaceInfo | null
   deletedWorkspaces: DeletedWs[]
-  showDashboard: boolean
-  activeView: 'dashboard' | 'profile' | 'settings' | null
   onSelect: (id: string) => void
   onAdd: (name: string, path: string) => void
   onEdit: (id: string, name: string, path: string) => void
@@ -21,7 +19,6 @@ interface Props {
   onDelete: (id: string) => void
   onRestore: (id: string) => void
   onPermanentDelete: (id: string) => void
-  onViewChange: (view: 'dashboard' | 'profile' | 'settings' | null) => void
   showModal: (title: string, onSubmit: (value: string) => void, defaultValue?: string) => void
   closeModal: () => void
 }
@@ -35,7 +32,7 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
   return Object.values(sessions).filter(s => s.status === 'busy' || s.status === 'waiting').length
 }
 
-export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, showDashboard: _sd, activeView, onSelect, onAdd, onRemove: _onRemove, onDelete, onRestore, onPermanentDelete, onViewChange, showModal, closeModal }: Props) {
+export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onAdd, onRemove: _onRemove, onDelete, onRestore, onPermanentDelete, showModal, closeModal }: Props) {
   const [showTrash, setShowTrash] = useState(false)
   const activeCount = getActiveCount(sessions)
 
@@ -59,15 +56,11 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
     })
   }
 
-  function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
-    onViewChange(activeView === view ? null : view)
-  }
-
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
         <div className="sidebar-header">
-          <h2>Workspaces</h2>
+          <h2>AgntSpce</h2>
           <button className="add-btn" onClick={handleAdd}>+</button>
         </div>
 
@@ -124,30 +117,6 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
             ))}
           </div>
         )}
-      </div>
-
-      <div className="sidebar-bottom">
-        <button
-          className={`sidebar-action-btn ${activeView === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setView('dashboard')}
-          title="Dashboard"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        </button>
-        <button
-          className={`sidebar-action-btn ${activeView === 'profile' ? 'active' : ''}`}
-          onClick={() => setView('profile')}
-          title="Profile"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-8 8-8s8 4 8 8"/></svg>
-        </button>
-        <button
-          className={`sidebar-action-btn ${activeView === 'settings' ? 'active' : ''}`}
-          onClick={() => setView('settings')}
-          title="Settings"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        </button>
       </div>
     </aside>
   )

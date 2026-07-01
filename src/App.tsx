@@ -78,8 +78,8 @@ function App() {
   })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
-  const [leftWidth, setLeftWidth] = useState(240)
-  const [rightWidth, setRightWidth] = useState(320)
+  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.1))
+  const [rightWidth, setRightWidth] = useState(() => Math.round(window.innerWidth * 0.1))
   const dragging = useRef<'left' | 'right' | null>(null)
 
   useEffect(() => {
@@ -249,6 +249,9 @@ function App() {
     if (shellSessions.length === 0) {
       handleNewTerminal('shell')
     }
+    if (!shellSidebarOpen) {
+      setRightWidth(Math.round(window.innerWidth * 0.1))
+    }
     setShellSidebarOpen(o => !o)
   }
 
@@ -298,7 +301,7 @@ function App() {
           '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
           '⌘B — Shell Sidebar\n⌘⇧B — Workspace Sidebar'
         ); break
-        case 'show-about': alert('Agent Workspace v1.0\nElectron + React + TypeScript'); break
+        case 'show-about': alert('AgntSpce v1.0\nElectron + React + TypeScript'); break
       }
     })
     return () => unsub?.()
@@ -352,11 +355,12 @@ function App() {
         if (!appBodyRef.current) return
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
-        const maxPanel = totalW * 0.2
+        const maxPanel = totalW * 0.15
+        const minPanel = totalW * 0.05
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
-          let newW = Math.max(180, startLeft + dx)
+          let newW = Math.max(minPanel, startLeft + dx)
           if (shellSidebarOpen) {
             newW = Math.min(newW, maxPanel, totalW - rightWidth - 200)
           } else {
@@ -365,7 +369,7 @@ function App() {
           setLeftWidth(newW)
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
-          let newW = Math.max(200, startRight + dx)
+          let newW = Math.max(minPanel, startRight + dx)
           newW = Math.min(newW, maxPanel, totalW - leftWidth - 180)
           setRightWidth(newW)
         }
@@ -386,9 +390,50 @@ function App() {
     }
   }
 
+  function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
+    setActiveView(activeView === view ? null : view)
+  }
+
   return (
     <div className="app">
       <div className="app-body" ref={appBodyRef}>
+        <div className="activity-bar">
+          <div className="activity-bar-top">
+            <div className="activity-logo" title="AgntSpce">
+              <img src="/img/logo-icon.png" alt="AgntSpce" className="activity-logo-img" />
+            </div>
+            <button
+              className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
+              onClick={() => setWorkspaceSidebarOpen(o => !o)}
+              title="Workspaces"
+            >
+              <span style={{ fontSize: 20, lineHeight: 1 }}>📁</span>
+            </button>
+          </div>
+          <div className="activity-bar-bottom">
+            <button
+              className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setView('dashboard')}
+              title="Dashboard"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            </button>
+            <button
+              className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
+              onClick={() => setView('profile')}
+              title="Profile"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-8 8-8s8 4 8 8"/></svg>
+            </button>
+            <button
+              className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
+              onClick={() => setView('settings')}
+              title="Settings"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            </button>
+          </div>
+        </div>
         {workspaceSidebarOpen && (
           <>
             <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
@@ -397,8 +442,6 @@ function App() {
                 sessions={sessions}
                 activeWorkspace={activeWorkspace}
                 deletedWorkspaces={deletedWorkspaces}
-                showDashboard={activeView === 'dashboard'}
-                activeView={activeView}
                 onSelect={handleSelectWorkspace}
                 onAdd={addWorkspace}
                 onEdit={editWorkspace}
@@ -406,7 +449,6 @@ function App() {
                 onDelete={handleDeleteWorkspace}
                 onRestore={handleRestoreWorkspace}
                 onPermanentDelete={handlePermanentDelete}
-                onViewChange={setActiveView}
                 showModal={showModal}
                 closeModal={closeModal}
               />
@@ -439,18 +481,18 @@ function App() {
               onRestart={restartSession}
               onStartAgent={handleStartAgent}
               onShowAgentModal={handleShowAgentModal}
-            onNewAgent={() => {}}
-            onSelectAgent={handleSelectAgent}
-            onNewShell={handleNewShell}
-            onCloseTab={handleCloseAgentTab}
+              onNewAgent={() => {}}
+              onSelectAgent={handleSelectAgent}
+              onNewShell={handleNewShell}
+              onCloseTab={handleCloseAgentTab}
               onActiveSessionChange={setActiveSessionId}
               activeSessionId={activeSessionId}
               writeBuffers={writeBuffers}
               agentConfigs={agentConfigs}
-            layoutPreset={layoutPreset}
-            focusMode={focusMode}
-            agentsList={AGENTS_LIST}
-          />
+              layoutPreset={layoutPreset}
+              focusMode={focusMode}
+              agentsList={AGENTS_LIST}
+            />
           )}
         </main>
         {shellSidebarOpen && (

@@ -34,10 +34,9 @@ export default function AgentPicker({ agents, onSelect, onClose }: Props) {
   return (
     <div className="agent-dropdown" ref={ref} onClick={e => e.stopPropagation()}>
       {agents.map(a => (
-        <div key={a.id} className="agent-dropdown-item" onClick={() => onSelect(a.id)}>
+        <div key={a.id} className="agent-dropdown-item" onClick={() => onSelect(a.id)} title={a.name}>
           <img className="agent-dropdown-icon agent-color-icon" src={getAgentColorImage(a.id)} alt={a.name} />
           <img className="agent-dropdown-icon agent-text-icon" src={getAgentTextImage(a.id)} alt={a.name} />
-          <span className="agent-dropdown-name">{a.name}</span>
         </div>
       ))}
     </div>

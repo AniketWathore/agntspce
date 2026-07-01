@@ -342,7 +342,7 @@ export class SessionManager extends EventEmitter {
     const sessionId = `raw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const cwd = workspacePath || this.workspace?.repository?.path || process.env.HOME || os.homedir() || '/tmp'
     const args = type === 'shell'
-      ? buildShellArgs([`cd "${cwd}"`, `echo "Welcome to Agent Workspace"`])
+      ? buildShellArgs([`cd "${cwd}"`, `echo "Welcome to AgntSpce"`])
       : buildShellArgs(`cd "${cwd}"`)
 
     try {
