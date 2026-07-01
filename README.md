@@ -1,6 +1,6 @@
-# AgntSpce
+# CodingAgentsWorkspace
 
-AgntSpce is a ai workspace software for coding agents with built in terminal output compression layer, prompt optimisation, auto model routing, onboard small agentic model and many more functionalities to reduce overall tokens consumption.
+CodingAgentsWorkspace is a workspace software for coding ai agents with built in terminal output compression layer, prompt optimisation, auto model routing, onboard small agentic model and many more functionalities to reduce overall tokens consumption.
 
 ## React + TypeScript + Vite
 

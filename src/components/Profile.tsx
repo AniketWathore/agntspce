@@ -1,0 +1,38 @@
+interface Props {
+  onClose: () => void
+}
+
+export default function Profile({ onClose }: Props) {
+  return (
+    <div className="profile-page">
+      <div className="profile-header">
+        <h1>Profile</h1>
+        <button className="profile-close-btn" onClick={onClose}>✕</button>
+      </div>
+      <div className="profile-body">
+        <div className="profile-avatar">
+          <div className="profile-avatar-placeholder">U</div>
+        </div>
+        <div className="profile-info">
+          <h2>User</h2>
+          <p className="profile-email">user@agentworkspace.dev</p>
+          <p className="profile-role">Developer</p>
+        </div>
+        <div className="profile-details">
+          <div className="profile-detail-item">
+            <span className="profile-detail-label">Workspaces</span>
+            <span className="profile-detail-value">—</span>
+          </div>
+          <div className="profile-detail-item">
+            <span className="profile-detail-label">Sessions</span>
+            <span className="profile-detail-value">—</span>
+          </div>
+          <div className="profile-detail-item">
+            <span className="profile-detail-label">Version</span>
+            <span className="profile-detail-value">1.0.0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

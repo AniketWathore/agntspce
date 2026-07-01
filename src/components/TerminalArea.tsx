@@ -1,76 +1,220 @@
-import type { Workspace, Panel } from '../App'
+import { useState, useEffect, useMemo, type CSSProperties } from 'react'
+import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
-import './TerminalArea.css'
+import AgentPicker from './AgentPicker'
+import { getAgentColorImage } from '../agentImages'
 
-type Props = {
-  workspace: Workspace | null
-  panels: Panel[]
-  onAddPanel: () => void
-  onRemovePanel: (id: string) => void
-  onAddWorkspace: () => void
+export type LayoutPreset = 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
+
+interface Props {
+  sessions: SessionState[]
+  onInput: (sessionId: string, data: string) => void
+  onResize: (sessionId: string, cols: number, rows: number) => void
+  onRestart: (sessionId: string) => void
+  onStartAgent: (sessionId: string, config: AgentStartConfig) => void
+  onShowAgentModal: (sessionId: string) => void
+  onNewAgent: () => void
+  onSelectAgent: (agentId: string) => void
+  onNewShell: () => void
+  onCloseTab: (sessionId: string) => void
+  onActiveSessionChange: (id: string | null) => void
+  activeSessionId: string | null
+  writeBuffers: Record<string, string>
+  agentConfigs: AgentConfig[]
+  layoutPreset: LayoutPreset
+  focusMode: boolean
+  agentsList?: { id: string; name: string; icon: string }[]
 }
 
-function getGridLayout(count: number): { style: React.CSSProperties; className: string } {
-  if (count === 0) return { style: {}, className: '' }
-  if (count === 1) return { style: { gridTemplateColumns: '1fr' }, className: '' }
-  if (count === 2) return { style: { gridTemplateColumns: '1fr 1fr' }, className: '' }
-  if (count === 3) return { style: {}, className: 'master-stack' }
-  if (count === 4) return { style: { gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }, className: '' }
-  const cols = Math.ceil(Math.sqrt(count))
-  return { style: { gridTemplateColumns: `repeat(${cols}, 1fr)` }, className: '' }
+const AGENT_TYPES = [
+  { id: 'claude', label: 'Claude Code', icon: '🤖' },
+  { id: 'opencode', label: 'Opencode', icon: '🔧' },
+  { id: 'codex', label: 'Codex', icon: '⚡' },
+  { id: 'gemini', label: 'Gemini CLI', icon: '✨' },
+]
+
+function getTilingStyle(count: number, preset: LayoutPreset): CSSProperties {
+  const base: CSSProperties = { display: 'grid', gap: 4, padding: '0 4px 4px', height: '100%' }
+  switch (preset) {
+    case '1x1':
+      return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
+    case '2x2':
+      return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
+    case '1+2':
+      return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
+    case '3x3':
+      return { ...base, gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr' }
+    case 'auto':
+    default:
+      if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
+      if (count === 2) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
+      if (count <= 4) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
+      const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
+      const rows = Math.ceil(count / cols)
+      return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
+  }
 }
 
-export default function TerminalArea({ workspace, panels, onAddPanel, onRemovePanel, onAddWorkspace }: Props) {
-  if (!workspace) {
+function getItemStyle(index: number, count: number, preset: LayoutPreset, activeIndex: number): CSSProperties {
+  if (preset === '1x1') {
+    if (index !== activeIndex) return { display: 'none' }
+    return {}
+  }
+  if (preset === '1+2' && count > 1 && index === activeIndex) {
+    return { gridRow: 'span 2' }
+  }
+  if (preset === 'auto' && count === 3 && index === 0) {
+    return { gridRow: 'span 2' }
+  }
+  return {}
+}
+
+export default function TerminalArea({
+  sessions, onInput, onResize, onRestart, onStartAgent,
+  onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
+  activeSessionId, writeBuffers, agentConfigs,
+  layoutPreset, focusMode, agentsList,
+}: Props) {
+  const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
+  const [showDropdown, setShowDropdown] = useState(false)
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const s of sessions) {
+      counts[s.type] = (counts[s.type] || 0) + 1
+    }
+    return counts
+  }, [sessions])
+
+  const filteredSessions = useMemo(() => {
+    if (activeGroupTab === 'all') return sessions
+    return sessions.filter(s => s.type === activeGroupTab)
+  }, [sessions, activeGroupTab])
+
+  useEffect(() => {
+    if (activeGroupTab !== 'all' && activeSessionId) {
+      const session = sessions.find(s => s.id === activeSessionId)
+      if (session && session.type !== activeGroupTab) {
+        const firstInGroup = filteredSessions[0]
+        if (firstInGroup) onActiveSessionChange(firstInGroup.id)
+      }
+    }
+  }, [activeGroupTab])
+
+  useEffect(() => {
+    if (!activeSessionId || filteredSessions.some(s => s.id === activeSessionId)) return
+    const session = sessions.find(s => s.id === activeSessionId)
+    if (session) setActiveGroupTab('all')
+  }, [activeSessionId])
+
+  if (sessions.length === 0) {
     return (
-      <div className="terminal-area">
-        <div className="terminal-area-empty">
-          <div className="terminal-area-empty-inner">
-            <h2>Welcome to AgntSpce</h2>
-            <p>Select a workspace or add a folder to get started</p>
-            <button className="btn btn-primary" onClick={onAddWorkspace}>
-              + Add Workspace
-            </button>
+      <div className="terminal-area-empty">
+        <div className="empty-state">
+          <p>No agent terminals</p>
+          <p className="empty-hint">Add an AI coding agent or open a shell</p>
+          <div className="empty-actions" style={{ position: 'relative' }}>
+            <button className="new-terminal-btn" onClick={() => {
+              if (agentsList && agentsList.length > 0) {
+                setShowDropdown(o => !o)
+              }
+            }}>+ Agent</button>
+            <button className="shell-btn" onClick={onNewShell}>&gt;_ Shell</button>
+            {showDropdown && agentsList && (
+              <AgentPicker
+                agents={agentsList}
+                onSelect={(agentId) => { setShowDropdown(false); onSelectAgent(agentId) }}
+                onClose={() => setShowDropdown(false)}
+              />
+            )}
           </div>
         </div>
       </div>
     )
   }
 
-  const { style: gridStyle, className: gridClass } = getGridLayout(panels.length)
+  const groupTabs = [
+    { id: 'all', label: 'All', icon: '⊞', count: sessions.length },
+    ...AGENT_TYPES
+      .filter(t => typeCounts[t.id] > 0)
+      .map(t => ({ id: t.id, label: t.label, icon: t.icon, count: typeCounts[t.id] })),
+  ]
+
+  function handleShellBtn() { onNewShell() }
+
+  function handleAddAgentClick() {
+    if (agentsList && agentsList.length > 0) {
+      setShowDropdown(o => !o)
+    } else {
+      onNewAgent()
+    }
+  }
+
+  function handleDropdownSelect(agentId: string) {
+    setShowDropdown(false)
+    onSelectAgent(agentId)
+  }
+
+  function handleDropdownClose() { setShowDropdown(false) }
+
+  const activeIdx = activeSessionId
+    ? filteredSessions.findIndex(s => s.id === activeSessionId)
+    : 0
+  const tilingStyle = getTilingStyle(filteredSessions.length, layoutPreset)
 
   return (
-    <div className="terminal-area">
-      <div className="terminal-area-header">
-        <span className="terminal-area-title">{workspace.name}</span>
-        <span className="terminal-area-path">{workspace.path}</span>
-        <div className="terminal-area-spacer" />
-        <button className="btn btn-primary btn-sm" onClick={onAddPanel}>
-          + Add Panel
-        </button>
+    <div className="terminal-area-wrapper">
+      <div className="tab-bar">
+        <div className="tab-bar-tabs">
+          {groupTabs.map(tab => {
+            const isActive = tab.id === activeGroupTab
+            return (
+              <div
+                key={tab.id}
+                className={`tab-item ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveGroupTab(tab.id)}
+              >
+                {tab.icon === '⊞' ? (
+                  <span className="tab-icon">{tab.icon}</span>
+                ) : (
+                  <img className="tab-icon-img" src={getAgentColorImage(tab.id)} alt={tab.label} />
+                )}
+                {tab.icon === '⊞' && <span className="tab-label">{tab.label}</span>}
+                <span className="tab-count">{tab.count}</span>
+              </div>
+            )
+          })}
+        </div>
+        <div className="tab-bar-actions" style={{ position: 'relative' }}>
+          <button className="new-terminal-btn" onClick={handleAddAgentClick}>+ Agent</button>
+          <button className="shell-btn" onClick={handleShellBtn}>&gt;_ Shell</button>
+          {showDropdown && agentsList && (
+            <AgentPicker
+              agents={agentsList}
+              onSelect={handleDropdownSelect}
+              onClose={handleDropdownClose}
+            />
+          )}
+        </div>
       </div>
-      {panels.length === 0 ? (
-        <div className="terminal-area-empty">
-          <p>No terminal panels. Click "Add Panel" to open one.</p>
-        </div>
-      ) : (
-        <div className={`terminal-area-grid${gridClass ? ` ${gridClass}` : ''}`} style={gridStyle}>
-          {panels.map((panel, i) => (
-            <div
-              key={panel.id}
-              className="tile-wrapper"
-              style={panels.length === 3 && i === 0 ? { gridRow: 'span 2' } : undefined}
-            >
-              <TerminalPane
-                id={panel.id}
-                workspaceName={workspace.name}
-                workspacePath={workspace.path}
-                onClose={() => onRemovePanel(panel.id)}
-              />
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="terminal-area" style={tilingStyle}>
+        {filteredSessions.map((session, i) => (
+          <TerminalPane
+            key={session.id}
+            session={session}
+            onInput={onInput}
+            onResize={onResize}
+            onRestart={onRestart}
+            onStartAgent={onStartAgent}
+            onShowAgentModal={onShowAgentModal}
+            writeData={writeBuffers[session.id] || ''}
+            agentConfigs={agentConfigs}
+            style={getItemStyle(i, filteredSessions.length, layoutPreset, activeIdx)}
+            onClose={onCloseTab}
+            dimmed={focusMode && session.id !== activeSessionId}
+          />
+        ))}
+      </div>
     </div>
   )
 }

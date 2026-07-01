@@ -1,222 +1,537 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
-import NamePrompt from './components/NamePrompt'
+import ShellSidebar from './components/ShellSidebar'
+import InputModal from './components/InputModal'
+import AgentModal from './components/AgentModal'
+import Dashboard from './components/Dashboard'
+import Profile from './components/Profile'
+import Settings from './components/Settings'
+import { useSocket } from './hooks/useSocket'
+import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
+import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
-export type Workspace = {
-  id: string
-  name: string
-  path: string
-}
+const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
+  { id: 'claude', name: 'Claude Code', icon: '🤖' },
+  { id: 'opencode', name: 'Opencode', icon: '🔧' },
+  { id: 'codex', name: 'Codex', icon: '⚡' },
+  { id: 'gemini', name: 'Gemini', icon: '✨' },
+]
 
-export type Panel = {
-  id: string
-  workspaceId: string
-}
+const FALLBACK_AGENTS: AgentConfig[] = [
+  {
+    id: 'claude', name: 'Claude Code', icon: '🤖', description: 'Anthropic Claude Code CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Resume conversation' }, { id: 'resume', name: 'Resume', description: 'Restore interrupted session' }],
+    flags: [{ id: 'skipPermissions', flag: '--dangerously-skip-permissions', label: '🚀 YOLO Mode', description: 'YOLO Mode (skip permissions)', category: 'permissions', default: true }],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'opencode', name: 'Opencode', icon: '🔧', description: 'AI-powered coding agent CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'codex', name: 'Codex', icon: '⚡', description: 'OpenAI Codex CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue most recent session' }, { id: 'resume', name: 'Resume', description: 'Resume interrupted session' }],
+    flags: [{ id: 'yolo', flag: '--dangerously-bypass-approvals-and-sandbox', label: '🚀 YOLO Mode', description: 'No approvals + no sandboxing', category: 'sandbox', default: true }],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'gemini', name: 'Gemini', icon: '✨', description: 'Google Gemini CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+]
 
-function getNextDefaultName(workspaces: Workspace[]): string {
-  const count = workspaces.filter(w => w.name.startsWith('Workspace')).length + 1
-  return `Workspace${count}`
+interface ModalState {
+  open: boolean
+  title: string
+  defaultValue?: string
+  onSubmit: (value: string) => void
 }
 
 function App() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const {
+    sessions, workspaces, activeWorkspace,
+    onTerminalOutput, sendTerminalInput, sendTerminalResize,
+    restartSession, switchWorkspace, createWorkspace,
+    deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
+    closeTab, startAgent, fetchAgentConfigs, createRawSession,
+  } = useSocket()
+  const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
-  const [panels, setPanels] = useState<Panel[]>([])
-  const [sidebarWidth, setSidebarWidth] = useState(260)
-  const [isDragging, setIsDragging] = useState(false)
-  const [pendingFolder, setPendingFolder] = useState<string | null>(null)
-  const resizing = useRef(false)
-  const dragCounter = useRef(0)
-  const workspacesRef = useRef(workspaces)
-  workspacesRef.current = workspaces
+  const [modal, setModal] = useState<ModalState | null>(null)
+  const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
+  const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
+  const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
+  const [focusMode, setFocusMode] = useState(false)
+  const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | null>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
+  })
+  const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
+  const appBodyRef = useRef<HTMLDivElement>(null)
+  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.1))
+  const [rightWidth, setRightWidth] = useState(() => Math.round(window.innerWidth * 0.1))
+  const dragging = useRef<'left' | 'right' | null>(null)
 
-  const addWorkspace = useCallback((name: string, path: string) => {
-    console.log('[app] addWorkspace:', name, path)
-    const current = workspacesRef.current
-    const existing = current.find(w => w.path === path)
-    if (existing) {
-      setActiveWorkspaceId(existing.id)
-      return
-    }
-    const id = String(Date.now())
-    setWorkspaces(prev => [...prev, { id, name, path }])
-    setActiveWorkspaceId(id)
+  useEffect(() => {
+    fetchAgentConfigs().then(configs => {
+      if (configs.length > 0) setAgentConfigs(configs)
+      else setAgentConfigs(FALLBACK_AGENTS)
+    }).catch(() => setAgentConfigs(FALLBACK_AGENTS))
   }, [])
 
-  const editWorkspace = useCallback((id: string, name: string, path: string) => {
-    setWorkspaces(prev => prev.map(w => w.id === id ? { ...w, name, path } : w))
+  const refreshDeleted = useCallback(() => {
+    listDeletedWorkspaces().then(setDeletedWorkspaces)
+  }, [listDeletedWorkspaces])
+
+  useEffect(() => { refreshDeleted() }, [])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
   }, [])
 
-  const removeWorkspace = useCallback((id: string) => {
-    setWorkspaces(prev => {
-      const next = prev.filter(w => w.id !== id)
-      setPanels(prevPanels => prevPanels.filter(p => p.workspaceId !== id))
-      setActiveWorkspaceId(prevId => prevId === id ? (next.length > 0 ? next[0].id : null) : prevId)
-      return next
-    })
+  const showModal = useCallback((title: string, onSubmit: (value: string) => void, defaultValue?: string) => {
+    setModal({ open: true, title, onSubmit, defaultValue })
   }, [])
 
-  const addPanel = useCallback(() => {
-    if (!activeWorkspaceId) return
-    const id = String(Date.now())
-    setPanels(prev => [...prev, { id, workspaceId: activeWorkspaceId }])
-  }, [activeWorkspaceId])
-
-  const removePanel = useCallback((id: string) => {
-    setPanels(prev => prev.filter(p => p.id !== id))
+  const closeModal = useCallback(() => {
+    setModal(null)
   }, [])
 
-  const onNameConfirm = useCallback((name: string) => {
-    const folder = pendingFolder
-    setPendingFolder(null)
-    if (folder) addWorkspace(name, folder)
-  }, [pendingFolder, addWorkspace])
+  function handleModalSubmit(value: string) {
+    modal?.onSubmit(value)
+  }
 
-  const onNameCancel = useCallback(() => {
-    setPendingFolder(null)
-  }, [])
+  function handleStartAgent(sessionId: string, config: AgentStartConfig) {
+    startAgent(sessionId, config)
+  }
 
-  const promptForName = useCallback((folderPath: string) => {
-    console.log('[app] promptForName:', folderPath)
-    setPendingFolder(folderPath)
-  }, [])
-
-  const handleAddWorkspace = useCallback(async () => {
-    console.log('[app] handleAddWorkspace, electronAPI:', window.electronAPI)
-    const api = window.electronAPI
-    if (api?.selectDirectory) {
-      const folder = await api.selectDirectory()
-      console.log('[app] selectDirectory returned:', folder)
-      if (folder) promptForName(folder)
-      return
-    }
-    const p = prompt('Enter workspace path:')
-    if (p?.trim()) promptForName(p.trim())
-  }, [promptForName])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounter.current++
-    setIsDragging(true)
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounter.current--
-    if (dragCounter.current <= 0) {
-      dragCounter.current = 0
-      setIsDragging(false)
-    }
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounter.current = 0
-    setIsDragging(false)
-
-    console.log('[app] drop event, electronAPI:', window.electronAPI)
-    const api = window.electronAPI
-    if (api?.getDropPath) {
-      const folder = await api.getDropPath()
-      console.log('[app] getDropPath returned:', folder)
-      if (folder) promptForName(folder)
-    }
-  }, [promptForName])
-
-  function handleResizeDown(e: React.MouseEvent) {
-    e.preventDefault()
-    resizing.current = true
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
+  function handleShowAgentModal(sessionId: string) {
+    setAgentModalSession(sessionId)
   }
 
   useEffect(() => {
-    function handleMouseMove(e: MouseEvent) {
-      if (!resizing.current) return
-      setSidebarWidth(Math.max(180, Math.min(window.innerWidth * 0.2, e.clientX)))
+    const unsub = onTerminalOutput((data: TerminalOutput) => {
+      setWriteBuffers(prev => ({
+        ...prev,
+        [data.sessionId]: (prev[data.sessionId] || '') + data.data,
+      }))
+    })
+    return unsub
+  }, [onTerminalOutput])
+
+  useEffect(() => {
+    if (activeWorkspace?.id && activeWorkspaceId !== activeWorkspace.id) {
+      setActiveWorkspaceId(activeWorkspace.id)
     }
-    function handleMouseUp() {
-      if (resizing.current) {
-        resizing.current = false
+  }, [activeWorkspace])
+
+  function addWorkspace(name: string, path: string) {
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    createWorkspace({
+      id,
+      name,
+      workspaceType: 'single-repo',
+      repository: { path, type: 'generic' },
+      worktrees: { enabled: false, count: 0, namingPattern: 'work{n}', autoCreate: false },
+    }).then((res: any) => {
+      if (res?.ok) {
+        switchWorkspace(id)
+      }
+    })
+  }
+
+  function editWorkspace(_id: string, _name: string, _path: string) { }
+
+  function removeWorkspace(id: string) {
+    const wsSessions = Object.entries(sessions)
+      .filter(([, s]) => s.repositoryName === id || s.id.startsWith(id))
+      .map(([sid]) => sid)
+    if (wsSessions.length > 0) closeTab(wsSessions)
+    if (activeWorkspaceId === id) {
+      setActiveWorkspaceId(workspaces.length > 1 ? workspaces.find(w => w.id !== id)?.id ?? null : null)
+    }
+  }
+
+  const wsPath = activeWorkspace?.repository?.path
+
+  const agentSessions = useMemo(
+    () => Object.values(sessions).filter(s => s.type === 'claude' || s.type === 'codex' || s.type === 'opencode' || s.type === 'gemini').slice(0, 12),
+    [sessions]
+  )
+  const shellSessions = useMemo(
+    () => Object.values(sessions).filter(s => s.type === 'shell'),
+    [sessions]
+  )
+
+  const handleNewTerminal = useCallback((type?: string) => {
+    createRawSession(type, wsPath)
+  }, [createRawSession, wsPath])
+
+  function handleCreateWorkspace() {
+    showModal('Workspace name:', (name) => {
+      const doCreate = async () => {
+        let path = ''
+        try {
+          if (window.electronAPI) {
+            const defaultPath = await window.electronAPI.getDefaultPath()
+            path = defaultPath
+            const selected = await window.electronAPI.selectDirectory()
+            if (selected) path = selected
+          } else {
+            path = ''
+            const fallback = prompt('Workspace directory:', '')
+            if (fallback && fallback.trim()) path = fallback.trim()
+          }
+        } catch (e) {
+          console.error('Error selecting workspace directory:', e)
+        }
+        addWorkspace(name, path)
+        setModal(null)
+      }
+      doCreate()
+    })
+  }
+
+  function handleSelectWorkspace(id: string) {
+    switchWorkspace(id)
+  }
+
+  function handleDeleteWorkspace(id: string) {
+    deleteWorkspace(id)
+    removeWorkspace(id)
+    setTimeout(refreshDeleted, 500)
+  }
+
+  function handleRestoreWorkspace(id: string) {
+    restoreWorkspace(id).then(ok => {
+      if (ok) refreshDeleted()
+    })
+  }
+
+  function handlePermanentDelete(id: string) {
+    permanentDeleteWorkspace(id).then(() => refreshDeleted())
+  }
+
+  function handleCloseShellSession(sessionId: string) {
+    closeTab([sessionId])
+  }
+
+  function handleSelectAgent(agentId: string) {
+    handleNewTerminal(agentId)
+  }
+
+  // Auto-set active session when a new one is created
+  useEffect(() => {
+    if (!activeSessionId && agentSessions.length > 0) {
+      setActiveSessionId(agentSessions[0].id)
+    }
+  }, [agentSessions.length])
+
+  function handleCloseAgentTab(sessionId: string) {
+    closeTab([sessionId])
+    if (activeSessionId === sessionId) {
+      const remaining = agentSessions.filter(s => s.id !== sessionId)
+      setActiveSessionId(remaining.length > 0 ? remaining[0].id : null)
+    }
+  }
+
+  function handleNewShell() {
+    if (shellSessions.length === 0) {
+      handleNewTerminal('shell')
+    }
+    if (!shellSidebarOpen) {
+      setRightWidth(Math.round(window.innerWidth * 0.1))
+    }
+    setShellSidebarOpen(o => !o)
+  }
+
+  function handleToggleWorkspaceSidebar() {
+    setWorkspaceSidebarOpen(o => !o)
+  }
+
+  // Native menu IPC
+  useEffect(() => {
+    const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
+      switch (action) {
+        case 'new-agent': handleNewTerminal('claude'); break
+        case 'new-shell': handleNewShell(); break
+        case 'new-workspace': handleCreateWorkspace(); break
+        case 'save-workspace': alert('Workspace saved'); break
+        case 'save-workspace-as': {
+          window.electronAPI?.exportWorkspace().then(path => {
+            if (path) alert(`Workspace exported to ${path}`)
+          })
+          break
+        }
+        case 'load-workspace': {
+          window.electronAPI?.importWorkspace().then(result => {
+            if (result?.workspace) {
+              handleSelectWorkspace(result.workspace.id)
+            }
+          })
+          break
+        }
+        case 'duplicate-workspace': {
+          const name = prompt('New workspace name:')
+          if (name?.trim()) {
+            window.electronAPI?.duplicateWorkspace(name.trim()).then(dup => {
+              if (dup) handleSelectWorkspace(dup.id)
+            })
+          }
+          break
+        }
+        case 'switch-workspace': handleSelectWorkspace(data); break
+        case 'toggle-shell-sidebar': setShellSidebarOpen(o => !o); break
+        case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
+        case 'toggle-focus': setFocusMode(o => !o); break
+        case 'set-layout': setLayoutPreset(data); break
+        case 'show-shortcuts': alert(
+          '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
+          '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
+          '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
+          '⌘B — Shell Sidebar\n⌘⇧B — Workspace Sidebar'
+        ); break
+        case 'show-about': alert('AgntSpce v1.0\nElectron + React + TypeScript'); break
+      }
+    })
+    return () => unsub?.()
+  }, [])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isMeta = e.metaKey || e.ctrlKey
+      if (!isMeta) return
+
+      if (e.key === 'F' && e.shiftKey) {
+        e.preventDefault()
+        setFocusMode(o => !o)
+        return
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        const idx = agentSessions.findIndex(s => s.id === activeSessionId)
+        if (idx < 0) {
+          if (agentSessions.length > 0) setActiveSessionId(agentSessions[0].id)
+          return
+        }
+        const dir = e.shiftKey ? -1 : 1
+        const next = (idx + dir + agentSessions.length) % agentSessions.length
+        setActiveSessionId(agentSessions[next].id)
+        return
+      }
+
+      const num = parseInt(e.key)
+      if (num >= 1 && num <= 9 && num <= agentSessions.length) {
+        e.preventDefault()
+        setActiveSessionId(agentSessions[num - 1].id)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [activeSessionId, agentSessions])
+
+  // Resize drag handlers
+  function onResizerMouseDown(side: 'left' | 'right') {
+    return (e: React.MouseEvent) => {
+      e.preventDefault()
+      dragging.current = side
+      const startX = e.clientX
+      const startLeft = leftWidth
+      const startRight = rightWidth
+
+      function onMove(ev: MouseEvent) {
+        if (!appBodyRef.current) return
+        const bodyRect = appBodyRef.current.getBoundingClientRect()
+        const totalW = bodyRect.width
+        const maxPanel = totalW * 0.15
+        const minPanel = totalW * 0.05
+
+        if (dragging.current === 'left') {
+          const dx = ev.clientX - startX
+          let newW = Math.max(minPanel, startLeft + dx)
+          if (shellSidebarOpen) {
+            newW = Math.min(newW, maxPanel, totalW - rightWidth - 200)
+          } else {
+            newW = Math.min(newW, maxPanel)
+          }
+          setLeftWidth(newW)
+        } else if (dragging.current === 'right') {
+          const dx = startX - ev.clientX
+          let newW = Math.max(minPanel, startRight + dx)
+          newW = Math.min(newW, maxPanel, totalW - leftWidth - 180)
+          setRightWidth(newW)
+        }
+      }
+
+      function onUp() {
+        dragging.current = null
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
       }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
     }
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [])
+  }
 
-  const actionsRef = useRef({ handleAddWorkspace, promptForName })
-  actionsRef.current = { handleAddWorkspace, promptForName }
-
-  useEffect(() => {
-    window.electronAPI?.onMenuAction?.(action => {
-      const { handleAddWorkspace, promptForName } = actionsRef.current
-      switch (action) {
-        case 'open-folder':
-          handleAddWorkspace()
-          break
-        case 'new-workspace':
-          promptForName('')
-          break
-        case 'save-workspace':
-          console.log('[app] save-workspace — not yet implemented')
-          break
-        case 'load-workspace':
-          console.log('[app] load-workspace — not yet implemented')
-          break
-      }
-    })
-  }, [])
-
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) ?? null
-  const activePanels = panels.filter(p => p.workspaceId === activeWorkspaceId)
+  function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
+    setActiveView(activeView === view ? null : view)
+  }
 
   return (
-    <div
-      className={`app${isDragging ? ' drag-over' : ''}`}
-      style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
-      onDragOver={handleDragOver}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
-      <WorkspaceSidebar
-        workspaces={workspaces}
-        activeWorkspaceId={activeWorkspaceId}
-        onSelect={setActiveWorkspaceId}
-        onEdit={editWorkspace}
-        onRemove={removeWorkspace}
+    <div className="app">
+      <div className="app-body" ref={appBodyRef}>
+        <div className="activity-bar">
+          <div className="activity-bar-top">
+            <div className="activity-logo" title="AgntSpce">
+              <img src="/img/logo-icon.png" alt="AgntSpce" className="activity-logo-img" />
+            </div>
+            <button
+              className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
+              onClick={() => setWorkspaceSidebarOpen(o => !o)}
+              title="Workspaces"
+            >
+              <span style={{ fontSize: 20, lineHeight: 1 }}>📁</span>
+            </button>
+          </div>
+          <div className="activity-bar-bottom">
+            <button
+              className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setView('dashboard')}
+              title="Dashboard"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            </button>
+            <button
+              className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
+              onClick={() => setView('profile')}
+              title="Profile"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-8 8-8s8 4 8 8"/></svg>
+            </button>
+            <button
+              className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
+              onClick={() => setView('settings')}
+              title="Settings"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            </button>
+          </div>
+        </div>
+        {workspaceSidebarOpen && (
+          <>
+            <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
+              <WorkspaceSidebar
+                workspaces={workspaces}
+                sessions={sessions}
+                activeWorkspace={activeWorkspace}
+                deletedWorkspaces={deletedWorkspaces}
+                onSelect={handleSelectWorkspace}
+                onAdd={addWorkspace}
+                onEdit={editWorkspace}
+                onRemove={removeWorkspace}
+                onDelete={handleDeleteWorkspace}
+                onRestore={handleRestoreWorkspace}
+                onPermanentDelete={handlePermanentDelete}
+                showModal={showModal}
+                closeModal={closeModal}
+              />
+            </div>
+            <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
+          </>
+        )}
+        <main className="main-content">
+          {activeView === 'dashboard' ? (
+            <Dashboard
+              workspaces={workspaces}
+              sessions={sessions}
+              activeWorkspace={activeWorkspace}
+              deletedWorkspaces={deletedWorkspaces}
+              onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+              onDelete={handleDeleteWorkspace}
+              onRestore={handleRestoreWorkspace}
+              onPermanentDelete={handlePermanentDelete}
+              onNewWorkspace={handleCreateWorkspace}
+            />
+          ) : activeView === 'profile' ? (
+            <Profile onClose={() => setActiveView(null)} />
+          ) : activeView === 'settings' ? (
+            <Settings theme={theme} onThemeChange={setTheme} onClose={() => setActiveView(null)} />
+          ) : (
+            <TerminalArea
+              sessions={agentSessions}
+              onInput={sendTerminalInput}
+              onResize={sendTerminalResize}
+              onRestart={restartSession}
+              onStartAgent={handleStartAgent}
+              onShowAgentModal={handleShowAgentModal}
+              onNewAgent={() => handleNewTerminal('claude')}
+              onSelectAgent={handleSelectAgent}
+              onNewShell={handleNewShell}
+              onCloseTab={handleCloseAgentTab}
+              onActiveSessionChange={setActiveSessionId}
+              activeSessionId={activeSessionId}
+              writeBuffers={writeBuffers}
+              agentConfigs={agentConfigs}
+              layoutPreset={layoutPreset}
+              focusMode={focusMode}
+              agentsList={AGENTS_LIST}
+            />
+          )}
+        </main>
+        {shellSidebarOpen && (
+          <>
+            <div className="resizer" onMouseDown={onResizerMouseDown('right')} />
+            <div className="panel-right" style={{ width: rightWidth, minWidth: rightWidth }}>
+              <ShellSidebar
+                sessions={shellSessions}
+                onInput={sendTerminalInput}
+                onResize={sendTerminalResize}
+                onRestart={restartSession}
+                onClose={handleCloseShellSession}
+                onNewShell={() => handleNewTerminal('shell')}
+                onCloseShell={() => setShellSidebarOpen(false)}
+                writeBuffers={writeBuffers}
+              />
+            </div>
+          </>
+        )}
+      </div>
+      <InputModal
+        open={modal?.open || false}
+        title={modal?.title || ''}
+        defaultValue={modal?.defaultValue}
+        onSubmit={handleModalSubmit}
+        onCancel={closeModal}
       />
-      <div className="resize-handle" onMouseDown={handleResizeDown} />
-      <TerminalArea
-        workspace={activeWorkspace}
-        panels={activePanels}
-        onAddPanel={addPanel}
-        onRemovePanel={removePanel}
-        onAddWorkspace={handleAddWorkspace}
+      <AgentModal
+        open={agentModalSession !== null}
+        sessionId={agentModalSession}
+        agentConfigs={agentConfigs}
+        onStart={handleStartAgent}
+        onClose={() => setAgentModalSession(null)}
       />
-      {pendingFolder && (
-        <NamePrompt
-          defaultName={getNextDefaultName(workspaces)}
-          onConfirm={onNameConfirm}
-          onCancel={onNameCancel}
-        />
-      )}
     </div>
   )
 }
