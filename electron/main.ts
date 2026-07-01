@@ -33,7 +33,6 @@ function createNewWindow() {
   })
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL!)
-    win.webContents.openDevTools()
   } else {
     win.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
   }
@@ -148,6 +147,12 @@ function rebuildMenu() {
           label: 'Toggle Workspace Sidebar',
           accelerator: 'CmdOrCtrl+Shift+B',
           click: () => sendMenuAction('toggle-workspace-sidebar'),
+        },
+        { type: 'separator' as const },
+        {
+          label: 'Focus Active Terminal',
+          accelerator: 'CmdOrCtrl+Shift+F',
+          click: () => sendMenuAction('toggle-focus'),
         },
         { type: 'separator' as const },
         {
@@ -270,6 +275,11 @@ io.on('connection', (socket) => {
   })
   socket.emit('sessions', sessionManager.getSessionStates())
 
+  const backlog = sessionManager.getUndeliveredOutputAndMarkDelivered()
+  if (Object.keys(backlog).length > 0) {
+    socket.emit('backlog', backlog)
+  }
+
   socket.on('terminal-input', ({ sessionId, data, input }) => {
     const inputData = data || input
     if (!inputData) return
@@ -308,6 +318,26 @@ io.on('connection', (socket) => {
     } catch (error: any) {
       if (callback) callback({ ok: false, error: error.message })
     }
+  })
+
+  socket.on('list-deleted-workspaces', async (_data: any, callback?: Function) => {
+    const deleted = await workspaceManager.listDeletedWorkspaces()
+    if (callback) callback(deleted)
+  })
+
+  socket.on('restore-workspace', async ({ workspaceId }, callback?: Function) => {
+    const ws = await workspaceManager.restoreWorkspace(workspaceId)
+    if (ws) {
+      io.emit('workspaces-list', workspaceManager.listWorkspaces())
+      if (callback) callback({ ok: true, workspace: ws })
+    } else {
+      if (callback) callback({ ok: false })
+    }
+  })
+
+  socket.on('permanent-delete-workspace', async ({ workspaceId }, callback?: Function) => {
+    await workspaceManager.permanentDeleteWorkspace(workspaceId)
+    if (callback) callback({ ok: true })
   })
 
   socket.on('delete-workspace', async ({ workspaceId }) => {
@@ -392,7 +422,6 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
-    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
   }

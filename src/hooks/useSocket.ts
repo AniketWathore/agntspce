@@ -19,6 +19,9 @@ interface UseSocketReturn {
   switchWorkspace: (workspaceId: string) => void
   createWorkspace: (data: any) => Promise<any>
   deleteWorkspace: (workspaceId: string) => void
+  listDeletedWorkspaces: () => Promise<{ id: string; name: string; deletedAt: string }[]>
+  restoreWorkspace: (workspaceId: string) => Promise<boolean>
+  permanentDeleteWorkspace: (workspaceId: string) => Promise<boolean>
   refreshWorkspaces: () => void
   closeTab: (sessionIds: string[]) => void
   startAgent: (sessionId: string, config: AgentStartConfig) => void
@@ -99,6 +102,14 @@ export function useSocket(): UseSocketReturn {
       console.error('[socket error]', err?.message || err)
     })
 
+    socket.on('backlog', (data: Record<string, string>) => {
+      for (const [sessionId, buffered] of Object.entries(data)) {
+        if (buffered) {
+          terminalOutputCbs.current.forEach(cb => cb({ sessionId, data: buffered }))
+        }
+      }
+    })
+
     socket.on('session-closed', ({ sessionId }: { sessionId: string }) => {
       setSessions(prev => {
         const next = { ...prev }
@@ -166,6 +177,24 @@ export function useSocket(): UseSocketReturn {
     socketRef.current?.emit('delete-workspace', { workspaceId })
   }, [])
 
+  const listDeletedWorkspaces = useCallback((): Promise<{ id: string; name: string; deletedAt: string }[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('list-deleted-workspaces', {}, (res: any) => resolve(res || []))
+    })
+  }, [])
+
+  const restoreWorkspace = useCallback((workspaceId: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('restore-workspace', { workspaceId }, (res: any) => resolve(res?.ok ?? false))
+    })
+  }, [])
+
+  const permanentDeleteWorkspace = useCallback((workspaceId: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('permanent-delete-workspace', { workspaceId }, (res: any) => resolve(res?.ok ?? false))
+    })
+  }, [])
+
   const refreshWorkspaces = useCallback(() => {
     socketRef.current?.emit('list-workspaces')
   }, [])
@@ -211,6 +240,9 @@ export function useSocket(): UseSocketReturn {
     switchWorkspace,
     createWorkspace,
     deleteWorkspace,
+    listDeletedWorkspaces,
+    restoreWorkspace,
+    permanentDeleteWorkspace,
     refreshWorkspaces,
     closeTab,
     startAgent,

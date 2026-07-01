@@ -258,5 +258,73 @@ export class WorkspaceManager {
     return this.workspaces.get(id)
   }
 
+  async listDeletedWorkspaces(): Promise<{ id: string; name: string; deletedAt: string }[]> {
+    const deletedDir = path.join(CONFIG_DIR, 'deleted-workspaces')
+    let files: string[]
+    try {
+      files = await fs.readdir(deletedDir)
+    } catch { return [] }
+
+    const result: { id: string; name: string; deletedAt: string }[] = []
+    for (const file of files.filter((f: string) => f.endsWith('.json'))) {
+      try {
+        const content = await fs.readFile(path.join(deletedDir, file), 'utf8')
+        const data = JSON.parse(content)
+        result.push({
+          id: data.workspace?.id || file,
+          name: data.workspace?.name || file,
+          deletedAt: data.deletedAt,
+        })
+      } catch {}
+    }
+    return result.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))
+  }
+
+  async restoreWorkspace(deletedId: string): Promise<Workspace | null> {
+    const deletedDir = path.join(CONFIG_DIR, 'deleted-workspaces')
+    let files: string[]
+    try {
+      files = await fs.readdir(deletedDir)
+    } catch { return null }
+
+    for (const file of files.filter((f: string) => f.endsWith('.json'))) {
+      try {
+        const content = await fs.readFile(path.join(deletedDir, file), 'utf8')
+        const data = JSON.parse(content)
+        if (data.workspace?.id === deletedId) {
+          const ws = data.workspace as Workspace
+          await fs.writeFile(
+            path.join(CONFIG_DIR, 'workspaces', `${ws.id}.json`),
+            JSON.stringify(ws, null, 2)
+          )
+          this.workspaces.set(ws.id, ws)
+          await fs.unlink(path.join(deletedDir, file))
+          return ws
+        }
+      } catch {}
+    }
+    return null
+  }
+
+  async permanentDeleteWorkspace(deletedId: string): Promise<boolean> {
+    const deletedDir = path.join(CONFIG_DIR, 'deleted-workspaces')
+    let files: string[]
+    try {
+      files = await fs.readdir(deletedDir)
+    } catch { return false }
+
+    for (const file of files.filter((f: string) => f.endsWith('.json'))) {
+      try {
+        const content = await fs.readFile(path.join(deletedDir, file), 'utf8')
+        const data = JSON.parse(content)
+        if (data.workspace?.id === deletedId) {
+          await fs.unlink(path.join(deletedDir, file))
+          return true
+        }
+      } catch {}
+    }
+    return false
+  }
+
   getConfig() { return this.config }
 }

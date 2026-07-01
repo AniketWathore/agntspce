@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 
 interface AgentItem {
   id: string
@@ -13,26 +14,32 @@ interface Props {
 }
 
 export default function AgentPicker({ agents, onSelect, onClose }: Props) {
-  const overlayRef = useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
     }
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
     document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
+    document.addEventListener('mousedown', handleClick)
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+      document.removeEventListener('mousedown', handleClick)
+    }
   }, [onClose])
 
   return (
-    <div className="agent-picker-overlay" ref={overlayRef} onClick={onClose}>
-      <div className="agent-picker" onClick={e => e.stopPropagation()}>
-        {agents.map(a => (
-          <div key={a.id} className="agent-picker-item" onClick={() => onSelect(a.id)}>
-            <span className="agent-picker-icon">{a.icon}</span>
-            <span className="agent-picker-name">{a.name}</span>
-          </div>
-        ))}
-      </div>
+    <div className="agent-dropdown" ref={ref} onClick={e => e.stopPropagation()}>
+      {agents.map(a => (
+        <div key={a.id} className="agent-dropdown-item" onClick={() => onSelect(a.id)}>
+          <img className="agent-dropdown-icon agent-color-icon" src={getAgentColorImage(a.id)} alt={a.name} />
+          <img className="agent-dropdown-icon agent-text-icon" src={getAgentTextImage(a.id)} alt={a.name} />
+          <span className="agent-dropdown-name">{a.name}</span>
+        </div>
+      ))}
     </div>
   )
 }

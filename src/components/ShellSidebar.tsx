@@ -11,6 +11,7 @@ interface Props {
   onRestart: (sessionId: string) => void
   onClose: (sessionId: string) => void
   onNewShell: () => void
+  onCloseShell: () => void
   writeBuffers: Record<string, string>
 }
 
@@ -106,12 +107,15 @@ function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeDa
   )
 }
 
-export default function ShellSidebar({ sessions, onInput, onResize, onRestart, onClose, onNewShell, writeBuffers }: Props) {
+export default function ShellSidebar({ sessions, onInput, onResize, onRestart, onClose, onNewShell, onCloseShell, writeBuffers }: Props) {
   return (
     <aside className="shell-sidebar">
       <div className="shell-sidebar-header">
         <h3>Shells</h3>
-        <button className="shell-add-btn" onClick={onNewShell} title="New shell">+</button>
+        <div className="shell-header-actions">
+          <button className="shell-add-btn" onClick={onNewShell} title="New shell">+</button>
+          <button className="shell-close-panel-btn" onClick={onCloseShell} title="Close shell">&times;</button>
+        </div>
       </div>
       <div className="shell-sidebar-list">
         {sessions.length === 0 ? (

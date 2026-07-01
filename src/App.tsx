@@ -5,13 +5,15 @@ import TerminalArea from './components/TerminalArea'
 import ShellSidebar from './components/ShellSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
-import AgentPicker from './components/AgentPicker'
+import Dashboard from './components/Dashboard'
+import Profile from './components/Profile'
+import Settings from './components/Settings'
 import { useSocket } from './hooks/useSocket'
 import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
 import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
-const AGENTS_LIST: { id: string, name: string, icon: string }[] = [
+const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'claude', name: 'Claude Code', icon: '🤖' },
   { id: 'opencode', name: 'Opencode', icon: '🔧' },
   { id: 'codex', name: 'Codex', icon: '⚡' },
@@ -57,7 +59,8 @@ function App() {
     sessions, workspaces, activeWorkspace,
     onTerminalOutput, sendTerminalInput, sendTerminalResize,
     restartSession, switchWorkspace, createWorkspace,
-    deleteWorkspace, closeTab, startAgent, fetchAgentConfigs, createRawSession,
+    deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
+    closeTab, startAgent, fetchAgentConfigs, createRawSession,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -65,9 +68,14 @@ function App() {
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
   const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
-  const [showAgentPicker, setShowAgentPicker] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
+  const [focusMode, setFocusMode] = useState(false)
+  const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | null>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
+  })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(240)
@@ -79,6 +87,21 @@ function App() {
       if (configs.length > 0) setAgentConfigs(configs)
       else setAgentConfigs(FALLBACK_AGENTS)
     }).catch(() => setAgentConfigs(FALLBACK_AGENTS))
+  }, [])
+
+  const refreshDeleted = useCallback(() => {
+    listDeletedWorkspaces().then(setDeletedWorkspaces)
+  }, [listDeletedWorkspaces])
+
+  useEffect(() => { refreshDeleted() }, [])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
   }, [])
 
   const showModal = useCallback((title: string, onSubmit: (value: string) => void, defaultValue?: string) => {
@@ -186,6 +209,17 @@ function App() {
   function handleDeleteWorkspace(id: string) {
     deleteWorkspace(id)
     removeWorkspace(id)
+    setTimeout(refreshDeleted, 500)
+  }
+
+  function handleRestoreWorkspace(id: string) {
+    restoreWorkspace(id).then(ok => {
+      if (ok) refreshDeleted()
+    })
+  }
+
+  function handlePermanentDelete(id: string) {
+    permanentDeleteWorkspace(id).then(() => refreshDeleted())
   }
 
   function handleCloseShellSession(sessionId: string) {
@@ -193,12 +227,7 @@ function App() {
   }
 
   function handleSelectAgent(agentId: string) {
-    setShowAgentPicker(false)
     handleNewTerminal(agentId)
-  }
-
-  function handleAgentPickerBtnClick() {
-    setShowAgentPicker(o => !o)
   }
 
   // Auto-set active session when a new one is created
@@ -231,7 +260,7 @@ function App() {
   useEffect(() => {
     const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
       switch (action) {
-        case 'new-agent': handleAgentPickerBtnClick(); break
+        case 'new-agent': handleNewTerminal('claude'); break
         case 'new-shell': handleNewShell(); break
         case 'new-workspace': handleCreateWorkspace(); break
         case 'save-workspace': alert('Workspace saved'); break
@@ -261,6 +290,7 @@ function App() {
         case 'switch-workspace': handleSelectWorkspace(data); break
         case 'toggle-shell-sidebar': setShellSidebarOpen(o => !o); break
         case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
+        case 'toggle-focus': setFocusMode(o => !o); break
         case 'set-layout': setLayoutPreset(data); break
         case 'show-shortcuts': alert(
           '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
@@ -279,6 +309,12 @@ function App() {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
       if (!isMeta) return
+
+      if (e.key === 'F' && e.shiftKey) {
+        e.preventDefault()
+        setFocusMode(o => !o)
+        return
+      }
 
       if (e.key === 'Tab') {
         e.preventDefault()
@@ -360,11 +396,17 @@ function App() {
                 workspaces={workspaces}
                 sessions={sessions}
                 activeWorkspace={activeWorkspace}
+                deletedWorkspaces={deletedWorkspaces}
+                showDashboard={activeView === 'dashboard'}
+                activeView={activeView}
                 onSelect={handleSelectWorkspace}
                 onAdd={addWorkspace}
                 onEdit={editWorkspace}
                 onRemove={removeWorkspace}
                 onDelete={handleDeleteWorkspace}
+                onRestore={handleRestoreWorkspace}
+                onPermanentDelete={handlePermanentDelete}
+                onViewChange={setActiveView}
                 showModal={showModal}
                 closeModal={closeModal}
               />
@@ -373,22 +415,43 @@ function App() {
           </>
         )}
         <main className="main-content">
-          <TerminalArea
-            sessions={agentSessions}
-            onInput={sendTerminalInput}
-            onResize={sendTerminalResize}
-            onRestart={restartSession}
-            onStartAgent={handleStartAgent}
-            onShowAgentModal={handleShowAgentModal}
-            onNewAgent={() => setShowAgentPicker(true)}
+          {activeView === 'dashboard' ? (
+            <Dashboard
+              workspaces={workspaces}
+              sessions={sessions}
+              activeWorkspace={activeWorkspace}
+              deletedWorkspaces={deletedWorkspaces}
+              onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+              onDelete={handleDeleteWorkspace}
+              onRestore={handleRestoreWorkspace}
+              onPermanentDelete={handlePermanentDelete}
+              onNewWorkspace={handleCreateWorkspace}
+            />
+          ) : activeView === 'profile' ? (
+            <Profile onClose={() => setActiveView(null)} />
+          ) : activeView === 'settings' ? (
+            <Settings theme={theme} onThemeChange={setTheme} onClose={() => setActiveView(null)} />
+          ) : (
+            <TerminalArea
+              sessions={agentSessions}
+              onInput={sendTerminalInput}
+              onResize={sendTerminalResize}
+              onRestart={restartSession}
+              onStartAgent={handleStartAgent}
+              onShowAgentModal={handleShowAgentModal}
+            onNewAgent={() => {}}
+            onSelectAgent={handleSelectAgent}
             onNewShell={handleNewShell}
             onCloseTab={handleCloseAgentTab}
-            onActiveSessionChange={setActiveSessionId}
-            activeSessionId={activeSessionId}
-            writeBuffers={writeBuffers}
-            agentConfigs={agentConfigs}
+              onActiveSessionChange={setActiveSessionId}
+              activeSessionId={activeSessionId}
+              writeBuffers={writeBuffers}
+              agentConfigs={agentConfigs}
             layoutPreset={layoutPreset}
+            focusMode={focusMode}
+            agentsList={AGENTS_LIST}
           />
+          )}
         </main>
         {shellSidebarOpen && (
           <>
@@ -401,6 +464,7 @@ function App() {
                 onRestart={restartSession}
                 onClose={handleCloseShellSession}
                 onNewShell={() => handleNewTerminal('shell')}
+                onCloseShell={() => setShellSidebarOpen(false)}
                 writeBuffers={writeBuffers}
               />
             </div>
@@ -421,13 +485,6 @@ function App() {
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
       />
-      {showAgentPicker && (
-        <AgentPicker
-          agents={AGENTS_LIST}
-          onSelect={handleSelectAgent}
-          onClose={() => setShowAgentPicker(false)}
-        />
-      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import StatusDot from './StatusDot'
+import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 import StartupUI from './StartupUI'
 
 interface Props {
@@ -17,9 +18,10 @@ interface Props {
   writeData: string
   agentConfigs: AgentConfig[]
   style?: CSSProperties
+  dimmed?: boolean
 }
 
-export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -116,10 +118,17 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
   }, [])
 
   return (
-    <div className="terminal-pane" style={style}>
+    <div className={`terminal-pane${dimmed ? ' dimmed' : ''}`} style={style}>
       <div className="terminal-header">
         <StatusDot status={session.status} />
-        <span className="terminal-title">{session.type.toUpperCase()}</span>
+        {isAgentType ? (
+          <>
+            <img className="terminal-color-img" src={getAgentColorImage(session.type)} alt={session.type} />
+            <img className="terminal-title-img" src={getAgentTextImage(session.type)} alt={session.type} />
+          </>
+        ) : (
+          <span className="terminal-title">{session.type.toUpperCase()}</span>
+        )}
         {session.branch && session.branch !== 'unknown' && (
           <span className="terminal-branch">{session.branch}</span>
         )}

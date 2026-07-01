@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, type CSSProperties } from 'react'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
+import AgentPicker from './AgentPicker'
+import { getAgentColorImage } from '../agentImages'
 
 export type LayoutPreset = 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
 
@@ -12,6 +14,7 @@ interface Props {
   onStartAgent: (sessionId: string, config: AgentStartConfig) => void
   onShowAgentModal: (sessionId: string) => void
   onNewAgent: () => void
+  onSelectAgent: (agentId: string) => void
   onNewShell: () => void
   onCloseTab: (sessionId: string) => void
   onActiveSessionChange: (id: string | null) => void
@@ -19,6 +22,8 @@ interface Props {
   writeBuffers: Record<string, string>
   agentConfigs: AgentConfig[]
   layoutPreset: LayoutPreset
+  focusMode: boolean
+  agentsList?: { id: string; name: string; icon: string }[]
 }
 
 const AGENT_TYPES = [
@@ -66,11 +71,12 @@ function getItemStyle(index: number, count: number, preset: LayoutPreset, active
 
 export default function TerminalArea({
   sessions, onInput, onResize, onRestart, onStartAgent,
-  onShowAgentModal, onNewAgent, onNewShell, onCloseTab, onActiveSessionChange,
+  onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
   activeSessionId, writeBuffers, agentConfigs,
-  layoutPreset,
+  layoutPreset, focusMode, agentsList,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
+  const [showDropdown, setShowDropdown] = useState(false)
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -123,9 +129,22 @@ export default function TerminalArea({
       .map(t => ({ id: t.id, label: t.label, icon: t.icon, count: typeCounts[t.id] })),
   ]
 
-  function handleShellBtn() {
-    onNewShell()
+  function handleShellBtn() { onNewShell() }
+
+  function handleAddAgentClick() {
+    if (agentsList && agentsList.length > 0) {
+      setShowDropdown(o => !o)
+    } else {
+      onNewAgent()
+    }
   }
+
+  function handleDropdownSelect(agentId: string) {
+    setShowDropdown(false)
+    onSelectAgent(agentId)
+  }
+
+  function handleDropdownClose() { setShowDropdown(false) }
 
   const activeIdx = activeSessionId
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
@@ -144,16 +163,27 @@ export default function TerminalArea({
                 className={`tab-item ${isActive ? 'active' : ''}`}
                 onClick={() => setActiveGroupTab(tab.id)}
               >
-                <span className="tab-icon">{tab.icon}</span>
-                <span className="tab-label">{tab.label}</span>
+                {tab.icon === '⊞' ? (
+                  <span className="tab-icon">{tab.icon}</span>
+                ) : (
+                  <img className="tab-icon-img" src={getAgentColorImage(tab.id)} alt={tab.label} />
+                )}
+                {tab.icon === '⊞' && <span className="tab-label">{tab.label}</span>}
                 <span className="tab-count">{tab.count}</span>
               </div>
             )
           })}
         </div>
-        <div className="tab-bar-actions">
-          <button className="new-terminal-btn" onClick={onNewAgent}>+ Agent</button>
+        <div className="tab-bar-actions" style={{ position: 'relative' }}>
+          <button className="new-terminal-btn" onClick={handleAddAgentClick}>+ Agent</button>
           <button className="shell-btn" onClick={handleShellBtn}>&gt;_ Shell</button>
+          {showDropdown && agentsList && (
+            <AgentPicker
+              agents={agentsList}
+              onSelect={handleDropdownSelect}
+              onClose={handleDropdownClose}
+            />
+          )}
         </div>
       </div>
       <div className="terminal-area" style={tilingStyle}>
@@ -170,6 +200,7 @@ export default function TerminalArea({
             agentConfigs={agentConfigs}
             style={getItemStyle(i, filteredSessions.length, layoutPreset, activeIdx)}
             onClose={onCloseTab}
+            dimmed={focusMode && session.id !== activeSessionId}
           />
         ))}
       </div>
