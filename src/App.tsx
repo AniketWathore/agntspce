@@ -185,7 +185,7 @@ function App() {
   function handleCreateWorkspace() {
     showModal('Workspace name:', (name) => {
       const doCreate = async () => {
-        let path = '/tmp'
+        let path = ''
         try {
           if (window.electronAPI) {
             const selected = await window.electronAPI.selectDirectory()

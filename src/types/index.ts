@@ -86,6 +86,46 @@ export interface AgentStartConfig {
   resumeId?: string
 }
 
+export interface CompressionStats {
+  totalOriginalChars: number
+  totalCompressedChars: number
+  totalOriginalTokens: number
+  totalCompressedTokens: number
+  linesCompressed: number
+}
+
+export interface CompressionDebugDetail {
+  word: string
+  kept: boolean
+  reason?: string
+}
+
+export interface CompressionDebugRecord {
+  original: string
+  compressed: string
+  details: CompressionDebugDetail[]
+  originalChars: number
+  compressedChars: number
+  originalTokens: number
+  compressedTokens: number
+  reduction: number
+}
+
+export interface CompressionEvent {
+  sessionId: string
+  stats: {
+    originalChars: number
+    compressedChars: number
+    originalTokens: number
+    compressedTokens: number
+    reduction: number
+    charsSaved: number
+    tokensSaved: number
+  }
+  cumulative: CompressionStats
+  debug: CompressionDebugRecord
+}
+
 declare global {
   interface Window {
     electronAPI?: {

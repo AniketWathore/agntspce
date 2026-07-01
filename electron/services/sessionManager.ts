@@ -6,6 +6,7 @@ import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } fr
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
+import { TokenReductionService } from './tokenReduction'
 
 let pty: any = null
 try {
@@ -42,11 +43,17 @@ export class SessionManager extends EventEmitter {
   private isWorkspaceSwitching = false
   private maxBufferSize = 100000
   private agentManager: any = null
+  tokenReduction = new TokenReductionService()
 
   constructor(io: any, agentManager?: any) {
     super()
     this.io = io
     if (agentManager) this.agentManager = agentManager
+    this.tokenReduction.setOnCompression((event) => {
+      try {
+        this.io.emit('compression-event', event)
+      } catch {}
+    })
   }
 
   setAgentManager(am: any) { this.agentManager = am }
@@ -314,7 +321,8 @@ export class SessionManager extends EventEmitter {
     const session = this.sessions.get(sessionId)
     if (!session?.pty) return false
     try {
-      session.pty.write(data)
+      const processed = this.tokenReduction.processInput(sessionId, data)
+      session.pty.write(processed)
       return true
     } catch { return false }
   }
@@ -334,6 +342,7 @@ export class SessionManager extends EventEmitter {
         try { session.pty.kill() } catch { }
       }
     } catch { }
+    this.tokenReduction.cleanup(sessionId)
     this.sessions.delete(sessionId)
     return true
   }

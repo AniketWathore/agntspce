@@ -113,9 +113,20 @@ export default function TerminalArea({
         <div className="empty-state">
           <p>No agent terminals</p>
           <p className="empty-hint">Add an AI coding agent or open a shell</p>
-          <div className="empty-actions">
-            <button className="new-terminal-btn" onClick={onNewAgent}>+ Agent</button>
+          <div className="empty-actions" style={{ position: 'relative' }}>
+            <button className="new-terminal-btn" onClick={() => {
+              if (agentsList && agentsList.length > 0) {
+                setShowDropdown(o => !o)
+              }
+            }}>+ Agent</button>
             <button className="shell-btn" onClick={onNewShell}>&gt;_ Shell</button>
+            {showDropdown && agentsList && (
+              <AgentPicker
+                agents={agentsList}
+                onSelect={(agentId) => { setShowDropdown(false); onSelectAgent(agentId) }}
+                onClose={() => setShowDropdown(false)}
+              />
+            )}
           </div>
         </div>
       </div>

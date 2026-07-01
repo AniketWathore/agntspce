@@ -292,6 +292,31 @@ io.on('connection', (socket) => {
     sessionManager.resizeSession(sessionId, cols, rows)
   })
 
+  socket.on('toggle-token-reduction', ({ sessionId, enabled }) => {
+    if (enabled !== undefined) {
+      sessionManager.tokenReduction.setEnabled(sessionId, enabled)
+    } else {
+      const state = sessionManager.tokenReduction.toggle(sessionId)
+      socket.emit('token-reduction-state', { sessionId, enabled: state })
+    }
+  })
+
+  socket.on('get-token-reduction-state', ({ sessionId }) => {
+    const config = sessionManager.tokenReduction.getConfig(sessionId)
+    socket.emit('token-reduction-state', { sessionId, enabled: config.enabled })
+  })
+
+  socket.on('get-compression-stats', ({ sessionId }) => {
+    if (sessionId) {
+      const stats = sessionManager.tokenReduction.getSessionStats(sessionId)
+      const history = sessionManager.tokenReduction.getSessionHistory(sessionId)
+      socket.emit('compression-stats', { sessionId, stats, history })
+    } else {
+      const allStats = sessionManager.tokenReduction.getAllStats()
+      socket.emit('compression-stats-all', allStats)
+    }
+  })
+
   socket.on('restart-session', ({ sessionId }) => {
     sessionManager.restartSession(sessionId)
   })

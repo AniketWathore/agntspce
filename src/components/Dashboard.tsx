@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
+import { useSocket } from '../hooks/useSocket'
 
 interface DeletedWs {
   id: string
@@ -31,6 +33,26 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
 export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace }: Props) {
   const totalSessions = Object.keys(sessions).length
   const activeCount = getActiveCount(sessions)
+  const { compressionStats, compressionHistory, requestCompressionStats } = useSocket()
+  const [showDebug, setShowDebug] = useState(false)
+  const [debugSearch, setDebugSearch] = useState('')
+
+  useEffect(() => {
+    requestCompressionStats()
+  }, [])
+
+  const tokensSaved = compressionStats.totalOriginalTokens - compressionStats.totalCompressedTokens
+  const charsSaved = compressionStats.totalOriginalChars - compressionStats.totalCompressedChars
+  const pctReduction = compressionStats.totalOriginalTokens > 0
+    ? Math.round((tokensSaved / compressionStats.totalOriginalTokens) * 100 * 10) / 10
+    : 0
+
+  const filteredHistory = debugSearch
+    ? compressionHistory.filter(r =>
+        r.original.toLowerCase().includes(debugSearch.toLowerCase()) ||
+        r.compressed.toLowerCase().includes(debugSearch.toLowerCase())
+      )
+    : compressionHistory
 
   return (
     <div className="dashboard">
@@ -43,6 +65,99 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
         </div>
         <button className="new-workspace-btn" onClick={onNewWorkspace}>+ New Workspace</button>
       </div>
+
+      {compressionStats.linesCompressed > 0 && (
+        <div className="dashboard-tr-section">
+          <div className="dashboard-tr-header">
+            <h2>Token Reduction</h2>
+            <span className="dashboard-tr-badge">active</span>
+          </div>
+          <div className="dashboard-tr-grid">
+            <div className="dashboard-tr-stat">
+              <span className="dashboard-tr-value">{compressionStats.linesCompressed}</span>
+              <span className="dashboard-tr-label">lines compressed</span>
+            </div>
+            <div className="dashboard-tr-stat">
+              <span className="dashboard-tr-value">{tokensSaved}</span>
+              <span className="dashboard-tr-label">tokens saved</span>
+            </div>
+            <div className="dashboard-tr-stat">
+              <span className="dashboard-tr-value">{charsSaved.toLocaleString()}</span>
+              <span className="dashboard-tr-label">chars saved</span>
+            </div>
+            <div className="dashboard-tr-stat">
+              <span className="dashboard-tr-value">{pctReduction}%</span>
+              <span className="dashboard-tr-label">avg reduction</span>
+            </div>
+          </div>
+          <div className="dashboard-tr-detail">
+            <span>{compressionStats.totalOriginalTokens} tokens → {compressionStats.totalCompressedTokens} tokens</span>
+            <span> | </span>
+            <span>{compressionStats.totalOriginalChars.toLocaleString()} chars → {compressionStats.totalCompressedChars.toLocaleString()} chars</span>
+          </div>
+
+          <div className="dashboard-tr-debug-header">
+            <button className="dashboard-tr-debug-toggle" onClick={() => setShowDebug(!showDebug)}>
+              {showDebug ? '▼' : '▶'} Debug Viewer ({compressionHistory.length} records)
+            </button>
+            {showDebug && (
+              <input
+                className="dashboard-tr-debug-search"
+                type="text"
+                placeholder="Filter records..."
+                value={debugSearch}
+                onChange={e => setDebugSearch(e.target.value)}
+              />
+            )}
+          </div>
+
+          {showDebug && (
+            <div className="dashboard-tr-debug-list">
+              {filteredHistory.length === 0 && (
+                <div className="dashboard-tr-debug-empty">No compression records yet.</div>
+              )}
+              {filteredHistory.map((record, i) => (
+                <div key={i} className="dashboard-tr-debug-item">
+                  <div className="dashboard-tr-debug-meta">
+                    <span className="dashboard-tr-debug-reduction">{record.reduction}% reduction</span>
+                    <span className="dashboard-tr-debug-tokens">{record.originalTokens}→{record.compressedTokens} tokens</span>
+                  </div>
+                  <div className="dashboard-tr-debug-original">
+                    <span className="dashboard-tr-debug-label">Original:</span>
+                    <span className="dashboard-tr-debug-text">
+                      {record.original.split(' ').map((word, wi) => {
+                        const detail = record.details?.find(d => d.word === word)
+                        const removed = detail && !detail.kept
+                        return (
+                          <span key={wi} className={removed ? 'tr-word-removed' : 'tr-word-kept'} title={detail?.reason}>
+                            {word}{' '}
+                          </span>
+                        )
+                      })}
+                    </span>
+                  </div>
+                  <div className="dashboard-tr-debug-compressed">
+                    <span className="dashboard-tr-debug-label">Compressed:</span>
+                    <span className="dashboard-tr-debug-text">{record.compressed}</span>
+                  </div>
+                    {record.details && (
+                    <div className="dashboard-tr-debug-removed">
+                      <span className="dashboard-tr-debug-label">Removed:</span>
+                      <span className="dashboard-tr-debug-text">
+                        {record.details.filter(d => !d.kept).map((d, di) => (
+                          <span key={di} className="tr-word-removed-reason" title={d.reason}>
+                            {di > 0 && <>{' '}</>}"{d.word}"({d.reason})
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="dashboard-grid">
         {workspaces.map(ws => {

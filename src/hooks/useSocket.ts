@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, CompressionEvent, CompressionStats, CompressionDebugRecord } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -28,6 +28,12 @@ interface UseSocketReturn {
   fetchAgentConfigs: () => Promise<AgentConfig[]>
   createRawSession: (type?: string, workspacePath?: string) => void
   emit: (event: string, ...args: any[]) => void
+  toggleTokenReduction: (sessionId: string, enabled?: boolean) => void
+  onTokenReductionState: (cb: (data: { sessionId: string, enabled: boolean }) => void) => () => void
+  onCompressionEvent: (cb: (data: CompressionEvent) => void) => () => void
+  compressionStats: CompressionStats
+  compressionHistory: CompressionDebugRecord[]
+  requestCompressionStats: () => void
 }
 
 export function useSocket(): UseSocketReturn {
@@ -36,10 +42,20 @@ export function useSocket(): UseSocketReturn {
   const [sessions, setSessions] = useState<Record<string, SessionState>>({})
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([])
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null)
+  const [compressionStats, setCompressionStats] = useState<CompressionStats>({
+    totalOriginalChars: 0,
+    totalCompressedChars: 0,
+    totalOriginalTokens: 0,
+    totalCompressedTokens: 0,
+    linesCompressed: 0,
+  })
+  const [compressionHistory, setCompressionHistory] = useState<CompressionDebugRecord[]>([])
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
   const statusChangeCbs = useRef<((data: StatusChange) => void)[]>([])
   const branchChangeCbs = useRef<((data: BranchChange) => void)[]>([])
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
+  const tokenReductionStateCbs = useRef<((data: { sessionId: string, enabled: boolean }) => void)[]>([])
+  const compressionEventCbs = useRef<((data: CompressionEvent) => void)[]>([])
 
   useEffect(() => {
     const socket = io(SERVER_URL)
@@ -116,6 +132,24 @@ export function useSocket(): UseSocketReturn {
         delete next[sessionId]
         return next
       })
+    })
+
+    socket.on('token-reduction-state', (data: { sessionId: string, enabled: boolean }) => {
+      tokenReductionStateCbs.current.forEach(cb => cb(data))
+    })
+
+    socket.on('compression-event', (event: CompressionEvent) => {
+      setCompressionStats(event.cumulative)
+      setCompressionHistory(prev => {
+        const next = [event.debug, ...prev]
+        return next.slice(0, 100)
+      })
+      compressionEventCbs.current.forEach(cb => cb(event))
+    })
+
+    socket.on('compression-stats', (data: { sessionId: string, stats: CompressionStats, history: CompressionDebugRecord[] }) => {
+      setCompressionStats(data.stats)
+      setCompressionHistory(data.history || [])
     })
 
     return () => {
@@ -225,6 +259,28 @@ export function useSocket(): UseSocketReturn {
     socketRef.current?.emit(event, ...args)
   }, [])
 
+  const toggleTokenReduction = useCallback((sessionId: string, enabled?: boolean) => {
+    socketRef.current?.emit('toggle-token-reduction', { sessionId, enabled })
+  }, [])
+
+  const onTokenReductionState = useCallback((cb: (data: { sessionId: string, enabled: boolean }) => void) => {
+    tokenReductionStateCbs.current.push(cb)
+    return () => {
+      tokenReductionStateCbs.current = tokenReductionStateCbs.current.filter(c => c !== cb)
+    }
+  }, [])
+
+  const onCompressionEvent = useCallback((cb: (data: CompressionEvent) => void) => {
+    compressionEventCbs.current.push(cb)
+    return () => {
+      compressionEventCbs.current = compressionEventCbs.current.filter(c => c !== cb)
+    }
+  }, [])
+
+  const requestCompressionStats = useCallback(() => {
+    socketRef.current?.emit('get-compression-stats', { sessionId: null })
+  }, [])
+
   return {
     connected,
     sessions,
@@ -249,5 +305,11 @@ export function useSocket(): UseSocketReturn {
     fetchAgentConfigs,
     createRawSession,
     emit,
+    toggleTokenReduction,
+    onTokenReductionState,
+    onCompressionEvent,
+    compressionStats,
+    compressionHistory,
+    requestCompressionStats,
   }
 }
