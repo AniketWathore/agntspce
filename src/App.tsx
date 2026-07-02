@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
-import ShellSidebar from './components/ShellSidebar'
+import ChatSidebar from './components/ChatSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
 import Dashboard from './components/Dashboard'
@@ -67,7 +67,7 @@ function App() {
   const [modal, setModal] = useState<ModalState | null>(null)
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
-  const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
+  const [chatSidebarOpen, setChatSidebarOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
   const [focusMode, setFocusMode] = useState(false)
@@ -78,16 +78,10 @@ function App() {
   })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
-  const [leftWidth, setLeftWidth] = useState(220)
-  const [rightWidth, setRightWidth] = useState(() => Math.round(window.innerWidth * 0.15))
+  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
+  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.15))
+  const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
-
-  useEffect(() => {
-    if (appBodyRef.current) {
-      const totalW = appBodyRef.current.getBoundingClientRect().width
-      setLeftWidth(Math.round(totalW * 0.12))
-    }
-  }, [])
 
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
@@ -109,6 +103,13 @@ function App() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
+  }, [])
+
+  useEffect(() => {
+    if (appBodyRef.current) {
+      const totalW = appBodyRef.current.getBoundingClientRect().width
+      setLeftWidth(Math.round(totalW * 0.12))
+    }
   }, [])
 
   const showModal = useCallback((title: string, onSubmit: (value: string) => void, defaultValue?: string) => {
@@ -250,7 +251,6 @@ function App() {
     }
   }
 
-  // Auto-set active session when a new one is created
   useEffect(() => {
     if (!activeSessionId && agentSessions.length > 0) {
       setActiveSessionId(agentSessions[0].id)
@@ -269,23 +269,33 @@ function App() {
     if (shellSessions.length === 0) {
       handleNewTerminal('shell')
     }
-    if (!shellSidebarOpen) {
-      setRightWidth(Math.round(window.innerWidth * 0.15))
-    }
-    setShellSidebarOpen(true)
+    setBottomShellOpen(true)
+  }
+
+  function handleToggleChatSidebar() {
+    setChatSidebarOpen(o => {
+      if (!o && appBodyRef.current) {
+        const totalW = appBodyRef.current.getBoundingClientRect().width
+        setChatWidth(Math.round(totalW * 0.15))
+      }
+      return !o
+    })
   }
 
   function handleToggleWorkspaceSidebar() {
     setWorkspaceSidebarOpen(o => {
       if (!o && appBodyRef.current) {
         const totalW = appBodyRef.current.getBoundingClientRect().width
-      setLeftWidth(Math.round(totalW * 0.12))
+        setLeftWidth(Math.round(totalW * 0.12))
       }
       return !o
     })
   }
 
-  // Native menu IPC
+  function handleToggleBottomShell() {
+    setBottomShellOpen(o => !o)
+  }
+
   useEffect(() => {
     const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
       switch (action) {
@@ -317,7 +327,7 @@ function App() {
           break
         }
         case 'switch-workspace': handleSelectWorkspace(data); break
-        case 'toggle-shell-sidebar': setShellSidebarOpen(o => !o); break
+        case 'toggle-shell-sidebar': handleToggleChatSidebar(); break
         case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
         case 'toggle-focus': setFocusMode(o => !o); break
         case 'set-layout': setLayoutPreset(data); break
@@ -325,7 +335,7 @@ function App() {
           '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
           '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
           '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
-          '⌘B — Shell Sidebar\n⌘⇧B — Workspace Sidebar'
+          '⌘B — Chat Sidebar\n⌘⇧B — Workspace Sidebar'
         ); break
         case 'show-about': alert('AgntSpce v1.0\nElectron + React + TypeScript'); break
       }
@@ -333,7 +343,6 @@ function App() {
     return () => unsub?.()
   }, [])
 
-  // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
@@ -368,14 +377,13 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [activeSessionId, agentSessions])
 
-  // Resize drag handlers
   function onResizerMouseDown(side: 'left' | 'right') {
     return (e: React.MouseEvent) => {
       e.preventDefault()
       dragging.current = side
       const startX = e.clientX
       const startLeft = leftWidth
-      const startRight = rightWidth
+      const startChat = chatWidth
 
       function onMove(ev: MouseEvent) {
         if (!appBodyRef.current) return
@@ -383,22 +391,22 @@ function App() {
         const totalW = bodyRect.width
         const minPanel = 120
         const leftMax = Math.round(totalW * 0.12)
-        const rightMax = Math.round(totalW * 0.22)
+        const chatMax = Math.round(totalW * 0.20)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
           let newW = Math.max(minPanel, startLeft + dx)
-          if (shellSidebarOpen) {
-            newW = Math.min(newW, leftMax, totalW - rightWidth - 200)
+          if (chatSidebarOpen) {
+            newW = Math.min(newW, leftMax, totalW - chatWidth - 200)
           } else {
             newW = Math.min(newW, leftMax)
           }
           setLeftWidth(newW)
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
-          let newW = Math.max(minPanel, startRight + dx)
-          newW = Math.min(newW, rightMax, totalW - leftWidth - 180)
-          setRightWidth(newW)
+          let newW = Math.max(minPanel, startChat + dx)
+          newW = Math.min(newW, chatMax, totalW - leftWidth - 180)
+          setChatWidth(newW)
         }
       }
 
@@ -451,6 +459,13 @@ function App() {
               title="Dashboard"
             >
               <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
+            </button>
+            <button
+              className={`activity-bar-btn ${chatSidebarOpen ? 'active' : ''}`}
+              onClick={handleToggleChatSidebar}
+              title="Chat"
+            >
+              <img src="/img/terminal.png" alt="Chat" className="activity-bar-icon" />
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
@@ -510,6 +525,7 @@ function App() {
           ) : (
             <TerminalArea
               sessions={agentSessions}
+              shellSessions={shellSessions}
               onInput={sendTerminalInput}
               onResize={sendTerminalResize}
               onRestart={restartSession}
@@ -526,22 +542,17 @@ function App() {
               layoutPreset={layoutPreset}
               focusMode={focusMode}
               agentsList={AGENTS_LIST}
+              bottomShellOpen={bottomShellOpen}
+              onToggleShell={handleToggleBottomShell}
             />
           )}
         </main>
-        {shellSidebarOpen && (
+        {chatSidebarOpen && (
           <>
             <div className="resizer" onMouseDown={onResizerMouseDown('right')} />
-            <div className="panel-right" style={{ width: rightWidth, minWidth: rightWidth }}>
-              <ShellSidebar
-                sessions={shellSessions}
-                onInput={sendTerminalInput}
-                onResize={sendTerminalResize}
-                onRestart={restartSession}
-                onClose={handleCloseShellSession}
-                onNewShell={() => handleNewTerminal('shell')}
-                onCloseShell={() => setShellSidebarOpen(false)}
-                writeBuffers={writeBuffers}
+            <div className="panel-right" style={{ width: chatWidth, minWidth: chatWidth }}>
+              <ChatSidebar
+                onClose={() => setChatSidebarOpen(false)}
               />
             </div>
           </>
