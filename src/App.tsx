@@ -78,9 +78,16 @@ function App() {
   })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
-  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.1))
-  const [rightWidth, setRightWidth] = useState(() => Math.round(window.innerWidth * 0.1))
+  const [leftWidth, setLeftWidth] = useState(220)
+  const [rightWidth, setRightWidth] = useState(() => Math.round(window.innerWidth * 0.15))
   const dragging = useRef<'left' | 'right' | null>(null)
+
+  useEffect(() => {
+    if (appBodyRef.current) {
+      const totalW = appBodyRef.current.getBoundingClientRect().width
+      setLeftWidth(Math.round(totalW * 0.12))
+    }
+  }, [])
 
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
@@ -263,13 +270,19 @@ function App() {
       handleNewTerminal('shell')
     }
     if (!shellSidebarOpen) {
-      setRightWidth(Math.round(window.innerWidth * 0.1))
+      setRightWidth(Math.round(window.innerWidth * 0.15))
     }
     setShellSidebarOpen(true)
   }
 
   function handleToggleWorkspaceSidebar() {
-    setWorkspaceSidebarOpen(o => !o)
+    setWorkspaceSidebarOpen(o => {
+      if (!o && appBodyRef.current) {
+        const totalW = appBodyRef.current.getBoundingClientRect().width
+      setLeftWidth(Math.round(totalW * 0.12))
+      }
+      return !o
+    })
   }
 
   // Native menu IPC
@@ -368,22 +381,23 @@ function App() {
         if (!appBodyRef.current) return
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
-        const maxPanel = totalW * 0.12
-        const minPanel = totalW * 0.05
+        const minPanel = 120
+        const leftMax = Math.round(totalW * 0.12)
+        const rightMax = Math.round(totalW * 0.22)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
           let newW = Math.max(minPanel, startLeft + dx)
           if (shellSidebarOpen) {
-            newW = Math.min(newW, maxPanel, totalW - rightWidth - 200)
+            newW = Math.min(newW, leftMax, totalW - rightWidth - 200)
           } else {
-            newW = Math.min(newW, maxPanel)
+            newW = Math.min(newW, leftMax)
           }
           setLeftWidth(newW)
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
           let newW = Math.max(minPanel, startRight + dx)
-          newW = Math.min(newW, maxPanel, totalW - leftWidth - 180)
+          newW = Math.min(newW, rightMax, totalW - leftWidth - 180)
           setRightWidth(newW)
         }
       }
@@ -424,7 +438,7 @@ function App() {
             </div>
             <button
               className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
-              onClick={() => setWorkspaceSidebarOpen(o => !o)}
+              onClick={handleToggleWorkspaceSidebar}
               title="Workspaces"
             >
               <img src={iconPath('workspace')} alt="Workspaces" className="activity-bar-icon" />
