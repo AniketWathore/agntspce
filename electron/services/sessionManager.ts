@@ -27,7 +27,7 @@ function getShellName(): string {
 
 function buildShellArgs(commands: string | string[]): string[] {
   if (process.platform === 'win32') {
-    const joined = Array.isArray(commands) ? commands.join('; ') : commands
+    const joined = Array.isArray(commands) ? commands.join('; ') : commands.replace(/&&/g, ';')
     return ['-NoExit', '-NoProfile', '-Command', joined]
   }
   const shellName = getShellName()

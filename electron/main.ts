@@ -475,8 +475,8 @@ function createWindow() {
 // IPC handlers
 ipcMain.handle('select-directory', async () => {
   const result = await dialog.showOpenDialog({
-    parent: mainWindow || undefined,
     properties: ['openDirectory'],
+    ...(mainWindow ? { parent: mainWindow } : {}),
   })
   return result.canceled ? null : result.filePaths[0]
 })

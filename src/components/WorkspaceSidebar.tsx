@@ -42,16 +42,19 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
         let path = ''
         try {
           if (window.electronAPI) {
-            if (!path) {
-              try { path = await window.electronAPI.getDefaultPath() || '' } catch {}
-            }
+            try {
+              path = await window.electronAPI.getDefaultPath() || ''
+            } catch {}
             const selected = await window.electronAPI.selectDirectory()
             if (selected) path = selected
           } else {
-            const fallback = prompt('Workspace directory:', path)
+            path = ''
+            const fallback = prompt('Workspace directory:', '')
             if (fallback && fallback.trim()) path = fallback.trim()
           }
-        } catch (e) { console.error('[WorkspaceSidebar.handleAdd]', e) }
+        } catch (e) {
+          console.error('Error selecting workspace directory:', e)
+        }
         onAdd(name, path)
         closeModal()
       }

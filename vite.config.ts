@@ -8,15 +8,15 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-function copyPreload() {
+function copyPreload(): void {
+  const src = join(__dirname, 'electron', 'preload.cjs')
+  const dest = join(__dirname, 'dist-electron', 'preload.js')
   try {
-    copyFileSync(
-      join(__dirname, 'electron', 'preload.cjs'),
-      join(__dirname, 'dist-electron', 'preload.js')
-    )
-    console.log('[post-build] preload.js copied successfully')
-  } catch (e: any) {
-    console.error('[post-build] Failed to copy preload.js:', e.message)
+    mkdirSync(join(__dirname, 'dist-electron'), { recursive: true })
+    copyFileSync(src, dest)
+    console.log('[post-build] Copied preload.cjs → dist-electron/preload.js')
+  } catch (e) {
+    console.error('[post-build] Failed to copy preload:', e)
   }
 }
 
@@ -45,8 +45,8 @@ function postBuildPlugin(): Plugin {
           console.warn('[post-build] node-pty prebuilds not found at', src)
         }
         copyPreload()
-      } catch (e: any) {
-        console.error('[post-build] Error during post-build:', e.message)
+      } catch (e) {
+        console.error('[post-build] Error in closeBundle:', e)
       }
     },
   }
