@@ -128,7 +128,7 @@ export default function ShellSidebar({ sessions, onInput, onResize, onRestart, o
         <h3>Shells</h3>
         <div className="shell-header-actions">
           <button className="shell-add-btn" onClick={onNewShell} title="New shell">+</button>
-          <button className="shell-close-panel-btn" onClick={onCloseShell} title="Close shell">&times;</button>
+          <button className="shell-close-panel-btn" onClick={onCloseShell} title="Close panel">✕</button>
         </div>
       </div>
       <div className="shell-sidebar-list">

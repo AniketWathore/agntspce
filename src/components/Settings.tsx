@@ -13,21 +13,28 @@ export default function Settings({ theme, onThemeChange, onClose }: Props) {
       </div>
       <div className="settings-body">
         <div className="settings-section">
-          <h2>Appearance</h2>
+          <div className="settings-section-header">
+            <h2>Appearance</h2>
+          </div>
           <div className="settings-row">
-            <span className="settings-label">Theme</span>
-            <select
-              className="settings-select"
-              value={theme}
-              onChange={e => onThemeChange(e.target.value as 'dark' | 'light')}
-            >
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
+            <div>
+              <span className="settings-label">Theme</span>
+              <span className="settings-label-desc">Switch between dark and light mode</span>
+            </div>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={theme === 'dark'}
+                onChange={e => onThemeChange(e.target.checked ? 'dark' : 'light')}
+              />
+              <span className="settings-toggle-slider" />
+            </label>
           </div>
         </div>
         <div className="settings-section">
-          <h2>Terminal</h2>
+          <div className="settings-section-header">
+            <h2>Terminal</h2>
+          </div>
           <div className="settings-row">
             <span className="settings-label">Font Size</span>
             <span className="settings-value">13px</span>
@@ -35,6 +42,31 @@ export default function Settings({ theme, onThemeChange, onClose }: Props) {
           <div className="settings-row">
             <span className="settings-label">Font Family</span>
             <span className="settings-value">JetBrains Mono</span>
+          </div>
+        </div>
+        <div className="settings-section">
+          <div className="settings-section-header">
+            <h2>Session</h2>
+          </div>
+          <div className="settings-row">
+            <div>
+              <span className="settings-label">Auto-save</span>
+              <span className="settings-label-desc">Automatically save session state</span>
+            </div>
+            <label className="settings-toggle">
+              <input type="checkbox" defaultChecked />
+              <span className="settings-toggle-slider" />
+            </label>
+          </div>
+          <div className="settings-row">
+            <div>
+              <span className="settings-label">Token Compression</span>
+              <span className="settings-label-desc">Enable real-time token reduction</span>
+            </div>
+            <label className="settings-toggle">
+              <input type="checkbox" defaultChecked />
+              <span className="settings-toggle-slider" />
+            </label>
           </div>
         </div>
       </div>
