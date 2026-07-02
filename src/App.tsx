@@ -266,9 +266,7 @@ function App() {
   }
 
   function handleNewShell() {
-    if (shellSessions.length === 0) {
-      handleNewTerminal('shell')
-    }
+    handleNewTerminal('shell')
     setBottomShellOpen(true)
   }
 
@@ -293,6 +291,9 @@ function App() {
   }
 
   function handleToggleBottomShell() {
+    if (!bottomShellOpen && shellSessions.length === 0) {
+      handleNewTerminal('shell')
+    }
     setBottomShellOpen(o => !o)
   }
 
@@ -389,13 +390,13 @@ function App() {
         if (!appBodyRef.current) return
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
-        const minPanel = 120
+        const chatMin = Math.round(totalW * 0.10)
         const leftMax = Math.round(totalW * 0.12)
-        const chatMax = Math.round(totalW * 0.20)
+        const chatMax = Math.round(totalW * 0.15)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
-          let newW = Math.max(minPanel, startLeft + dx)
+          let newW = Math.max(120, startLeft + dx)
           if (chatSidebarOpen) {
             newW = Math.min(newW, leftMax, totalW - chatWidth - 200)
           } else {
@@ -404,7 +405,7 @@ function App() {
           setLeftWidth(newW)
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
-          let newW = Math.max(minPanel, startChat + dx)
+          let newW = Math.max(chatMin, startChat + dx)
           newW = Math.min(newW, chatMax, totalW - leftWidth - 180)
           setChatWidth(newW)
         }
@@ -454,18 +455,18 @@ function App() {
           </div>
           <div className="activity-bar-bottom">
             <button
+              className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
+              onClick={handleToggleBottomShell}
+              title="Terminal"
+            >
+              <img src={iconPath('terminal')} alt="Terminal" className="activity-bar-icon" />
+            </button>
+            <button
               className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
               onClick={() => setView('dashboard')}
               title="Dashboard"
             >
               <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
-            </button>
-            <button
-              className={`activity-bar-btn ${chatSidebarOpen ? 'active' : ''}`}
-              onClick={handleToggleChatSidebar}
-              title="Chat"
-            >
-              <img src="/img/terminal.png" alt="Chat" className="activity-bar-icon" />
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
@@ -544,6 +545,8 @@ function App() {
               agentsList={AGENTS_LIST}
               bottomShellOpen={bottomShellOpen}
               onToggleShell={handleToggleBottomShell}
+              chatSidebarOpen={chatSidebarOpen}
+              onToggleChatSidebar={handleToggleChatSidebar}
             />
           )}
         </main>
