@@ -119,7 +119,9 @@ export default function TerminalArea({
                 setShowDropdown(o => !o)
               }
             }}>+ Agent</button>
-            <button className="shell-btn" onClick={onNewShell}>&gt;_ Shell</button>
+            <button className="shell-btn" onClick={onNewShell} title="Open shell">
+              <img src="/img/terminal.png" alt="Shell" className="shell-btn-icon" />
+            </button>
             {showDropdown && agentsList && (
               <AgentPicker
                 agents={agentsList}
@@ -187,7 +189,9 @@ export default function TerminalArea({
         </div>
         <div className="tab-bar-actions" style={{ position: 'relative' }}>
           <button className="new-terminal-btn" onClick={handleAddAgentClick}>+ Agent</button>
-          <button className="shell-btn" onClick={handleShellBtn}>&gt;_ Shell</button>
+          <button className="shell-btn" onClick={handleShellBtn} title="Open shell">
+            <img src="/img/terminal.png" alt="Shell" className="shell-btn-icon" />
+          </button>
           {showDropdown && agentsList && (
             <AgentPicker
               agents={agentsList}

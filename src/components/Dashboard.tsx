@@ -170,7 +170,6 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
               onClick={() => onSelect(ws.id)}
             >
               <div className="dashboard-card-header">
-                <span className="dashboard-card-icon">{ws.icon || '📁'}</span>
                 <span className="dashboard-card-name">{ws.name}</span>
                 {isActive && <span className="dashboard-card-badge">active</span>}
               </div>

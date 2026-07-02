@@ -16,8 +16,13 @@ try {
 }
 
 function getDefaultShell(): string {
-  if (process.platform !== 'win32') return 'bash'
-  return 'powershell.exe'
+  if (process.platform === 'win32') return 'powershell.exe'
+  return process.env.SHELL || '/bin/bash'
+}
+
+function getShellName(): string {
+  const shell = getDefaultShell()
+  return shell.split('/').pop() || 'bash'
 }
 
 function buildShellArgs(commands: string | string[]): string[] {
@@ -25,8 +30,9 @@ function buildShellArgs(commands: string | string[]): string[] {
     const joined = Array.isArray(commands) ? commands.join('; ') : commands
     return ['-NoExit', '-NoProfile', '-Command', joined]
   }
+  const shellName = getShellName()
   const joined = Array.isArray(commands) ? commands.join(' && ') : commands
-  const keepOpen = joined && joined.trim() ? `${joined} && exec bash` : 'exec bash'
+  const keepOpen = joined && joined.trim() ? `${joined} && exec ${shellName}` : `exec ${shellName}`
   return ['-c', keepOpen]
 }
 

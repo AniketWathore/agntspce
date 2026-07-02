@@ -80,7 +80,6 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
               onClick={() => onSelect(ws.id)}
             >
               <div className="workspace-item-header">
-                <span className="workspace-icon">{ws.icon || '📁'}</span>
                 <span className="workspace-name">{ws.name}</span>
                 <span className="workspace-session-count">{getSessionCount(ws)}</span>
               </div>

@@ -27,6 +27,34 @@ function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeDa
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
 
+  function buildTheme() {
+    function v(name: string): string {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    }
+    return {
+      background: v('--terminal-bg'),
+      foreground: v('--terminal-fg'),
+      cursor: v('--terminal-cursor'),
+      selectionBackground: v('--terminal-selection'),
+      black: v('--terminal-black'),
+      red: v('--terminal-red'),
+      green: v('--terminal-green'),
+      yellow: v('--terminal-yellow'),
+      blue: v('--terminal-blue'),
+      magenta: v('--terminal-magenta'),
+      cyan: v('--terminal-cyan'),
+      white: v('--terminal-white'),
+      brightBlack: v('--terminal-bright-black'),
+      brightRed: v('--terminal-bright-red'),
+      brightGreen: v('--terminal-bright-green'),
+      brightYellow: v('--terminal-bright-yellow'),
+      brightBlue: v('--terminal-bright-blue'),
+      brightMagenta: v('--terminal-bright-magenta'),
+      brightCyan: v('--terminal-bright-cyan'),
+      brightWhite: v('--terminal-bright-white'),
+    }
+  }
+
   useEffect(() => {
     if (!terminalRef.current) return
 
@@ -35,28 +63,7 @@ function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeDa
       cursorStyle: 'block',
       fontSize: 11,
       fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, monospace",
-      theme: {
-        background: '#1a1b1e',
-        foreground: '#e4e4e7',
-        cursor: '#e4e4e7',
-        selectionBackground: '#3b3f54',
-        black: '#1a1b1e',
-        red: '#f87171',
-        green: '#4ade80',
-        yellow: '#fbbf24',
-        blue: '#60a5fa',
-        magenta: '#c084fc',
-        cyan: '#22d3ee',
-        white: '#e4e4e7',
-        brightBlack: '#3f3f46',
-        brightRed: '#fca5a5',
-        brightGreen: '#86efac',
-        brightYellow: '#fde68a',
-        brightBlue: '#93c5fd',
-        brightMagenta: '#d8b4fe',
-        brightCyan: '#67e8f9',
-        brightWhite: '#f4f4f5',
-      },
+      theme: buildTheme(),
       allowTransparency: false,
     })
 
@@ -66,9 +73,10 @@ function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeDa
 
     term.open(terminalRef.current)
 
-    setTimeout(() => {
-      try { fitAddon.fit() } catch {}
-    }, 100)
+    function doFit() {
+      try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch {}
+    }
+    setTimeout(doFit, 100)
 
     term.onData((data) => {
       onInput(session.id, data)
@@ -80,7 +88,13 @@ function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeDa
 
     termInstance.current = term
 
+    const themeObserver = new MutationObserver(() => {
+      try { term.options.theme = buildTheme() } catch {}
+    })
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+
     return () => {
+      themeObserver.disconnect()
       term.dispose()
       termInstance.current = null
     }

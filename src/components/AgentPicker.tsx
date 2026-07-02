@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { getAgentColorImage, getAgentTextImage } from '../agentImages'
+import { getAgentColorImage } from '../agentImages'
 
 interface AgentItem {
   id: string
@@ -31,14 +31,25 @@ export default function AgentPicker({ agents, onSelect, onClose }: Props) {
     }
   }, [onClose])
 
+  const INSTALLED = new Set(['claude', 'opencode'])
+
   return (
     <div className="agent-dropdown" ref={ref} onClick={e => e.stopPropagation()}>
-      {agents.map(a => (
-        <div key={a.id} className="agent-dropdown-item" onClick={() => onSelect(a.id)} title={a.name}>
-          <img className="agent-dropdown-icon agent-color-icon" src={getAgentColorImage(a.id)} alt={a.name} />
-          <img className="agent-dropdown-icon agent-text-icon" src={getAgentTextImage(a.id)} alt={a.name} />
-        </div>
-      ))}
+      {agents.map(a => {
+        const installed = INSTALLED.has(a.id)
+        return (
+          <div
+            key={a.id}
+            className={`agent-dropdown-item${installed ? '' : ' disabled'}`}
+            onClick={() => installed && onSelect(a.id)}
+            title={installed ? a.name : `${a.name} — not installed`}
+          >
+            <img className="agent-dropdown-color" src={getAgentColorImage(a.id)} alt={a.name} />
+            <span className="agent-dropdown-name">{a.name}</span>
+            {!installed && <span className="agent-dropdown-tag">not installed</span>}
+          </div>
+        )
+      })}
     </div>
   )
 }

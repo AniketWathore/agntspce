@@ -60,7 +60,7 @@ function App() {
     onTerminalOutput, sendTerminalInput, sendTerminalResize,
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
-    closeTab, startAgent, fetchAgentConfigs, createRawSession,
+    closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -207,6 +207,11 @@ function App() {
 
   function handleSelectWorkspace(id: string) {
     switchWorkspace(id)
+    setWorkspaceSidebarOpen(true)
+    if (appBodyRef.current) {
+      const totalW = appBodyRef.current.getBoundingClientRect().width
+      setLeftWidth(Math.round(totalW * 0.12))
+    }
   }
 
   function handleDeleteWorkspace(id: string) {
@@ -230,7 +235,12 @@ function App() {
   }
 
   function handleSelectAgent(agentId: string) {
-    handleNewTerminal(agentId)
+    if (agentId === 'claude' || agentId === 'opencode') {
+      const defaultConfig = { agentId, mode: 'fresh', flags: [] }
+      createAgentSession(agentId, defaultConfig, wsPath)
+    } else {
+      handleNewTerminal(agentId)
+    }
   }
 
   // Auto-set active session when a new one is created
@@ -255,7 +265,7 @@ function App() {
     if (!shellSidebarOpen) {
       setRightWidth(Math.round(window.innerWidth * 0.1))
     }
-    setShellSidebarOpen(o => !o)
+    setShellSidebarOpen(true)
   }
 
   function handleToggleWorkspaceSidebar() {
@@ -358,7 +368,7 @@ function App() {
         if (!appBodyRef.current) return
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
-        const maxPanel = totalW * 0.15
+        const maxPanel = totalW * 0.12
         const minPanel = totalW * 0.05
 
         if (dragging.current === 'left') {
@@ -393,6 +403,13 @@ function App() {
     }
   }
 
+  function iconPath(name: string): string {
+    if (name === 'settings') {
+      return theme === 'dark' ? '/img/settings-white.png' : '/img/setting.png'
+    }
+    return `/img/${name}${theme === 'dark' ? '-white' : ''}.png`
+  }
+
   function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
     setActiveView(activeView === view ? null : view)
   }
@@ -410,7 +427,7 @@ function App() {
               onClick={() => setWorkspaceSidebarOpen(o => !o)}
               title="Workspaces"
             >
-              <span style={{ fontSize: 20, lineHeight: 1 }}>📁</span>
+              <img src={iconPath('workspace')} alt="Workspaces" className="activity-bar-icon" />
             </button>
           </div>
           <div className="activity-bar-bottom">
@@ -419,21 +436,21 @@ function App() {
               onClick={() => setView('dashboard')}
               title="Dashboard"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
               onClick={() => setView('profile')}
               title="Profile"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-8 8-8s8 4 8 8"/></svg>
+              <img src={iconPath('profile')} alt="Profile" className="activity-bar-icon" />
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
               onClick={() => setView('settings')}
               title="Settings"
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+              <img src={iconPath('settings')} alt="Settings" className="activity-bar-icon" />
             </button>
           </div>
         </div>

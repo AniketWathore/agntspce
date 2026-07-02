@@ -389,6 +389,23 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on('create-agent-session', async ({ type, workspacePath, config }) => {
+    const t = String(type || '').trim().toLowerCase() || 'shell'
+    const result = sessionManager.createRawSession(t, workspacePath)
+    if (result) {
+      try {
+        sessionManager.startAgentWithConfig(result.sessionId, config)
+      } catch (e: any) {
+        socket.emit('error', { message: 'Agent start failed', error: e.message })
+      }
+      const states = sessionManager.getSessionStates()
+      socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
+      await autoSaveSessions()
+    } else {
+      socket.emit('error', { message: 'Failed to create session' })
+    }
+  })
+
   socket.on('start-agent', async ({ sessionId, config }) => {
     try {
       sessionManager.startAgentWithConfig(sessionId, config)

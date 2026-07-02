@@ -27,6 +27,7 @@ interface UseSocketReturn {
   startAgent: (sessionId: string, config: AgentStartConfig) => void
   fetchAgentConfigs: () => Promise<AgentConfig[]>
   createRawSession: (type?: string, workspacePath?: string) => void
+  createAgentSession: (type: string, config: any, workspacePath?: string) => void
   emit: (event: string, ...args: any[]) => void
   toggleTokenReduction: (sessionId: string, enabled?: boolean) => void
   onTokenReductionState: (cb: (data: { sessionId: string, enabled: boolean }) => void) => () => void
@@ -245,6 +246,10 @@ export function useSocket(): UseSocketReturn {
     socketRef.current?.emit('create-raw-session', { type, workspacePath })
   }, [])
 
+  const createAgentSession = useCallback((type: string, config: any, workspacePath?: string) => {
+    socketRef.current?.emit('create-agent-session', { type, workspacePath, config })
+  }, [])
+
   const fetchAgentConfigs = useCallback(async (): Promise<AgentConfig[]> => {
     try {
       const res = await fetch(`${SERVER_URL}/api/agents`)
@@ -304,6 +309,7 @@ export function useSocket(): UseSocketReturn {
     startAgent,
     fetchAgentConfigs,
     createRawSession,
+    createAgentSession,
     emit,
     toggleTokenReduction,
     onTokenReductionState,
