@@ -21,7 +21,7 @@ export interface WorkspaceInfo {
 
 export interface SessionState {
   id: string
-  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'server' | 'shell'
+  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor' | 'copilot' | 'mastra' | 'droid' | 'amp' | 'pi' | 'server' | 'shell'
   worktreeId: string
   repositoryName?: string
   repositoryType?: string

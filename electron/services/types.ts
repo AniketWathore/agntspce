@@ -1,7 +1,7 @@
 export interface Session {
   id: string
   pty?: any
-  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'server' | 'shell'
+  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor' | 'copilot' | 'mastra' | 'droid' | 'amp' | 'pi' | 'server' | 'shell'
   worktreeId: string
   repositoryName?: string
   repositoryType?: string

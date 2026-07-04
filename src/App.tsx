@@ -18,6 +18,12 @@ const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'opencode', name: 'Opencode', icon: '🔧' },
   { id: 'codex', name: 'Codex', icon: '⚡' },
   { id: 'gemini', name: 'Gemini', icon: '✨' },
+  { id: 'cursor', name: 'Cursor Agent', icon: '🖥️' },
+  { id: 'copilot', name: 'GitHub Copilot', icon: '👽' },
+  { id: 'mastra', name: 'Mastra Code', icon: '🧩' },
+  { id: 'droid', name: 'Droid (Factory AI)', icon: '🤖' },
+  { id: 'amp', name: 'Amp Code', icon: '⚡' },
+  { id: 'pi', name: 'Pi Coding Agent', icon: '🥧' },
 ]
 
 const FALLBACK_AGENTS: AgentConfig[] = [
@@ -41,6 +47,42 @@ const FALLBACK_AGENTS: AgentConfig[] = [
   },
   {
     id: 'gemini', name: 'Gemini', icon: '✨', description: 'Google Gemini CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'cursor', name: 'Cursor Agent', icon: '🖥️', description: 'Cursor AI Agent (VS Code fork)',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'copilot', name: 'GitHub Copilot', icon: '👽', description: 'GitHub Copilot CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'mastra', name: 'Mastra Code', icon: '🧩', description: 'Mastra Code AI agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'droid', name: 'Droid (Factory AI)', icon: '🤖', description: 'Factory AI Droid',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'amp', name: 'Amp Code', icon: '⚡', description: 'Amp Coding Agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'pi', name: 'Pi Coding Agent', icon: '🥧', description: 'Pi AI coding assistant',
     modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
     flags: [],
     defaultMode: 'fresh',

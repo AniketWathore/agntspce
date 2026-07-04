@@ -31,7 +31,7 @@ export default function AgentPicker({ agents, onSelect, onClose }: Props) {
     }
   }, [onClose])
 
-  const INSTALLED = new Set(['claude', 'opencode'])
+  const INSTALLED = new Set(['claude', 'opencode', 'codex', 'gemini'])
 
   return (
     <div className="agent-dropdown" ref={ref} onClick={e => e.stopPropagation()}>

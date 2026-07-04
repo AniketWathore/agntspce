@@ -371,7 +371,7 @@ export class SessionManager extends EventEmitter {
         repositoryType: '',
       })
       const session = this.sessions.get(sessionId)
-      if (session && (type === 'claude' || type === 'codex' || type === 'opencode' || type === 'gemini')) {
+      if (session && (type === 'claude' || type === 'codex' || type === 'opencode' || type === 'gemini' || type === 'cursor' || type === 'copilot' || type === 'mastra' || type === 'droid' || type === 'amp' || type === 'pi')) {
         session.status = 'waiting'
         this.io?.emit('status-change', { sessionId, status: 'waiting' })
       }
