@@ -11,6 +11,12 @@ export interface AgentMode {
   description: string
 }
 
+export interface AgentCapabilities {
+  supportsWorktree: boolean
+  requiresGitRepo: boolean
+  supportsParallel: boolean
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -29,6 +35,7 @@ export interface AgentConfig {
   defaultReasoning?: string
   verbosityLevels?: string[]
   defaultVerbosity?: string
+  capabilities: AgentCapabilities
 }
 
 export interface AgentUIConfig {
@@ -39,6 +46,13 @@ export interface AgentUIConfig {
   modes: { id: string, name: string, description: string }[]
   flags: ({ id: string } & AgentFlag)[]
   defaultMode: string
+  models?: string[]
+  defaultModel?: string
+  reasoningLevels?: string[]
+  defaultReasoning?: string
+  verbosityLevels?: string[]
+  defaultVerbosity?: string
+  capabilities: AgentCapabilities
 }
 
 export interface AgentStartConfig {
@@ -100,6 +114,11 @@ export class AgentManager {
         permissions: { name: 'Permissions', mutuallyExclusive: false },
         output: { name: 'Output Options', mutuallyExclusive: false },
       },
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('opencode', {
@@ -117,6 +136,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('gemini', {
@@ -135,6 +159,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
 
     this.agentConfigs.set('codex', {
@@ -198,10 +227,150 @@ export class AgentManager {
         sandbox: { name: 'Sandbox Mode', mutuallyExclusive: true },
         approvals: { name: 'Approval Policy', mutuallyExclusive: true },
       },
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
-    this.agentConfigs.set('cursor', {
-      id: 'cursor',
+    this.agentConfigs.set('cursor-agent', {
+      id: 'cursor-agent',
+      name: 'Cursor Agent',
+      icon: '🖥️',
+      description: 'Cursor AI coding agent',
+      baseCommand: 'cursor-agent',
+      modes: {
+        fresh: { command: 'cursor-agent', description: 'Start new session' },
+        continue: { command: 'cursor-agent --continue', description: 'Continue last session' },
+      },
+      models: ['claude-sonnet-4', 'claude-3.5-sonnet', 'gpt-4', 'gpt-5'],
+      defaultModel: 'claude-sonnet-4',
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
+    })
+
+    this.agentConfigs.set('copilot', {
+      id: 'copilot',
+      name: 'Copilot',
+      icon: '🐙',
+      description: 'GitHub Copilot CLI',
+      baseCommand: 'gh copilot',
+      modes: {
+        fresh: { command: 'gh copilot', description: 'Start new session' },
+        explain: { command: 'gh copilot explain', description: 'Explain code' },
+        suggest: { command: 'gh copilot suggest', description: 'Suggest code' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
+    })
+
+    this.agentConfigs.set('mastracode', {
+      id: 'mastracode',
+      name: 'Mastra Code',
+      icon: '🔷',
+      description: 'Mastra Code AI agent',
+      baseCommand: 'mastra',
+      modes: {
+        fresh: { command: 'mastra', description: 'Start new session' },
+        continue: { command: 'mastra --continue', description: 'Continue last session' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
+    })
+
+    this.agentConfigs.set('droid', {
+      id: 'droid',
+      name: 'Droid',
+      icon: '🤖',
+      description: 'Factory AI Droid coding agent',
+      baseCommand: 'droid',
+      modes: {
+        fresh: { command: 'droid', description: 'Start new session' },
+        continue: { command: 'droid --continue', description: 'Continue last session' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
+    })
+
+    this.agentConfigs.set('amp', {
+      id: 'amp',
+      name: 'Amp',
+      icon: '⚡',
+      description: 'Amplified Amp coding agent',
+      baseCommand: 'amp',
+      modes: {
+        fresh: { command: 'amp', description: 'Start new session' },
+        agent: { command: 'amp agent', description: 'Run in agent mode' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
+    })
+
+    this.agentConfigs.set('pi', {
+      id: 'pi',
+      name: 'Pi',
+      icon: '🥧',
+      description: 'Pi coding agent',
+      baseCommand: 'pi',
+      modes: {
+        fresh: { command: 'pi', description: 'Start new session' },
+        continue: { command: 'pi --continue', description: 'Continue last session' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
+    })
+
+    this.agentConfigs.set('cursor-agent', {
+      id: 'cursor-agent',
       name: 'Cursor Agent',
       icon: '🖥️',
       description: 'Cursor AI Agent (VS Code fork)',
@@ -255,8 +424,8 @@ export class AgentManager {
       flagCategories: {},
     })
 
-    this.agentConfigs.set('mastra', {
-      id: 'mastra',
+    this.agentConfigs.set('mastracode', {
+      id: 'mastracode',
       name: 'Mastra Code',
       icon: '🧩',
       description: 'Mastra Code AI agent',
@@ -374,6 +543,13 @@ export class AgentManager {
         ...agent.flags[flagId],
       })),
       defaultMode: agent.defaultMode,
+      models: agent.models,
+      defaultModel: agent.defaultModel,
+      reasoningLevels: agent.reasoningLevels,
+      defaultReasoning: agent.defaultReasoning,
+      verbosityLevels: agent.verbosityLevels,
+      defaultVerbosity: agent.defaultVerbosity,
+      capabilities: agent.capabilities,
     }
   }
 
@@ -400,7 +576,7 @@ export class AgentManager {
       if (config.model && agent.models) {
         const modelFlag = agentId === 'gemini' ? '-m' :
           agentId === 'codex' ? '-m' :
-          agentId === 'mastra' ? '--model' :
+          agentId === 'mastracode' ? '--model' :
           '-m'
         command += ` ${modelFlag} ${config.model}`
       }

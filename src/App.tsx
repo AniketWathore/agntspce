@@ -2,14 +2,24 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
-import ShellSidebar from './components/ShellSidebar'
+import ChatSidebar from './components/ChatSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
+import CreateWorkspaceModal from './components/CreateWorkspaceModal'
+import WorkspaceConfigModal from './components/WorkspaceConfigModal'
+import ParallelTaskModal from './components/ParallelTaskModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
+import CommanderPanel from './components/CommanderPanel'
+import NotificationPanel from './components/NotificationPanel'
+import HistoryPanel from './components/HistoryPanel'
+import type { Notification } from './components/NotificationPanel'
+import type { HistoryEntry } from './components/HistoryPanel'
+
 import { useSocket } from './hooks/useSocket'
-import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
+import PRPanel from './components/PRPanel'
+import type { TerminalOutput, AgentConfig, AgentStartConfig, WorkspaceInfo, SessionState } from './types'
 import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
@@ -18,12 +28,12 @@ const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'opencode', name: 'Opencode', icon: '🔧' },
   { id: 'codex', name: 'Codex', icon: '⚡' },
   { id: 'gemini', name: 'Gemini', icon: '✨' },
-  { id: 'cursor', name: 'Cursor Agent', icon: '🖥️' },
-  { id: 'copilot', name: 'GitHub Copilot', icon: '👽' },
-  { id: 'mastra', name: 'Mastra Code', icon: '🧩' },
-  { id: 'droid', name: 'Droid (Factory AI)', icon: '🤖' },
-  { id: 'amp', name: 'Amp Code', icon: '⚡' },
-  { id: 'pi', name: 'Pi Coding Agent', icon: '🥧' },
+  { id: 'cursor-agent', name: 'Cursor Agent', icon: '🖥️' },
+  { id: 'copilot', name: 'Copilot', icon: '🐙' },
+  { id: 'mastracode', name: 'Mastra Code', icon: '🔷' },
+  { id: 'droid', name: 'Droid', icon: '🤖' },
+  { id: 'amp', name: 'Amp', icon: '⚡' },
+  { id: 'pi', name: 'Pi', icon: '🥧' },
 ]
 
 const FALLBACK_AGENTS: AgentConfig[] = [
@@ -52,38 +62,38 @@ const FALLBACK_AGENTS: AgentConfig[] = [
     defaultMode: 'fresh',
   },
   {
-    id: 'cursor', name: 'Cursor Agent', icon: '🖥️', description: 'Cursor AI Agent (VS Code fork)',
-    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    id: 'cursor-agent', name: 'Cursor Agent', icon: '🖥️', description: 'Cursor AI coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
     flags: [],
     defaultMode: 'fresh',
   },
   {
-    id: 'copilot', name: 'GitHub Copilot', icon: '👽', description: 'GitHub Copilot CLI',
-    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    id: 'copilot', name: 'Copilot', icon: '🐙', description: 'GitHub Copilot CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'explain', name: 'Explain', description: 'Explain code' }, { id: 'suggest', name: 'Suggest', description: 'Suggest code' }],
     flags: [],
     defaultMode: 'fresh',
   },
   {
-    id: 'mastra', name: 'Mastra Code', icon: '🧩', description: 'Mastra Code AI agent',
-    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    id: 'mastracode', name: 'Mastra Code', icon: '🔷', description: 'Mastra Code AI agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
     flags: [],
     defaultMode: 'fresh',
   },
   {
-    id: 'droid', name: 'Droid (Factory AI)', icon: '🤖', description: 'Factory AI Droid',
-    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    id: 'droid', name: 'Droid', icon: '🤖', description: 'Factory AI Droid coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
     flags: [],
     defaultMode: 'fresh',
   },
   {
-    id: 'amp', name: 'Amp Code', icon: '⚡', description: 'Amp Coding Agent',
-    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    id: 'amp', name: 'Amp', icon: '⚡', description: 'Amplified Amp coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'agent', name: 'Agent', description: 'Run in agent mode' }],
     flags: [],
     defaultMode: 'fresh',
   },
   {
-    id: 'pi', name: 'Pi Coding Agent', icon: '🥧', description: 'Pi AI coding assistant',
-    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    id: 'pi', name: 'Pi', icon: '🥧', description: 'Pi coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
     flags: [],
     defaultMode: 'fresh',
   },
@@ -103,13 +113,17 @@ function App() {
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
+    createWorkspaceFromGit, updateWorkspaceConfig,
+    addWorktree, removeWorktree, listWorktrees, startParallelTask,
+    getSessionHistory, getGitLog, getGitDiff, getGitBranches, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
+    setUserSettings,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
-  const [shellSidebarOpen, setShellSidebarOpen] = useState(false)
+  const [chatSidebarOpen, setChatSidebarOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
   const [focusMode, setFocusMode] = useState(false)
@@ -118,10 +132,28 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
+  const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false)
+  const [workspaceConfigModalOpen, setWorkspaceConfigModalOpen] = useState(false)
+  const [editingWorkspace, setEditingWorkspace] = useState<WorkspaceInfo | null>(null)
+  const [parallelTaskModalOpen, setParallelTaskModalOpen] = useState(false)
+  const [worktreesForEdit, setWorktreesForEdit] = useState<any[]>([])
+  const [commanderOpen, setCommanderOpen] = useState(false)
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
+  const [prPanelOpen, setPrPanelOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
+  const [fontSize, setFontSize] = useState(() => {
+    try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
+  })
+  const [fontFamily, setFontFamily] = useState(() => {
+    try { return localStorage.getItem('agent-workspace-font-family') || "'JetBrains Mono', 'Fira Code', Menlo, monospace'" } catch { return "'JetBrains Mono', 'Fira Code', Menlo, monospace'" }
+  })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
-  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.1))
-  const [rightWidth, setRightWidth] = useState(() => Math.round(window.innerWidth * 0.1))
+  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
+  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.15))
+  const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
 
   useEffect(() => {
@@ -143,7 +175,28 @@ function App() {
   }, [theme])
 
   useEffect(() => {
+    localStorage.setItem('agent-workspace-font-size', String(fontSize))
+    document.documentElement.style.setProperty('--terminal-font-size', `${fontSize}px`)
+  }, [fontSize])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-font-family', fontFamily)
+    document.documentElement.style.setProperty('--terminal-font-family', fontFamily)
+  }, [fontFamily])
+
+  useEffect(() => {
+    getSessionHistory().then(h => setSessionHistory(h))
+  }, [sessions])
+
+  useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
+  }, [])
+
+  useEffect(() => {
+    if (appBodyRef.current) {
+      const totalW = appBodyRef.current.getBoundingClientRect().width
+      setLeftWidth(Math.round(totalW * 0.12))
+    }
   }, [])
 
   const showModal = useCallback((title: string, onSubmit: (value: string) => void, defaultValue?: string) => {
@@ -175,6 +228,48 @@ function App() {
     })
     return unsub
   }, [onTerminalOutput])
+
+  const prevSessionRef = useRef<Record<string, SessionState>>({})
+  const firstMountRef = useRef(true)
+  const notifDebounceRef = useRef<Record<string, number>>({})
+  useEffect(() => {
+    if (firstMountRef.current) {
+      firstMountRef.current = false
+      prevSessionRef.current = sessions
+      return
+    }
+    const prev = prevSessionRef.current
+    const newNots: Notification[] = []
+    const now = Date.now()
+
+    for (const [id, s] of Object.entries(sessions)) {
+      const prevS = prev[id]
+      if (!prevS) continue
+      if (prevS.status !== s.status) {
+        if (prevS.status === 'busy' && s.status === 'idle') {
+          const key = `complete-${id}`
+          if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
+          notifDebounceRef.current[key] = now
+          newNots.push({ id: `not-complete-${id}-${now}`, type: 'session-complete', title: 'Task complete', detail: `${s.type} session ${id.slice(-8)} finished`, timestamp: now, read: false })
+        }
+      }
+    }
+
+    for (const id of Object.keys(prev)) {
+      if (!sessions[id]) {
+        const key = `exit-${id}`
+        if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
+        notifDebounceRef.current[key] = now
+        newNots.push({ id: `not-exited-${id}-${now}`, type: 'session-exited', title: 'Session closed', detail: `${prev[id].type} session ${id.slice(-8)} ended`, timestamp: now, read: false })
+      }
+    }
+
+    if (newNots.length > 0) {
+      setNotifications(prev => [...newNots, ...prev].slice(0, 100))
+    }
+
+    prevSessionRef.current = sessions
+  }, [sessions])
 
   useEffect(() => {
     if (activeWorkspace?.id && activeWorkspaceId !== activeWorkspace.id) {
@@ -211,8 +306,9 @@ function App() {
 
   const wsPath = activeWorkspace?.repository?.path
 
+  const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi'])
   const agentSessions = useMemo(
-    () => Object.values(sessions).filter(s => s.type === 'claude' || s.type === 'codex' || s.type === 'opencode' || s.type === 'gemini').slice(0, 12),
+    () => Object.values(sessions).filter(s => agentTypes.has(s.type)).slice(0, 12),
     [sessions]
   )
   const shellSessions = useMemo(
@@ -225,26 +321,84 @@ function App() {
   }, [createRawSession, wsPath])
 
   function handleCreateWorkspace() {
-    showModal('Workspace name:', (name) => {
-      const doCreate = async () => {
-        let path = ''
-        try {
-          if (window.electronAPI) {
-            if (!path) {
-              try { path = await window.electronAPI.getDefaultPath() || '' } catch {}
-            }
-            const selected = await window.electronAPI.selectDirectory()
-            if (selected) path = selected
-          } else {
-            const fallback = prompt('Workspace directory:', path)
-            if (fallback && fallback.trim()) path = fallback.trim()
-          }
-        } catch (e) { console.error('[handleCreateWorkspace]', e) }
-        addWorkspace(name, path)
-        setModal(null)
-      }
-      doCreate()
-    })
+    setCreateWorkspaceModalOpen(true)
+  }
+
+  async function handleCreateWorkspaceLocal(name: string, path: string) {
+    addWorkspace(name, path)
+  }
+
+  async function handleCreateWorkspaceFromGit(gitUrl: string, name?: string) {
+    const res = await createWorkspaceFromGit(gitUrl, name)
+    if (res?.ok) {
+      switchWorkspace(res.workspace.id)
+    } else {
+      throw new Error(res?.error || 'Failed to clone repository')
+    }
+  }
+
+  function handleEditConfig(ws: WorkspaceInfo) {
+    setEditingWorkspace(ws)
+    setWorkspaceConfigModalOpen(true)
+    listWorktrees(ws.id).then(setWorktreesForEdit)
+  }
+
+  async function handleSaveConfig(workspaceId: string, updates: any) {
+    const res = await updateWorkspaceConfig(workspaceId, updates)
+    if (!res?.ok) throw new Error(res?.error || 'Failed to save')
+  }
+
+  async function handleLaunchParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number }) {
+    const res = await startParallelTask(config)
+    if (!res?.ok) throw new Error(res?.error || 'Failed to launch parallel task')
+  }
+
+  function dismissNotification(id: string) {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+  }
+
+  function dismissAllNotifications() {
+    setNotifications([])
+  }
+
+  function handleRestoreHistory(entry: HistoryEntry) {
+    createRawSession(entry.type, entry.worktreeId !== 'default' ? undefined : undefined)
+    setHistoryPanelOpen(false)
+  }
+
+  const commanderCommands = useMemo(() => [
+    { id: 'new-agent', category: 'Terminals', label: 'New Agent Session', description: 'Create a new AI agent terminal', shortcut: '⌘⇧A', action: () => { createRawSession('claude') } },
+    { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', shortcut: '⌘⇧S', action: () => { handleNewShell() } },
+    { id: 'new-workspace', category: 'Workspaces', label: 'Create Workspace', description: 'Create a new workspace', shortcut: '⌘⇧N', action: () => { setCreateWorkspaceModalOpen(true) } },
+    { id: 'focus-mode', category: 'View', label: 'Toggle Focus Mode', description: 'Dim inactive terminals', shortcut: '⌘⇧F', action: () => { setFocusMode(o => !o) } },
+    { id: 'layout-auto', category: 'View', label: 'Auto Layout', description: 'Automatic terminal grid layout', action: () => { setLayoutPreset('auto') } },
+    { id: 'layout-1x1', category: 'View', label: '1x1 Layout', description: 'Single terminal view', action: () => { setLayoutPreset('1x1') } },
+    { id: 'layout-2x2', category: 'View', label: '2x2 Layout', description: 'Four terminal grid', action: () => { setLayoutPreset('2x2') } },
+    { id: 'layout-1+2', category: 'View', label: '1+2 Layout', description: 'Detail + two terminals', action: () => { setLayoutPreset('1+2') } },
+    { id: 'toggle-chat', category: 'View', label: 'Toggle Chat Sidebar', description: 'Show/hide the chat panel', shortcut: '⌘B', action: () => { handleToggleChatSidebar() } },
+    { id: 'toggle-workspace-sidebar', category: 'View', label: 'Toggle Workspace Sidebar', description: 'Show/hide workspace list', shortcut: '⌘⇧B', action: () => { handleToggleWorkspaceSidebar() } },
+    { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', action: () => { handleToggleBottomShell() } },
+    { id: 'show-board', category: 'View', label: 'Show Project Board', description: 'View session cards', action: () => { setActiveView(null) } },
+    { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', action: () => { setActiveView('dashboard') } },
+    { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', action: () => { setActiveView('settings') } },
+    { id: 'show-history', category: 'View', label: 'Show Session History', description: 'View past sessions', action: () => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) } },
+    { id: 'clear-notifications', category: 'Notifications', label: 'Clear Notifications', description: 'Dismiss all notifications', action: () => { dismissAllNotifications() } },
+    { id: 'parallel-task', category: 'Terminals', label: 'Launch Parallel Task', description: 'Run the same prompt across multiple agents', action: () => { setParallelTaskModalOpen(true) } },
+  ], [createRawSession, handleNewShell, setFocusMode, setLayoutPreset, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, getSessionHistory, setSessionHistory])
+
+  async function handleAddWorktree(workspaceId: string) {
+    const res = await addWorktree(workspaceId)
+    if (res?.ok) {
+      setWorktreesForEdit(prev => [...prev, { id: res.worktree.id, path: res.worktree.path }])
+    }
+  }
+
+  async function handleRemoveWorktree(workspaceId: string, worktreeId: string) {
+    if (!confirm(`Remove worktree "${worktreeId}"?`)) return
+    const res = await removeWorktree(workspaceId, worktreeId)
+    if (res?.ok) {
+      setWorktreesForEdit(prev => prev.filter(w => w.id !== worktreeId))
+    }
   }
 
   function handleSelectWorkspace(id: string) {
@@ -272,12 +426,8 @@ function App() {
     permanentDeleteWorkspace(id).then(() => refreshDeleted())
   }
 
-  function handleCloseShellSession(sessionId: string) {
-    closeTab([sessionId])
-  }
-
   function handleSelectAgent(agentId: string) {
-    if (agentId === 'claude' || agentId === 'opencode') {
+    if (agentTypes.has(agentId)) {
       const defaultConfig = { agentId, mode: 'fresh', flags: [] }
       createAgentSession(agentId, defaultConfig, wsPath)
     } else {
@@ -285,7 +435,6 @@ function App() {
     }
   }
 
-  // Auto-set active session when a new one is created
   useEffect(() => {
     if (!activeSessionId && agentSessions.length > 0) {
       setActiveSessionId(agentSessions[0].id)
@@ -301,20 +450,37 @@ function App() {
   }
 
   function handleNewShell() {
-    if (shellSessions.length === 0) {
-      handleNewTerminal('shell')
-    }
-    if (!shellSidebarOpen) {
-      setRightWidth(Math.round(window.innerWidth * 0.1))
-    }
-    setShellSidebarOpen(true)
+    handleNewTerminal('shell')
+    setBottomShellOpen(true)
+  }
+
+  function handleToggleChatSidebar() {
+    setChatSidebarOpen(o => {
+      if (!o && appBodyRef.current) {
+        const totalW = appBodyRef.current.getBoundingClientRect().width
+        setChatWidth(Math.round(totalW * 0.15))
+      }
+      return !o
+    })
   }
 
   function handleToggleWorkspaceSidebar() {
-    setWorkspaceSidebarOpen(o => !o)
+    setWorkspaceSidebarOpen(o => {
+      if (!o && appBodyRef.current) {
+        const totalW = appBodyRef.current.getBoundingClientRect().width
+        setLeftWidth(Math.round(totalW * 0.12))
+      }
+      return !o
+    })
   }
 
-  // Native menu IPC
+  function handleToggleBottomShell() {
+    if (!bottomShellOpen && shellSessions.length === 0) {
+      handleNewTerminal('shell')
+    }
+    setBottomShellOpen(o => !o)
+  }
+
   useEffect(() => {
     const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
       switch (action) {
@@ -346,7 +512,7 @@ function App() {
           break
         }
         case 'switch-workspace': handleSelectWorkspace(data); break
-        case 'toggle-shell-sidebar': setShellSidebarOpen(o => !o); break
+        case 'toggle-shell-sidebar': handleToggleChatSidebar(); break
         case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
         case 'toggle-focus': setFocusMode(o => !o); break
         case 'set-layout': setLayoutPreset(data); break
@@ -354,7 +520,7 @@ function App() {
           '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
           '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
           '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
-          '⌘B — Shell Sidebar\n⌘⇧B — Workspace Sidebar'
+          '⌘B — Chat Sidebar\n⌘⇧B — Workspace Sidebar'
         ); break
         case 'show-about': alert('AgntSpce v1.0\nElectron + React + TypeScript'); break
       }
@@ -362,11 +528,16 @@ function App() {
     return () => unsub?.()
   }, [])
 
-  // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
       if (!isMeta) return
+
+      if (e.key === 'k') {
+        e.preventDefault()
+        setCommanderOpen(o => !o)
+        return
+      }
 
       if (e.key === 'F' && e.shiftKey) {
         e.preventDefault()
@@ -397,36 +568,36 @@ function App() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [activeSessionId, agentSessions])
 
-  // Resize drag handlers
   function onResizerMouseDown(side: 'left' | 'right') {
     return (e: React.MouseEvent) => {
       e.preventDefault()
       dragging.current = side
       const startX = e.clientX
       const startLeft = leftWidth
-      const startRight = rightWidth
+      const startChat = chatWidth
 
       function onMove(ev: MouseEvent) {
         if (!appBodyRef.current) return
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
-        const maxPanel = totalW * 0.12
-        const minPanel = totalW * 0.05
+        const chatMin = Math.round(totalW * 0.10)
+        const leftMax = Math.round(totalW * 0.12)
+        const chatMax = Math.round(totalW * 0.15)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
-          let newW = Math.max(minPanel, startLeft + dx)
-          if (shellSidebarOpen) {
-            newW = Math.min(newW, maxPanel, totalW - rightWidth - 200)
+          let newW = Math.max(120, startLeft + dx)
+          if (chatSidebarOpen) {
+            newW = Math.min(newW, leftMax, totalW - chatWidth - 200)
           } else {
-            newW = Math.min(newW, maxPanel)
+            newW = Math.min(newW, leftMax)
           }
           setLeftWidth(newW)
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
-          let newW = Math.max(minPanel, startRight + dx)
-          newW = Math.min(newW, maxPanel, totalW - leftWidth - 180)
-          setRightWidth(newW)
+          let newW = Math.max(chatMin, startChat + dx)
+          newW = Math.min(newW, chatMax, totalW - leftWidth - 180)
+          setChatWidth(newW)
         }
       }
 
@@ -466,7 +637,7 @@ function App() {
             </div>
             <button
               className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
-              onClick={() => setWorkspaceSidebarOpen(o => !o)}
+              onClick={handleToggleWorkspaceSidebar}
               title="Workspaces"
             >
               <img src={iconPath('workspace')} alt="Workspaces" className="activity-bar-icon" />
@@ -474,11 +645,42 @@ function App() {
           </div>
           <div className="activity-bar-bottom">
             <button
+              className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
+              onClick={handleToggleBottomShell}
+              title="Terminal"
+            >
+              <img src={iconPath('terminal')} alt="Terminal" className="activity-bar-icon" />
+            </button>
+            <button
               className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
               onClick={() => setView('dashboard')}
               title="Dashboard"
             >
               <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
+            </button>
+            <button
+              className="activity-bar-btn"
+              onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
+              title="Session History"
+            >
+              <span className="activity-bar-text-icon">📋</span>
+            </button>
+            <button
+              className="activity-bar-btn"
+              onClick={() => setPrPanelOpen(o => !o)}
+              title="Git Review"
+            >
+              <span className="activity-bar-text-icon">🔀</span>
+            </button>
+            <button
+              className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
+              onClick={() => setNotificationPanelOpen(o => !o)}
+              title="Notifications"
+            >
+              <span className="activity-bar-text-icon">🔔</span>
+              {notifications.filter(n => !n.read).length > 0 && (
+                <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
+              )}
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
@@ -499,21 +701,23 @@ function App() {
         {workspaceSidebarOpen && (
           <>
             <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
-              <WorkspaceSidebar
-                workspaces={workspaces}
-                sessions={sessions}
-                activeWorkspace={activeWorkspace}
-                deletedWorkspaces={deletedWorkspaces}
-                onSelect={handleSelectWorkspace}
-                onAdd={addWorkspace}
-                onEdit={editWorkspace}
-                onRemove={removeWorkspace}
-                onDelete={handleDeleteWorkspace}
-                onRestore={handleRestoreWorkspace}
-                onPermanentDelete={handlePermanentDelete}
-                showModal={showModal}
-                closeModal={closeModal}
-              />
+                <WorkspaceSidebar
+                  workspaces={workspaces}
+                  sessions={sessions}
+                  activeWorkspace={activeWorkspace}
+                  deletedWorkspaces={deletedWorkspaces}
+                  onSelect={handleSelectWorkspace}
+                  onAdd={addWorkspace}
+                  onEdit={editWorkspace}
+                  onRemove={removeWorkspace}
+                  onDelete={handleDeleteWorkspace}
+                  onRestore={handleRestoreWorkspace}
+                  onPermanentDelete={handlePermanentDelete}
+                  showModal={showModal}
+                  closeModal={closeModal}
+                  onOpenCreateModal={handleCreateWorkspace}
+                  onEditConfig={handleEditConfig}
+                />
             </div>
             <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
           </>
@@ -534,10 +738,11 @@ function App() {
           ) : activeView === 'profile' ? (
             <Profile onClose={() => setActiveView(null)} />
           ) : activeView === 'settings' ? (
-            <Settings theme={theme} onThemeChange={setTheme} onClose={() => setActiveView(null)} />
+            <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
           ) : (
             <TerminalArea
               sessions={agentSessions}
+              shellSessions={shellSessions}
               onInput={sendTerminalInput}
               onResize={sendTerminalResize}
               onRestart={restartSession}
@@ -546,6 +751,7 @@ function App() {
               onNewAgent={() => {}}
               onSelectAgent={handleSelectAgent}
               onNewShell={handleNewShell}
+              onParallelTask={() => setParallelTaskModalOpen(true)}
               onCloseTab={handleCloseAgentTab}
               onActiveSessionChange={setActiveSessionId}
               activeSessionId={activeSessionId}
@@ -554,27 +760,40 @@ function App() {
               layoutPreset={layoutPreset}
               focusMode={focusMode}
               agentsList={AGENTS_LIST}
+              bottomShellOpen={bottomShellOpen}
+              onToggleShell={handleToggleBottomShell}
+              chatSidebarOpen={chatSidebarOpen}
+              onToggleChatSidebar={handleToggleChatSidebar}
+              onLayoutChange={setLayoutPreset}
             />
           )}
         </main>
-        {shellSidebarOpen && (
+        {chatSidebarOpen && (
           <>
             <div className="resizer" onMouseDown={onResizerMouseDown('right')} />
-            <div className="panel-right" style={{ width: rightWidth, minWidth: rightWidth }}>
-              <ShellSidebar
-                sessions={shellSessions}
-                onInput={sendTerminalInput}
-                onResize={sendTerminalResize}
-                onRestart={restartSession}
-                onClose={handleCloseShellSession}
-                onNewShell={() => handleNewTerminal('shell')}
-                onCloseShell={() => setShellSidebarOpen(false)}
-                writeBuffers={writeBuffers}
+            <div className="panel-right" style={{ width: chatWidth, minWidth: chatWidth }}>
+              <ChatSidebar
+                onClose={() => setChatSidebarOpen(false)}
               />
             </div>
           </>
         )}
       </div>
+      <CreateWorkspaceModal
+        open={createWorkspaceModalOpen}
+        onClose={() => setCreateWorkspaceModalOpen(false)}
+        onCreateLocal={handleCreateWorkspaceLocal}
+        onCreateFromGit={handleCreateWorkspaceFromGit}
+      />
+      <WorkspaceConfigModal
+        open={workspaceConfigModalOpen}
+        workspace={editingWorkspace}
+        onClose={() => setWorkspaceConfigModalOpen(false)}
+        onSave={handleSaveConfig}
+        worktrees={worktreesForEdit}
+        onAddWorktree={handleAddWorktree}
+        onRemoveWorktree={handleRemoveWorktree}
+      />
       <InputModal
         open={modal?.open || false}
         title={modal?.title || ''}
@@ -589,6 +808,43 @@ function App() {
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
       />
+      <ParallelTaskModal
+        open={parallelTaskModalOpen}
+        agentConfigs={agentConfigs}
+        onClose={() => setParallelTaskModalOpen(false)}
+        onLaunch={handleLaunchParallelTask}
+      />
+      {commanderOpen && (
+        <CommanderPanel commands={commanderCommands} onClose={() => setCommanderOpen(false)} />
+      )}
+      {notificationPanelOpen && (
+        <NotificationPanel
+          notifications={notifications}
+          onDismiss={dismissNotification}
+          onDismissAll={dismissAllNotifications}
+          onClose={() => setNotificationPanelOpen(false)}
+        />
+      )}
+      {historyPanelOpen && (
+        <HistoryPanel
+          history={sessionHistory}
+          onRestore={handleRestoreHistory}
+          onClose={() => setHistoryPanelOpen(false)}
+        />
+      )}
+      {prPanelOpen && activeWorkspace?.repository?.path && (
+        <PRPanel
+          worktreePath={activeWorkspace.repository.path}
+          onClose={() => setPrPanelOpen(false)}
+          onSelectDiff={() => {}}
+          fetchLog={getGitLog}
+          fetchDiff={getGitDiff}
+          fetchWorkingTreeDiff={getGitWorkingTreeDiff}
+          fetchCommitFiles={getGitCommitFiles}
+          fetchWorkingTreeFiles={getGitWorkingTreeFiles}
+          fetchFileDiff={getGitFileDiff}
+        />
+      )}
     </div>
   )
 }

@@ -10,6 +10,7 @@ import { StatusDetector } from './services/statusDetector'
 import { GitHelper } from './services/gitHelper'
 import { WorktreeHelper } from './services/worktreeHelper'
 import { AgentManager } from './services/agentManager'
+import { AgentOrchestrator } from './services/agentOrchestrator'
 
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
@@ -65,9 +66,11 @@ const sessionManager = new SessionManager(io, agentManager)
 const statusDetector = new StatusDetector()
 const gitHelper = new GitHelper()
 const worktreeHelper = new WorktreeHelper()
+const agentOrchestrator = new AgentOrchestrator(io)
 
 sessionManager.setStatusDetector(statusDetector)
 sessionManager.setGitHelper(gitHelper)
+sessionManager.orchestrator = agentOrchestrator
 
 async function autoSaveSessions() {
   const ws = sessionManager.getWorkspace()
@@ -324,8 +327,17 @@ io.on('connection', (socket) => {
 
   socket.on('switch-workspace', async ({ workspaceId }) => {
     try {
+      const prevWs = workspaceManager.getActiveWorkspace()
+      if (prevWs) {
+        try { await workspaceManager.runTeardownScript(prevWs) } catch (e) {
+          console.warn('Teardown script failed:', e)
+        }
+      }
       const newWs = await workspaceManager.switchWorkspace(workspaceId)
       await worktreeHelper.ensureWorktreesExist(newWs)
+      try { await workspaceManager.runSetupScript(newWs) } catch (e) {
+        console.warn('Setup script failed:', e)
+      }
       const { sessions } = await sessionManager.switchWorkspacePreservingSessions(newWs)
       socket.emit('workspace-changed', { workspace: newWs, sessions })
       rebuildMenu()
@@ -341,6 +353,26 @@ io.on('connection', (socket) => {
   socket.on('create-workspace', async (data: any, callback?: Function) => {
     try {
       const ws = await workspaceManager.createWorkspace(data)
+      if (callback) callback({ ok: true, workspace: ws })
+      io.emit('workspaces-list', workspaceManager.listWorkspaces())
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('create-workspace-from-git', async (data: { gitUrl: string, name?: string }, callback?: Function) => {
+    try {
+      const ws = await workspaceManager.cloneFromGitUrl(data.gitUrl, data.name)
+      if (callback) callback({ ok: true, workspace: ws })
+      io.emit('workspaces-list', workspaceManager.listWorkspaces())
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('update-workspace-config', async (data: { workspaceId: string, updates: any }, callback?: Function) => {
+    try {
+      const ws = await workspaceManager.updateWorkspace(data.workspaceId, data.updates)
       if (callback) callback({ ok: true, workspace: ws })
       io.emit('workspaces-list', workspaceManager.listWorkspaces())
     } catch (error: any) {
@@ -424,6 +456,193 @@ io.on('connection', (socket) => {
     }
     await autoSaveSessions()
   })
+
+  socket.on('start-parallel-task', async (data: any, callback?: Function) => {
+    try {
+      const load = agentOrchestrator.getConcurrencyLoad()
+      const availableSlots = load.max - load.active
+      if (data.worktreeCount > availableSlots) {
+        if (callback) callback({ ok: false, error: `Only ${availableSlots} of ${data.worktreeCount} requested slots available. Try fewer agents.` })
+        return
+      }
+      const { sessionIds, groupId } = sessionManager.createParallelTask(data)
+      const states = sessionManager.getSessionStates()
+      const groupSessions = sessionIds.map(id => states[id]).filter(Boolean)
+      if (callback) callback({ ok: true, sessionIds, groupId, sessions: groupSessions, load: agentOrchestrator.getConcurrencyLoad() })
+      for (const id of sessionIds) {
+        io.emit('session-created', { sessionId: id, sessions: states })
+      }
+      await autoSaveSessions()
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-orchestrator-stats', async (_data: any, callback?: Function) => {
+    try {
+      callback({
+        ok: true,
+        concurrency: agentOrchestrator.getConcurrencyLoad(),
+        sessionCount: agentOrchestrator.getSessionCount(),
+        totalMemoryMB: agentOrchestrator.getTotalMemoryMB(),
+        resourceUsage: agentOrchestrator.getAllResourceUsage(),
+      })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-session-usage', async ({ sessionId }: { sessionId: string }, callback?: Function) => {
+    try {
+      const usage = agentOrchestrator.getResourceUsage(sessionId)
+      callback({ ok: true, usage })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-session-history', async (_data: any, callback?: Function) => {
+    try {
+      callback({ ok: true, history: sessionManager.getSessionHistory() })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-token-usage', async ({ sessionId }: { sessionId: string }, callback?: Function) => {
+    try {
+      const all = sessionManager.tokenUsageTracker.getAllUsage()
+      if (sessionId) {
+        callback({ ok: true, usage: sessionManager.tokenUsageTracker.getUsage(sessionId) })
+      } else {
+        callback({ ok: true, usage: all, totalTokens: all.reduce((s: number, u: any) => s + u.totalTokens, 0), totalCost: all.reduce((s: number, u: any) => s + u.estimatedCost, 0) })
+      }
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-log', async ({ worktreePath, maxCount }: { worktreePath: string, maxCount?: number }, callback?: Function) => {
+    try {
+      const log = await gitHelper.getLog(worktreePath, maxCount)
+      callback({ ok: true, log })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-diff', async ({ worktreePath, base, head }: { worktreePath: string, base?: string, head?: string }, callback?: Function) => {
+    try {
+      const diff = await gitHelper.getDiff(worktreePath, base, head)
+      callback({ ok: true, diff })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-branches', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const branches = await gitHelper.getBranches(worktreePath)
+      callback({ ok: true, branches })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-working-tree-diff', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const diff = await gitHelper.getWorkingTreeDiff(worktreePath)
+      callback({ ok: true, diff })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-commit-files', async ({ worktreePath, commitHash }: { worktreePath: string, commitHash: string }, callback?: Function) => {
+    try {
+      const files = await gitHelper.getCommitFiles(worktreePath, commitHash)
+      callback({ ok: true, files })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-working-tree-files', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const files = await gitHelper.getWorkingTreeFiles(worktreePath)
+      callback({ ok: true, files })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-file-diff', async ({ worktreePath, filePath, base, head }: { worktreePath: string, filePath: string, base?: string, head?: string }, callback?: Function) => {
+    try {
+      const diff = await gitHelper.getFileDiff(worktreePath, filePath, base, head)
+      callback({ ok: true, diff })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('add-worktree', async ({ workspaceId }, callback?: Function) => {
+    try {
+      const ws = workspaceManager.getWorkspace(workspaceId)
+      if (!ws) throw new Error('Workspace not found')
+      const nextIndex = (ws.worktrees?.count || 0) + 1
+      const worktreeId = (ws.worktrees?.namingPattern || 'work{n}').replace('{n}', String(nextIndex))
+      const path = await worktreeHelper.createWorktree(ws, worktreeId)
+      await workspaceManager.updateWorkspace(workspaceId, {
+        worktrees: { ...ws.worktrees, enabled: true, count: nextIndex, autoCreate: true },
+      })
+      if (callback) callback({ ok: true, worktree: { id: worktreeId, path } })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('remove-worktree', async ({ workspaceId, worktreeId }, callback?: Function) => {
+    try {
+      const ws = workspaceManager.getWorkspace(workspaceId)
+      if (!ws) throw new Error('Workspace not found')
+      const sessionIds: string[] = []
+      const states = sessionManager.getSessionStates()
+      for (const [id, s] of Object.entries(states) as any) {
+        if (s.worktreeId === worktreeId) sessionIds.push(id)
+      }
+      for (const id of sessionIds) {
+        sessionManager.closeSession(id)
+        io.emit('session-closed', { sessionId: id })
+      }
+      await worktreeHelper.removeWorktree(ws, worktreeId)
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('list-worktrees', async ({ workspaceId }, callback?: Function) => {
+    try {
+      const ws = workspaceManager.getWorkspace(workspaceId)
+      if (!ws) {
+        if (callback) callback([])
+        return
+      }
+      const wtList = sessionManager.getWorktrees().map(wt => ({
+        id: wt.id,
+        path: wt.path,
+      }))
+      if (callback) callback(wtList)
+    } catch {
+      if (callback) callback([])
+    }
+  })
+
+  socket.on('set-user-settings', (settings: { autoRestartSessions?: boolean }) => {
+    if (typeof settings.autoRestartSessions === 'boolean') {
+      sessionManager.autoRestartSessions = settings.autoRestartSessions
+    }
+  })
 })
 
 // Start server
@@ -433,6 +652,7 @@ async function startServer() {
     const activeWs = workspaceManager.getActiveWorkspace()
     if (activeWs) {
       sessionManager.setWorkspace(activeWs)
+      await worktreeHelper.ensureWorktreesExist(activeWs)
       await sessionManager.initializeSessions()
       const savedSessions = await workspaceManager.loadSessionState(activeWs.id)
       if (savedSessions.length > 0) {
@@ -521,6 +741,12 @@ ipcMain.handle('duplicate-workspace', async (_event, newName: string) => {
 app.whenReady().then(async () => {
   createWindow()
   await startServer()
+})
+
+app.on('will-quit', () => {
+  agentOrchestrator.shutdownAll()
+  sessionManager.saveAllSessionBuffers()
+  autoSaveSessions()
 })
 
 app.on('window-all-closed', () => {
