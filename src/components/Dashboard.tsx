@@ -19,6 +19,7 @@ interface Props {
   onRestore: (id: string) => void
   onPermanentDelete: (id: string) => void
   onNewWorkspace: () => void
+  onClose: () => void
 }
 
 function getSessionCount(ws: WorkspaceInfo): number {
@@ -33,7 +34,7 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
 
 const TOKEN_COST_PER_1K = 0.015
 
-export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace }: Props) {
+export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace, onClose }: Props) {
   const totalSessions = Object.keys(sessions).length
   const activeCount = getActiveCount(sessions)
   const { compressionStats, compressionHistory, requestCompressionStats } = useSocket()
@@ -73,7 +74,12 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
             {activeCount > 0 && <span className="dashboard-header-stat active">{activeCount} active</span>}
           </div>
         </div>
-        <button className="new-terminal-btn" onClick={onNewWorkspace}>+ New Workspace</button>
+        <div className="dashboard-header-actions">
+          <button className="new-terminal-btn" onClick={onNewWorkspace}>+ New Workspace</button>
+          <button className="dashboard-close-btn" onClick={onClose} title="Close">
+            <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
+          </button>
+        </div>
       </div>
 
       <div className="dashboard-body">

@@ -125,7 +125,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -133,7 +133,7 @@ function App() {
   const [commanderOpen, setCommanderOpen] = useState(false)
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
-  const [prPanelOpen, setPrPanelOpen] = useState(false)
+
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
   const [fontSize, setFontSize] = useState(() => {
@@ -620,8 +620,8 @@ function App() {
                 <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className="activity-bar-btn"
-                onClick={() => setPrPanelOpen(o => !o)}
+                className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
+                onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
                 title="Git Review"
               >
                 <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
@@ -687,6 +687,19 @@ function App() {
               onRestore={handleRestoreWorkspace}
               onPermanentDelete={handlePermanentDelete}
               onNewWorkspace={handleCreateWorkspace}
+              onClose={() => setActiveView(null)}
+            />
+          ) : activeView === 'git-review' ? (
+            <PRPanel
+              worktreePath={activeWorkspace?.repository?.path || ''}
+              onClose={() => setActiveView(null)}
+              onSelectDiff={() => {}}
+              fetchLog={getGitLog}
+              fetchDiff={getGitDiff}
+              fetchWorkingTreeDiff={getGitWorkingTreeDiff}
+              fetchCommitFiles={getGitCommitFiles}
+              fetchWorkingTreeFiles={getGitWorkingTreeFiles}
+              fetchFileDiff={getGitFileDiff}
             />
           ) : activeView === 'profile' ? (
             <Profile onClose={() => setActiveView(null)} />
@@ -765,19 +778,6 @@ function App() {
           history={sessionHistory}
           onRestore={handleRestoreHistory}
           onClose={() => setHistoryPanelOpen(false)}
-        />
-      )}
-      {prPanelOpen && activeWorkspace?.repository?.path && (
-        <PRPanel
-          worktreePath={activeWorkspace.repository.path}
-          onClose={() => setPrPanelOpen(false)}
-          onSelectDiff={() => {}}
-          fetchLog={getGitLog}
-          fetchDiff={getGitDiff}
-          fetchWorkingTreeDiff={getGitWorkingTreeDiff}
-          fetchCommitFiles={getGitCommitFiles}
-          fetchWorkingTreeFiles={getGitWorkingTreeFiles}
-          fetchFileDiff={getGitFileDiff}
         />
       )}
       <StatusBar

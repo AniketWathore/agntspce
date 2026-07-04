@@ -86,7 +86,9 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
     <div className="settings-page">
       <div className="settings-header">
         <h1>Settings</h1>
-        <button className="settings-close-btn" onClick={onClose}>✕</button>
+        <button className="settings-close-btn" onClick={onClose} title="Close">
+          <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
+        </button>
       </div>
       <div className="settings-body">
         <div className="settings-section">

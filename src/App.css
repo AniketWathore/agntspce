@@ -1493,6 +1493,32 @@
   background: var(--success-bg);
 }
 
+.dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-close-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.12s;
+}
+
+.dashboard-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .dashboard-body {
   flex: 1;
   padding: 20px 24px 24px;
@@ -4598,40 +4624,21 @@
 }
 
 /* ── PR Panel ────────────────────────────── */
-.pr-panel-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-}
-
-.pr-panel {
-  width: 640px;
-  max-height: 75vh;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-light);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+.pr-fullpage {
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg-primary);
 }
 
-.scm-panel {
-  width: 85vw;
-  max-width: 1200px;
-  height: 80vh;
-  max-height: 80vh;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-light);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+.pr-fullpage-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .pr-panel-header {

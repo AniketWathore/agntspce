@@ -125,8 +125,8 @@ export default function PRPanel({
   }
 
   return (
-    <div className="pr-panel-overlay" onClick={onClose}>
-      <div className="pr-panel scm-panel" onClick={e => e.stopPropagation()}>
+    <div className="pr-fullpage">
+      <div className="pr-fullpage-body">
         <div className="pr-panel-header">
           <h3>Source Control</h3>
           <div className="pr-panel-tabs">
@@ -140,7 +140,9 @@ export default function PRPanel({
               Overall
             </button>
           </div>
-          <button className="pr-close-btn" onClick={onClose}>&#10005;</button>
+          <button className="pr-close-btn" onClick={onClose} title="Close">
+            <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
+          </button>
         </div>
         <div className="scm-body">
           <div className="scm-sidebar">
