@@ -7,6 +7,7 @@ import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
 import { TokenReductionService } from './tokenReduction'
+import { WorkspaceManager } from './workspaceManager'
 
 let pty: any = null
 try {
@@ -241,6 +242,11 @@ export class SessionManager extends EventEmitter {
   createSession(sessionId: string, config: SessionConfig) {
     if (!pty) throw new Error('node-pty unavailable')
     const env: any = { ...process.env, TERM: 'xterm-color' }
+    if (this.workspace?.envVars) {
+      for (const [key, val] of Object.entries(this.workspace.envVars)) {
+        env[key] = val
+      }
+    }
     const ptyProcess = pty.spawn(config.command, config.args, {
       name: 'xterm-color',
       cols: 80,
@@ -296,6 +302,7 @@ export class SessionManager extends EventEmitter {
     ptyProcess.onExit(({ exitCode, signal }: any) => {
       clearInterval(session.processMonitor!)
       session.status = 'exited'
+      this.persistSessionBuffer(sessionId)
       const isActive = this.sessions.get(sessionId) === session
       if (isActive) {
         try {
@@ -303,6 +310,7 @@ export class SessionManager extends EventEmitter {
         } catch { }
       }
       if (isActive && config.type === 'claude' && !this.isWorkspaceSwitching) {
+        this.cleanupSessionBuffer(sessionId)
         this.sessions.delete(sessionId)
         setTimeout(() => {
           this.createSession(sessionId, {
@@ -311,6 +319,7 @@ export class SessionManager extends EventEmitter {
           })
         }, 500)
       } else {
+        this.cleanupSessionBuffer(sessionId)
         this.sessions.delete(sessionId)
       }
     })
@@ -342,6 +351,7 @@ export class SessionManager extends EventEmitter {
   closeSession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
+    this.persistSessionBuffer(sessionId)
     try {
       clearInterval(session.processMonitor!)
       if (session.pty) {
@@ -350,6 +360,7 @@ export class SessionManager extends EventEmitter {
     } catch { }
     this.tokenReduction.cleanup(sessionId)
     this.sessions.delete(sessionId)
+    this.cleanupSessionBuffer(sessionId)
     return true
   }
 
@@ -390,15 +401,52 @@ export class SessionManager extends EventEmitter {
     setTimeout(() => this.createSession(sessionId, config), 300)
   }
 
+  private persistSessionBuffer(sessionId: string) {
+    if (!this.workspace?.id) return
+    const session = this.sessions.get(sessionId)
+    if (!session?.buffer) return
+    WorkspaceManager.getInstance().saveSessionBuffer(this.workspace.id, sessionId, session.buffer)
+  }
+
+  private cleanupSessionBuffer(sessionId: string) {
+    if (!this.workspace?.id) return
+    WorkspaceManager.getInstance().deleteSessionBuffer(this.workspace.id, sessionId)
+  }
+
+  async saveAllSessionBuffers() {
+    if (!this.workspace?.id) return
+    await WorkspaceManager.getInstance().saveAllSessionBuffers(this.workspace.id, this.sessions)
+  }
+
+  async restoreSessionBuffer(sessionId: string) {
+    if (!this.workspace?.id) return
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const saved = await WorkspaceManager.getInstance().loadSessionBuffer(this.workspace.id, sessionId)
+    if (saved) {
+      session.buffer = saved
+      session.deliveredBufferLength = 0
+    }
+  }
+
   getSessionSaveData(): SavedSessionData[] {
     const data: SavedSessionData[] = []
     for (const [id, s] of this.sessions) {
+      const config = s.agentStartConfig
       data.push({
         id,
         type: s.type,
         cwd: s.config?.cwd || '',
-        agentConfig: s.agentStartConfig
-          ? { agentId: s.agentStartConfig.agentId, mode: s.agentStartConfig.mode, flags: s.agentStartConfig.flags }
+        agentConfig: config
+          ? {
+              agentId: config.agentId,
+              mode: config.mode,
+              flags: config.flags,
+              model: config.model,
+              reasoning: config.reasoning,
+              verbosity: config.verbosity,
+              resumeId: config.resumeId,
+            }
           : undefined,
       })
     }
@@ -406,21 +454,88 @@ export class SessionManager extends EventEmitter {
   }
 
   async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
+    const restorePromises: Promise<void>[] = []
     for (const saved of sessions) {
       const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+      let sessionId: string | null = null
       if (saved.type === 'shell') {
-        this.createRawSession('shell', cwd)
+        const result = this.createRawSession('shell', cwd)
+        if (result) sessionId = result.sessionId
       } else {
         const result = this.createRawSession(saved.type, cwd)
-        if (result && saved.agentConfig) {
-          setTimeout(() => {
-            try {
-              this.startAgentWithConfig(result.sessionId, saved.agentConfig)
-            } catch {}
-          }, 300)
+        if (result) {
+          sessionId = result.sessionId
+          if (saved.agentConfig) {
+            const sid = result.sessionId
+            setTimeout(() => {
+              try {
+                this.startAgentWithConfig(sid, saved.agentConfig)
+              } catch {}
+            }, 300)
+          }
         }
       }
+      if (sessionId) {
+        restorePromises.push(this.restoreSessionBuffer(sessionId))
+      }
     }
+    await Promise.all(restorePromises)
+  }
+
+  createParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number, model?: string, reasoning?: string, verbosity?: string }): { sessionIds: string[], groupId: string } {
+    const groupId = `parallel-${Date.now()}`
+    const availableWts = this.worktrees.filter(wt => {
+      const existingType = [...this.sessions.values()].find(s => s.worktreeId === wt.id && s.type === config.agentId)
+      return !existingType
+    })
+    const count = Math.min(config.worktreeCount, availableWts.length || 1)
+    const sessionIds: string[] = []
+    const prompt = config.prompt || ''
+
+    for (let i = 0; i < count; i++) {
+      const wt = availableWts[i] || availableWts[0]
+      if (!wt) continue
+      const sessionId = `${groupId}-${i}`
+      const cwd = wt.path || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+      this.createSession(sessionId, {
+        command: getDefaultShell(),
+        args: buildShellArgs(`cd "${cwd}"`),
+        cwd,
+        type: config.agentId,
+        worktreeId: wt.id,
+      })
+      const session = this.sessions.get(sessionId)
+      if (session) {
+        session.sessionGroupId = groupId
+        session.status = 'waiting'
+        try { this.io.emit('status-change', { sessionId, status: 'waiting' }) } catch {}
+      }
+      sessionIds.push(sessionId)
+    }
+
+    if (sessionIds.length > 0) {
+      setTimeout(() => {
+        for (const sid of sessionIds) {
+          try {
+            this.startAgentWithConfig(sid, {
+              agentId: config.agentId,
+              mode: config.mode,
+              flags: config.flags,
+              model: config.model,
+              reasoning: config.reasoning,
+              verbosity: config.verbosity,
+            })
+            if (prompt) {
+              setTimeout(() => {
+                this.writeToSession(sid, prompt + '\n')
+              }, 2000)
+            }
+          } catch {}
+        }
+      }, 500)
+    }
+
+    return { sessionIds, groupId }
   }
 
   startAgentWithConfig(sessionId: string, config: any) {
@@ -438,6 +553,10 @@ export class SessionManager extends EventEmitter {
     } catch {}
   }
 
+  getWorktrees(): Worktree[] {
+    return this.worktrees
+  }
+
   getSessionStates(): Record<string, any> {
     const states: Record<string, any> = {}
     for (const [id, s] of this.sessions) {
@@ -450,6 +569,7 @@ export class SessionManager extends EventEmitter {
         status: s.status,
         branch: s.branch,
         lastActivity: s.lastActivity,
+        sessionGroupId: s.sessionGroupId,
       }
     }
     return states

@@ -2,6 +2,7 @@ import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { execSync, spawn } from 'child_process'
 import type { Workspace, SavedSessionData, WorkspaceExport } from './types'
 
 const CONFIG_DIR = path.join(os.homedir(), '.agent-workspace')
@@ -32,6 +33,7 @@ export class WorkspaceManager {
       path.join(CONFIG_DIR, 'workspaces'),
       path.join(CONFIG_DIR, 'deleted-workspaces'),
       path.join(CONFIG_DIR, 'exports'),
+      path.join(CONFIG_DIR, 'session-buffers'),
     ]) {
       await fs.mkdir(dir, { recursive: true })
     }
@@ -119,6 +121,124 @@ export class WorkspaceManager {
     } catch {
       return []
     }
+  }
+
+  private bufferPath(workspaceId: string, sessionId: string): string {
+    return path.join(CONFIG_DIR, 'session-buffers', `${workspaceId}-${sessionId}.log`)
+  }
+
+  async saveSessionBuffer(workspaceId: string, sessionId: string, buffer: string): Promise<void> {
+    try {
+      const truncated = buffer.slice(-50000)
+      await fs.writeFile(this.bufferPath(workspaceId, sessionId), truncated, 'utf-8')
+    } catch (e) {
+      console.error('Failed to save session buffer:', e)
+    }
+  }
+
+  async loadSessionBuffer(workspaceId: string, sessionId: string): Promise<string> {
+    try {
+      return await fs.readFile(this.bufferPath(workspaceId, sessionId), 'utf-8')
+    } catch {
+      return ''
+    }
+  }
+
+  async deleteSessionBuffer(workspaceId: string, sessionId: string): Promise<void> {
+    try {
+      await fs.unlink(this.bufferPath(workspaceId, sessionId))
+    } catch {}
+  }
+
+  async saveAllSessionBuffers(workspaceId: string, sessions: Map<string, any>): Promise<void> {
+    for (const [id, s] of sessions) {
+      if (s.buffer) {
+        await this.saveSessionBuffer(workspaceId, id, s.buffer)
+      }
+    }
+  }
+
+  async deleteAllSessionBuffers(workspaceId: string): Promise<void> {
+    const dir = path.join(CONFIG_DIR, 'session-buffers')
+    const prefix = `${workspaceId}-`
+    try {
+      const files = await fs.readdir(dir)
+      for (const file of files) {
+        if (file.startsWith(prefix) && file.endsWith('.log')) {
+          try { await fs.unlink(path.join(dir, file)) } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  async cloneFromGitUrl(gitUrl: string, name?: string): Promise<Workspace> {
+    const repoName = name || path.basename(gitUrl).replace(/\.git$/, '')
+    const id = repoName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    const cloneDir = path.join(os.homedir(), 'AgntSpce', repoName)
+    const wsDir = path.join(CONFIG_DIR, 'workspaces', `${id}.json`)
+
+    if (this.workspaces.has(id)) throw new Error(`Workspace "${repoName}" already exists (${id})`)
+
+    await fs.mkdir(path.dirname(cloneDir), { recursive: true })
+
+    return new Promise((resolve, reject) => {
+      const proc = spawn('git', ['clone', gitUrl, cloneDir], {
+        stdio: 'pipe',
+        env: { ...process.env },
+      })
+      proc.on('close', async (code) => {
+        if (code !== 0) {
+          reject(new Error(`git clone failed with code ${code}`))
+          return
+        }
+        const ws: Workspace = {
+          id,
+          name: repoName,
+          workspaceType: 'single-repo',
+          repository: { path: cloneDir, type: 'git', remote: gitUrl },
+          worktrees: { enabled: false, count: 0, namingPattern: 'work{n}', autoCreate: false },
+          lastAccess: new Date().toISOString(),
+          gitUrl,
+        }
+        await fs.writeFile(wsDir, JSON.stringify(ws, null, 2))
+        this.workspaces.set(id, ws)
+        await this.addRecentWorkspace(id)
+        resolve(ws)
+      })
+      proc.on('error', reject)
+    })
+  }
+
+  async runSetupScript(workspace: Workspace): Promise<void> {
+    if (!workspace.setupScript) return
+    await this.runScript(workspace, workspace.setupScript, 'setup')
+  }
+
+  async runTeardownScript(workspace: Workspace): Promise<void> {
+    if (!workspace.teardownScript) return
+    await this.runScript(workspace, workspace.teardownScript, 'teardown')
+  }
+
+  private async runScript(workspace: Workspace, script: string, label: string): Promise<void> {
+    const cwd = workspace.repository?.path || os.homedir()
+    const shell = process.env.SHELL || '/bin/bash'
+    return new Promise((resolve, reject) => {
+      const proc = spawn(shell, ['-c', script], {
+        cwd,
+        stdio: 'pipe',
+        env: { ...process.env, ...workspace.envVars },
+      })
+      const timeout = setTimeout(() => {
+        proc.kill()
+        reject(new Error(`${label} script timed out after 30s`))
+      }, 30000)
+      proc.on('close', (code) => {
+        clearTimeout(timeout)
+        if (code === 0) resolve()
+        else reject(new Error(`${label} script exited with code ${code}`))
+      })
+      proc.on('error', reject)
+    })
   }
 
   async exportWorkspace(workspaceId: string, savePath: string): Promise<void> {

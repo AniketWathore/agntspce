@@ -45,6 +45,11 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
 
   const isAgentType = session.type === 'claude' || session.type === 'codex' || session.type === 'opencode' || session.type === 'gemini'
   const shouldShowStartup = isAgentType && session.status === 'waiting' && showStartup
+  const groupColor = session.sessionGroupId
+    ? ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#f97316'][
+        session.sessionGroupId.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 7
+      ]
+    : undefined
 
   useEffect(() => {
     if (session.status === 'waiting' && isAgentType) {
@@ -149,7 +154,7 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
   }, [])
 
   return (
-    <div className={`terminal-pane${dimmed ? ' dimmed' : ''}`} ref={paneRef} style={style}>
+    <div className={`terminal-pane${dimmed ? ' dimmed' : ''}${session.sessionGroupId ? ' grouped' : ''}`} ref={paneRef} style={session.sessionGroupId ? { ...style, borderLeftColor: groupColor } : style}>
       <div className="terminal-header">
         <StatusDot status={session.status} />
         {isAgentType ? (

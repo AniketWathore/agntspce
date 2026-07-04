@@ -35,6 +35,12 @@ interface UseSocketReturn {
   compressionStats: CompressionStats
   compressionHistory: CompressionDebugRecord[]
   requestCompressionStats: () => void
+  createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
+  updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
+  addWorktree: (workspaceId: string) => Promise<any>
+  removeWorktree: (workspaceId: string, worktreeId: string) => Promise<any>
+  listWorktrees: (workspaceId: string) => Promise<any[]>
+  startParallelTask: (config: any) => Promise<any>
 }
 
 export function useSocket(): UseSocketReturn {
@@ -260,6 +266,42 @@ export function useSocket(): UseSocketReturn {
     }
   }, [])
 
+  const addWorktree = useCallback((workspaceId: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('add-worktree', { workspaceId }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const removeWorktree = useCallback((workspaceId: string, worktreeId: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('remove-worktree', { workspaceId, worktreeId }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const listWorktrees = useCallback((workspaceId: string): Promise<any[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('list-worktrees', { workspaceId }, (res: any) => resolve(res || []))
+    })
+  }, [])
+
+  const startParallelTask = useCallback((config: any): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('start-parallel-task', config, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const updateWorkspaceConfig = useCallback((workspaceId: string, updates: any): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('update-workspace-config', { workspaceId, updates }, (res: any) => resolve(res))
+    })
+  }, [])
+
   const emit = useCallback((event: string, ...args: any[]) => {
     socketRef.current?.emit(event, ...args)
   }, [])
@@ -310,6 +352,12 @@ export function useSocket(): UseSocketReturn {
     fetchAgentConfigs,
     createRawSession,
     createAgentSession,
+    createWorkspaceFromGit,
+    updateWorkspaceConfig,
+    addWorktree,
+    removeWorktree,
+    listWorktrees,
+    startParallelTask,
     emit,
     toggleTokenReduction,
     onTokenReductionState,

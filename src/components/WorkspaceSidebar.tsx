@@ -21,6 +21,8 @@ interface Props {
   onPermanentDelete: (id: string) => void
   showModal: (title: string, onSubmit: (value: string) => void, defaultValue?: string) => void
   closeModal: () => void
+  onOpenCreateModal: () => void
+  onEditConfig: (ws: WorkspaceInfo) => void
 }
 
 function getSessionCount(ws: WorkspaceInfo): number {
@@ -32,39 +34,18 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
   return Object.values(sessions).filter(s => s.status === 'busy' || s.status === 'waiting').length
 }
 
-export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onAdd, onRemove: _onRemove, onDelete, onRestore, onPermanentDelete, showModal, closeModal }: Props) {
+export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onOpenCreateModal, onEditConfig }: Props) {
   const [showTrash, setShowTrash] = useState(false)
   const activeCount = getActiveCount(sessions)
-
-  function handleAdd() {
-    showModal('Workspace name:', (name) => {
-      const doCreate = async () => {
-        let path = ''
-        try {
-          if (window.electronAPI) {
-            if (!path) {
-              try { path = await window.electronAPI.getDefaultPath() || '' } catch {}
-            }
-            const selected = await window.electronAPI.selectDirectory()
-            if (selected) path = selected
-          } else {
-            const fallback = prompt('Workspace directory:', path)
-            if (fallback && fallback.trim()) path = fallback.trim()
-          }
-        } catch (e) { console.error('[WorkspaceSidebar.handleAdd]', e) }
-        onAdd(name, path)
-        closeModal()
-      }
-      doCreate()
-    })
-  }
 
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
         <div className="sidebar-header">
           <h2>AgntSpce</h2>
-          <button className="add-btn" onClick={handleAdd} title="New workspace">+</button>
+          <div className="sidebar-header-buttons">
+            <button className="add-btn" onClick={onOpenCreateModal} title="New workspace">+</button>
+          </div>
         </div>
 
         <div className="sidebar-stats">
@@ -84,6 +65,13 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
                 <span className="workspace-session-count">{getSessionCount(ws)}</span>
               </div>
               <div className="workspace-item-actions">
+                <button
+                  className="action-btn"
+                  onClick={(e) => { e.stopPropagation(); onEditConfig(ws) }}
+                  title="Configure"
+                >
+                  Config
+                </button>
                 <button
                   className="action-btn danger"
                   onClick={(e) => {

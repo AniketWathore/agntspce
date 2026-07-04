@@ -16,18 +16,24 @@ export interface WorkspaceInfo {
     autoCreate: boolean
   }
   terminals?: any
+  projectType?: string
   lastAccess?: string
+  gitUrl?: string
+  envVars?: Record<string, string>
+  setupScript?: string
+  teardownScript?: string
 }
 
 export interface SessionState {
   id: string
-  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'server' | 'shell'
+  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor-agent' | 'copilot' | 'mastracode' | 'droid' | 'amp' | 'pi' | 'server' | 'shell'
   worktreeId: string
   repositoryName?: string
   repositoryType?: string
   status: 'idle' | 'busy' | 'waiting' | 'exited'
   branch: string
   lastActivity: number
+  sessionGroupId?: string
 }
 
 export interface TerminalOutput {
@@ -74,6 +80,12 @@ export interface AgentConfig {
   modes: AgentMode[]
   flags: AgentFlag[]
   defaultMode: string
+  models?: string[]
+  defaultModel?: string
+  reasoningLevels?: string[]
+  defaultReasoning?: string
+  verbosityLevels?: string[]
+  defaultVerbosity?: string
 }
 
 export interface AgentStartConfig {

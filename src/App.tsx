@@ -5,11 +5,14 @@ import TerminalArea from './components/TerminalArea'
 import ChatSidebar from './components/ChatSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
+import CreateWorkspaceModal from './components/CreateWorkspaceModal'
+import WorkspaceConfigModal from './components/WorkspaceConfigModal'
+import ParallelTaskModal from './components/ParallelTaskModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
 import { useSocket } from './hooks/useSocket'
-import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
+import type { TerminalOutput, AgentConfig, AgentStartConfig, WorkspaceInfo } from './types'
 import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
@@ -18,6 +21,12 @@ const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'opencode', name: 'Opencode', icon: '🔧' },
   { id: 'codex', name: 'Codex', icon: '⚡' },
   { id: 'gemini', name: 'Gemini', icon: '✨' },
+  { id: 'cursor-agent', name: 'Cursor Agent', icon: '🖥️' },
+  { id: 'copilot', name: 'Copilot', icon: '🐙' },
+  { id: 'mastracode', name: 'Mastra Code', icon: '🔷' },
+  { id: 'droid', name: 'Droid', icon: '🤖' },
+  { id: 'amp', name: 'Amp', icon: '⚡' },
+  { id: 'pi', name: 'Pi', icon: '🥧' },
 ]
 
 const FALLBACK_AGENTS: AgentConfig[] = [
@@ -45,6 +54,42 @@ const FALLBACK_AGENTS: AgentConfig[] = [
     flags: [],
     defaultMode: 'fresh',
   },
+  {
+    id: 'cursor-agent', name: 'Cursor Agent', icon: '🖥️', description: 'Cursor AI coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'copilot', name: 'Copilot', icon: '🐙', description: 'GitHub Copilot CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'explain', name: 'Explain', description: 'Explain code' }, { id: 'suggest', name: 'Suggest', description: 'Suggest code' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'mastracode', name: 'Mastra Code', icon: '🔷', description: 'Mastra Code AI agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'droid', name: 'Droid', icon: '🤖', description: 'Factory AI Droid coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'amp', name: 'Amp', icon: '⚡', description: 'Amplified Amp coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'agent', name: 'Agent', description: 'Run in agent mode' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'pi', name: 'Pi', icon: '🥧', description: 'Pi coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
 ]
 
 interface ModalState {
@@ -61,6 +106,8 @@ function App() {
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
+    createWorkspaceFromGit, updateWorkspaceConfig,
+    addWorktree, removeWorktree, listWorktrees, startParallelTask,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -76,6 +123,11 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
+  const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false)
+  const [workspaceConfigModalOpen, setWorkspaceConfigModalOpen] = useState(false)
+  const [editingWorkspace, setEditingWorkspace] = useState<WorkspaceInfo | null>(null)
+  const [parallelTaskModalOpen, setParallelTaskModalOpen] = useState(false)
+  const [worktreesForEdit, setWorktreesForEdit] = useState<any[]>([])
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
@@ -177,8 +229,9 @@ function App() {
 
   const wsPath = activeWorkspace?.repository?.path
 
+  const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi'])
   const agentSessions = useMemo(
-    () => Object.values(sessions).filter(s => s.type === 'claude' || s.type === 'codex' || s.type === 'opencode' || s.type === 'gemini').slice(0, 12),
+    () => Object.values(sessions).filter(s => agentTypes.has(s.type)).slice(0, 12),
     [sessions]
   )
   const shellSessions = useMemo(
@@ -191,26 +244,51 @@ function App() {
   }, [createRawSession, wsPath])
 
   function handleCreateWorkspace() {
-    showModal('Workspace name:', (name) => {
-      const doCreate = async () => {
-        let path = ''
-        try {
-          if (window.electronAPI) {
-            if (!path) {
-              try { path = await window.electronAPI.getDefaultPath() || '' } catch {}
-            }
-            const selected = await window.electronAPI.selectDirectory()
-            if (selected) path = selected
-          } else {
-            const fallback = prompt('Workspace directory:', path)
-            if (fallback && fallback.trim()) path = fallback.trim()
-          }
-        } catch (e) { console.error('[handleCreateWorkspace]', e) }
-        addWorkspace(name, path)
-        setModal(null)
-      }
-      doCreate()
-    })
+    setCreateWorkspaceModalOpen(true)
+  }
+
+  async function handleCreateWorkspaceLocal(name: string, path: string) {
+    addWorkspace(name, path)
+  }
+
+  async function handleCreateWorkspaceFromGit(gitUrl: string, name?: string) {
+    const res = await createWorkspaceFromGit(gitUrl, name)
+    if (res?.ok) {
+      switchWorkspace(res.workspace.id)
+    } else {
+      throw new Error(res?.error || 'Failed to clone repository')
+    }
+  }
+
+  function handleEditConfig(ws: WorkspaceInfo) {
+    setEditingWorkspace(ws)
+    setWorkspaceConfigModalOpen(true)
+    listWorktrees(ws.id).then(setWorktreesForEdit)
+  }
+
+  async function handleSaveConfig(workspaceId: string, updates: any) {
+    const res = await updateWorkspaceConfig(workspaceId, updates)
+    if (!res?.ok) throw new Error(res?.error || 'Failed to save')
+  }
+
+  async function handleLaunchParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number }) {
+    const res = await startParallelTask(config)
+    if (!res?.ok) throw new Error(res?.error || 'Failed to launch parallel task')
+  }
+
+  async function handleAddWorktree(workspaceId: string) {
+    const res = await addWorktree(workspaceId)
+    if (res?.ok) {
+      setWorktreesForEdit(prev => [...prev, { id: res.worktree.id, path: res.worktree.path }])
+    }
+  }
+
+  async function handleRemoveWorktree(workspaceId: string, worktreeId: string) {
+    if (!confirm(`Remove worktree "${worktreeId}"?`)) return
+    const res = await removeWorktree(workspaceId, worktreeId)
+    if (res?.ok) {
+      setWorktreesForEdit(prev => prev.filter(w => w.id !== worktreeId))
+    }
   }
 
   function handleSelectWorkspace(id: string) {
@@ -238,12 +316,8 @@ function App() {
     permanentDeleteWorkspace(id).then(() => refreshDeleted())
   }
 
-  function handleCloseShellSession(sessionId: string) {
-    closeTab([sessionId])
-  }
-
   function handleSelectAgent(agentId: string) {
-    if (agentId === 'claude' || agentId === 'opencode') {
+    if (agentTypes.has(agentId)) {
       const defaultConfig = { agentId, mode: 'fresh', flags: [] }
       createAgentSession(agentId, defaultConfig, wsPath)
     } else {
@@ -487,21 +561,23 @@ function App() {
         {workspaceSidebarOpen && (
           <>
             <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
-              <WorkspaceSidebar
-                workspaces={workspaces}
-                sessions={sessions}
-                activeWorkspace={activeWorkspace}
-                deletedWorkspaces={deletedWorkspaces}
-                onSelect={handleSelectWorkspace}
-                onAdd={addWorkspace}
-                onEdit={editWorkspace}
-                onRemove={removeWorkspace}
-                onDelete={handleDeleteWorkspace}
-                onRestore={handleRestoreWorkspace}
-                onPermanentDelete={handlePermanentDelete}
-                showModal={showModal}
-                closeModal={closeModal}
-              />
+                <WorkspaceSidebar
+                  workspaces={workspaces}
+                  sessions={sessions}
+                  activeWorkspace={activeWorkspace}
+                  deletedWorkspaces={deletedWorkspaces}
+                  onSelect={handleSelectWorkspace}
+                  onAdd={addWorkspace}
+                  onEdit={editWorkspace}
+                  onRemove={removeWorkspace}
+                  onDelete={handleDeleteWorkspace}
+                  onRestore={handleRestoreWorkspace}
+                  onPermanentDelete={handlePermanentDelete}
+                  showModal={showModal}
+                  closeModal={closeModal}
+                  onOpenCreateModal={handleCreateWorkspace}
+                  onEditConfig={handleEditConfig}
+                />
             </div>
             <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
           </>
@@ -535,6 +611,7 @@ function App() {
               onNewAgent={() => {}}
               onSelectAgent={handleSelectAgent}
               onNewShell={handleNewShell}
+              onParallelTask={() => setParallelTaskModalOpen(true)}
               onCloseTab={handleCloseAgentTab}
               onActiveSessionChange={setActiveSessionId}
               activeSessionId={activeSessionId}
@@ -561,6 +638,21 @@ function App() {
           </>
         )}
       </div>
+      <CreateWorkspaceModal
+        open={createWorkspaceModalOpen}
+        onClose={() => setCreateWorkspaceModalOpen(false)}
+        onCreateLocal={handleCreateWorkspaceLocal}
+        onCreateFromGit={handleCreateWorkspaceFromGit}
+      />
+      <WorkspaceConfigModal
+        open={workspaceConfigModalOpen}
+        workspace={editingWorkspace}
+        onClose={() => setWorkspaceConfigModalOpen(false)}
+        onSave={handleSaveConfig}
+        worktrees={worktreesForEdit}
+        onAddWorktree={handleAddWorktree}
+        onRemoveWorktree={handleRemoveWorktree}
+      />
       <InputModal
         open={modal?.open || false}
         title={modal?.title || ''}
@@ -574,6 +666,12 @@ function App() {
         agentConfigs={agentConfigs}
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
+      />
+      <ParallelTaskModal
+        open={parallelTaskModalOpen}
+        agentConfigs={agentConfigs}
+        onClose={() => setParallelTaskModalOpen(false)}
+        onLaunch={handleLaunchParallelTask}
       />
     </div>
   )

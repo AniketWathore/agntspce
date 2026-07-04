@@ -32,6 +32,7 @@ interface Props {
   onToggleShell: () => void
   chatSidebarOpen: boolean
   onToggleChatSidebar: () => void
+  onParallelTask?: () => void
 }
 
 const AGENT_TYPES = [
@@ -77,12 +78,10 @@ function getItemStyle(index: number, count: number, preset: LayoutPreset, active
   return {}
 }
 
-function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeData, hidden }: {
+function ShellTerminal({ session, onInput, onResize, writeData, hidden }: {
   session: SessionState
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
-  onRestart: (sessionId: string) => void
-  onClose: (sessionId: string) => void
   writeData: string
   hidden: boolean
 }) {
@@ -205,7 +204,7 @@ export default function TerminalArea({
   onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
   activeSessionId, writeBuffers, agentConfigs,
   layoutPreset, focusMode, agentsList, bottomShellOpen, onToggleShell,
-  chatSidebarOpen, onToggleChatSidebar,
+  chatSidebarOpen, onToggleChatSidebar, onParallelTask,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -325,8 +324,6 @@ export default function TerminalArea({
                     session={s}
                     onInput={onInput}
                     onResize={onResize}
-                    onRestart={onRestart}
-                    onClose={handleShellClose}
                     writeData={writeBuffers[s.id] || ''}
                     hidden={s.id !== activeShellId}
                   />
@@ -403,6 +400,9 @@ export default function TerminalArea({
         </div>
         <div className="tab-bar-actions" style={{ position: 'relative' }}>
           <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={handleAddAgentClick}>+ Agent</button>
+          {onParallelTask && (
+            <button className="new-terminal-btn parallel-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={onParallelTask}>Parallel</button>
+          )}
           <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
             <img src="/img/chat.png" alt="Chat" className="shell-btn-icon shell-btn-icon-chat" />
           </button>
@@ -464,8 +464,6 @@ export default function TerminalArea({
                     session={s}
                     onInput={onInput}
                     onResize={onResize}
-                    onRestart={onRestart}
-                    onClose={handleShellClose}
                     writeData={writeBuffers[s.id] || ''}
                     hidden={s.id !== activeShellId}
                   />

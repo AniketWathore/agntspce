@@ -324,8 +324,17 @@ io.on('connection', (socket) => {
 
   socket.on('switch-workspace', async ({ workspaceId }) => {
     try {
+      const prevWs = workspaceManager.getActiveWorkspace()
+      if (prevWs) {
+        try { await workspaceManager.runTeardownScript(prevWs) } catch (e) {
+          console.warn('Teardown script failed:', e)
+        }
+      }
       const newWs = await workspaceManager.switchWorkspace(workspaceId)
       await worktreeHelper.ensureWorktreesExist(newWs)
+      try { await workspaceManager.runSetupScript(newWs) } catch (e) {
+        console.warn('Setup script failed:', e)
+      }
       const { sessions } = await sessionManager.switchWorkspacePreservingSessions(newWs)
       socket.emit('workspace-changed', { workspace: newWs, sessions })
       rebuildMenu()
@@ -341,6 +350,26 @@ io.on('connection', (socket) => {
   socket.on('create-workspace', async (data: any, callback?: Function) => {
     try {
       const ws = await workspaceManager.createWorkspace(data)
+      if (callback) callback({ ok: true, workspace: ws })
+      io.emit('workspaces-list', workspaceManager.listWorkspaces())
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('create-workspace-from-git', async (data: { gitUrl: string, name?: string }, callback?: Function) => {
+    try {
+      const ws = await workspaceManager.cloneFromGitUrl(data.gitUrl, data.name)
+      if (callback) callback({ ok: true, workspace: ws })
+      io.emit('workspaces-list', workspaceManager.listWorkspaces())
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('update-workspace-config', async (data: { workspaceId: string, updates: any }, callback?: Function) => {
+    try {
+      const ws = await workspaceManager.updateWorkspace(data.workspaceId, data.updates)
       if (callback) callback({ ok: true, workspace: ws })
       io.emit('workspaces-list', workspaceManager.listWorkspaces())
     } catch (error: any) {
@@ -424,6 +453,74 @@ io.on('connection', (socket) => {
     }
     await autoSaveSessions()
   })
+
+  socket.on('start-parallel-task', async (data: any, callback?: Function) => {
+    try {
+      const { sessionIds, groupId } = sessionManager.createParallelTask(data)
+      const states = sessionManager.getSessionStates()
+      const groupSessions = sessionIds.map(id => states[id]).filter(Boolean)
+      if (callback) callback({ ok: true, sessionIds, groupId, sessions: groupSessions })
+      for (const id of sessionIds) {
+        io.emit('session-created', { sessionId: id, sessions: states })
+      }
+      await autoSaveSessions()
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('add-worktree', async ({ workspaceId }, callback?: Function) => {
+    try {
+      const ws = workspaceManager.getWorkspace(workspaceId)
+      if (!ws) throw new Error('Workspace not found')
+      const nextIndex = (ws.worktrees?.count || 0) + 1
+      const worktreeId = (ws.worktrees?.namingPattern || 'work{n}').replace('{n}', String(nextIndex))
+      const path = await worktreeHelper.createWorktree(ws, worktreeId)
+      await workspaceManager.updateWorkspace(workspaceId, {
+        worktrees: { ...ws.worktrees, enabled: true, count: nextIndex, autoCreate: true },
+      })
+      if (callback) callback({ ok: true, worktree: { id: worktreeId, path } })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('remove-worktree', async ({ workspaceId, worktreeId }, callback?: Function) => {
+    try {
+      const ws = workspaceManager.getWorkspace(workspaceId)
+      if (!ws) throw new Error('Workspace not found')
+      const sessionIds: string[] = []
+      const states = sessionManager.getSessionStates()
+      for (const [id, s] of Object.entries(states) as any) {
+        if (s.worktreeId === worktreeId) sessionIds.push(id)
+      }
+      for (const id of sessionIds) {
+        sessionManager.closeSession(id)
+        io.emit('session-closed', { sessionId: id })
+      }
+      await worktreeHelper.removeWorktree(ws, worktreeId)
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('list-worktrees', async ({ workspaceId }, callback?: Function) => {
+    try {
+      const ws = workspaceManager.getWorkspace(workspaceId)
+      if (!ws) {
+        if (callback) callback([])
+        return
+      }
+      const wtList = sessionManager.getWorktrees().map(wt => ({
+        id: wt.id,
+        path: wt.path,
+      }))
+      if (callback) callback(wtList)
+    } catch {
+      if (callback) callback([])
+    }
+  })
 })
 
 // Start server
@@ -433,6 +530,7 @@ async function startServer() {
     const activeWs = workspaceManager.getActiveWorkspace()
     if (activeWs) {
       sessionManager.setWorkspace(activeWs)
+      await worktreeHelper.ensureWorktreesExist(activeWs)
       await sessionManager.initializeSessions()
       const savedSessions = await workspaceManager.loadSessionState(activeWs.id)
       if (savedSessions.length > 0) {
@@ -521,6 +619,11 @@ ipcMain.handle('duplicate-workspace', async (_event, newName: string) => {
 app.whenReady().then(async () => {
   createWindow()
   await startServer()
+})
+
+app.on('will-quit', () => {
+  sessionManager.saveAllSessionBuffers()
+  autoSaveSessions()
 })
 
 app.on('window-all-closed', () => {

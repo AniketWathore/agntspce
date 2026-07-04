@@ -22,6 +22,7 @@ export interface Session {
   inactivityTimer?: NodeJS.Timeout | null
   processMonitor?: NodeJS.Timeout | null
   workspace?: string | null
+  sessionGroupId?: string
 }
 
 export interface SessionConfig {
@@ -63,6 +64,10 @@ export interface Workspace {
   terminals?: any
   projectType?: string
   lastAccess?: string
+  gitUrl?: string
+  envVars?: Record<string, string>
+  setupScript?: string
+  teardownScript?: string
 }
 
 export interface Worktree {
@@ -93,6 +98,10 @@ export interface SavedSessionData {
     agentId: string
     mode: string
     flags: string[]
+    model?: string
+    reasoning?: string
+    verbosity?: string
+    resumeId?: string
   }
 }
 

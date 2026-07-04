@@ -2191,6 +2191,460 @@
   background: var(--accent-bg);
 }
 
+.preset-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-style: solid;
+}
+
+/* ── Model Selector ─────────────────────────── */
+.model-selector {
+  margin-bottom: 16px;
+}
+
+.model-selector label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.select-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.select-input:hover,
+.select-input:focus {
+  border-color: var(--border-light);
+}
+
+.select-input option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+/* ── Slider Controls ─────────────────────────── */
+.slider-control {
+  margin-bottom: 16px;
+}
+
+.slider-control label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.slider-value {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.slider-options {
+  display: flex;
+  gap: 4px;
+}
+
+.slider-btn {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: capitalize;
+}
+
+.slider-btn:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.slider-btn.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Resume ID Field ─────────────────────────── */
+.resume-id-field {
+  margin-bottom: 16px;
+}
+
+.resume-id-field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.text-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.text-input:focus {
+  border-color: var(--accent-border);
+}
+
+.text-input::placeholder {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* ── Create Workspace Modal ──────────────── */
+.create-workspace-modal {
+  min-width: 420px;
+}
+
+.create-workspace-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.create-workspace-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.create-workspace-fields label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.path-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.path-picker .text-input {
+  flex: 1;
+}
+
+.browse-btn {
+  padding: 8px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.browse-btn:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.error-text {
+  font-size: 12px;
+  color: #e74c3c;
+  margin: 8px 0;
+}
+
+/* ── Workspace Config Modal ──────────────── */
+.workspace-config-modal {
+  min-width: 500px;
+}
+
+.config-field {
+  margin-bottom: 16px;
+}
+
+.config-field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.config-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+  min-height: 60px;
+}
+
+.config-textarea:focus {
+  border-color: var(--accent-border);
+}
+
+.config-textarea-code {
+  font-family: var(--font-mono);
+}
+
+/* ── Sidebar header buttons ──────────────── */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-header-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.sidebar-header h2 {
+  margin: 0;
+}
+
+/* ── Worktree Config ───────────────────────── */
+.config-tabs {
+  margin-bottom: 16px;
+}
+
+.config-section-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggle-row label:first-child {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin: 0;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  transition: all 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  top: 2px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+.text-input-mono {
+  font-family: var(--font-mono);
+}
+
+.field-hint {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.worktree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.worktree-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.worktree-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.worktree-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.worktree-item-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.worktree-item-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-item-branch {
+  font-size: 10px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.worktree-remove-btn {
+  flex-shrink: 0;
+}
+
+.worktree-add-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+/* ── Parallel Task ─────────────────────────── */
+.parallel-btn {
+  margin-left: 4px;
+}
+
+.parallel-task-modal {
+  min-width: 500px;
+}
+
+.parallel-prompt-input {
+  min-height: 100px;
+  font-family: inherit;
+}
+
+.parallel-field {
+  margin-bottom: 16px;
+}
+
+.parallel-field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.parallel-row {
+  display: flex;
+  gap: 12px;
+}
+
+.parallel-field-half {
+  flex: 1;
+}
+
+/* ── Grouped session styling ──────────────── */
+.terminal-pane.grouped {
+  border-left: 3px solid var(--accent);
+}
+
 /* ── Startup UI ─────────────────────────── */
 .terminal-startup-overlay {
   position: absolute;
