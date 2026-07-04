@@ -8,6 +8,8 @@ import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
 import { TokenReductionService } from './tokenReduction'
 import { WorkspaceManager } from './workspaceManager'
+import { AgentOrchestrator } from './agentOrchestrator'
+import { TokenUsageTracker, OutputCompressor, PromptOptimizer } from './outputCompressor'
 
 let pty: any = null
 try {
@@ -49,8 +51,14 @@ export class SessionManager extends EventEmitter {
   private branchRefreshInterval: NodeJS.Timeout | null = null
   private isWorkspaceSwitching = false
   private maxBufferSize = 100000
+  autoRestartSessions = false
   private agentManager: any = null
+  orchestrator: AgentOrchestrator | null = null
+  sessionHistory: { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] = []
   tokenReduction = new TokenReductionService()
+  tokenUsageTracker = new TokenUsageTracker()
+  outputCompressor = new OutputCompressor()
+  promptOptimizer = new PromptOptimizer()
 
   constructor(io: any, agentManager?: any) {
     super()
@@ -135,6 +143,10 @@ export class SessionManager extends EventEmitter {
       this.cleanupAllSessions()
     }
     if (!this.workspace) {
+      this.isWorkspaceSwitching = false
+      return
+    }
+    if (!this.autoRestartSessions) {
       this.isWorkspaceSwitching = false
       return
     }
@@ -280,6 +292,8 @@ export class SessionManager extends EventEmitter {
     ptyProcess.onData((data: string) => {
       session.buffer += data
       session.lastActivity = Date.now()
+      session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
+      this.tokenUsageTracker.trackOutput(sessionId, data)
       if (session.deliveredBufferLength > session.buffer.length) {
         session.deliveredBufferLength = session.buffer.length
       }
@@ -309,9 +323,11 @@ export class SessionManager extends EventEmitter {
           this.io.emit('session-exited', { sessionId, exitCode, signal })
         } catch { }
       }
-      if (isActive && config.type === 'claude' && !this.isWorkspaceSwitching) {
+      const canRestart = !this.orchestrator || this.orchestrator.canRestart(sessionId)
+      if (isActive && config.type === 'claude' && this.autoRestartSessions && !this.isWorkspaceSwitching && canRestart) {
         this.cleanupSessionBuffer(sessionId)
         this.sessions.delete(sessionId)
+        this.orchestrator?.recordRestart(sessionId)
         setTimeout(() => {
           this.createSession(sessionId, {
             ...config,
@@ -326,6 +342,10 @@ export class SessionManager extends EventEmitter {
 
     session.workspace = this.workspace?.id || null
     this.sessions.set(sessionId, session)
+
+    if (this.orchestrator) {
+      this.orchestrator.registerSession(sessionId, ptyProcess.pid, config.worktreeId, config.type)
+    }
 
     session.processMonitor = setInterval(() => {
       this.refreshSessionStatus(session.id)
@@ -351,6 +371,17 @@ export class SessionManager extends EventEmitter {
   closeSession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
+    this.sessionHistory.push({
+      id: sessionId,
+      type: session.type,
+      worktreeId: session.worktreeId,
+      branch: session.branch,
+      status: session.status,
+      lastActivity: session.lastActivity,
+      closedAt: Date.now(),
+      agentId: session.agentStartConfig?.agentId,
+    })
+    if (this.sessionHistory.length > 200) this.sessionHistory = this.sessionHistory.slice(-200)
     this.persistSessionBuffer(sessionId)
     try {
       clearInterval(session.processMonitor!)
@@ -361,6 +392,7 @@ export class SessionManager extends EventEmitter {
     this.tokenReduction.cleanup(sessionId)
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
+    this.orchestrator?.unregisterSession(sessionId)
     return true
   }
 
@@ -429,6 +461,10 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  getSessionHistory(): { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] {
+    return this.sessionHistory
+  }
+
   getSessionSaveData(): SavedSessionData[] {
     const data: SavedSessionData[] = []
     for (const [id, s] of this.sessions) {
@@ -454,6 +490,7 @@ export class SessionManager extends EventEmitter {
   }
 
   async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
+    if (!this.autoRestartSessions) return
     const restorePromises: Promise<void>[] = []
     for (const saved of sessions) {
       const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
@@ -484,25 +521,40 @@ export class SessionManager extends EventEmitter {
 
   createParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number, model?: string, reasoning?: string, verbosity?: string }): { sessionIds: string[], groupId: string } {
     const groupId = `parallel-${Date.now()}`
-    const availableWts = this.worktrees.filter(wt => {
-      const existingType = [...this.sessions.values()].find(s => s.worktreeId === wt.id && s.type === config.agentId)
-      return !existingType
-    })
-    const count = Math.min(config.worktreeCount, availableWts.length || 1)
+    const agentCfg = this.agentManager?.getAgent(config.agentId)
+    const supportsWorktree = agentCfg?.capabilities?.supportsWorktree !== false
     const sessionIds: string[] = []
     const prompt = config.prompt || ''
 
+    let count: number
+    let usedWorktrees: any[]
+
+    if (supportsWorktree) {
+      const availableWts = this.worktrees.filter(wt => {
+        const existingType = [...this.sessions.values()].find(s => s.worktreeId === wt.id && s.type === config.agentId)
+        return !existingType
+      })
+      count = Math.min(config.worktreeCount, availableWts.length || 1)
+      usedWorktrees = availableWts
+    } else {
+      count = 1
+      usedWorktrees = []
+    }
+
     for (let i = 0; i < count; i++) {
-      const wt = availableWts[i] || availableWts[0]
-      if (!wt) continue
+      const cwd = supportsWorktree && usedWorktrees[i]
+        ? usedWorktrees[i].path
+        : (this.workspace?.repository?.path || process.env.HOME || '/tmp')
+      const worktreeId = supportsWorktree && usedWorktrees[i]
+        ? usedWorktrees[i].id
+        : (this.workspace?.id || 'default')
       const sessionId = `${groupId}-${i}`
-      const cwd = wt.path || this.workspace?.repository?.path || process.env.HOME || '/tmp'
       this.createSession(sessionId, {
         command: getDefaultShell(),
         args: buildShellArgs(`cd "${cwd}"`),
         cwd,
         type: config.agentId,
-        worktreeId: wt.id,
+        worktreeId,
       })
       const session = this.sessions.get(sessionId)
       if (session) {
@@ -590,6 +642,7 @@ export class SessionManager extends EventEmitter {
   cleanupAllSessions() {
     for (const [id] of this.sessions) this.closeSession(id)
     this.sessions.clear()
+    this.orchestrator?.shutdownAll()
   }
 
   async updateGitBranch(worktreeId: string, cwd: string, force = false) {

@@ -10,6 +10,7 @@ import { StatusDetector } from './services/statusDetector'
 import { GitHelper } from './services/gitHelper'
 import { WorktreeHelper } from './services/worktreeHelper'
 import { AgentManager } from './services/agentManager'
+import { AgentOrchestrator } from './services/agentOrchestrator'
 
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
@@ -65,9 +66,11 @@ const sessionManager = new SessionManager(io, agentManager)
 const statusDetector = new StatusDetector()
 const gitHelper = new GitHelper()
 const worktreeHelper = new WorktreeHelper()
+const agentOrchestrator = new AgentOrchestrator(io)
 
 sessionManager.setStatusDetector(statusDetector)
 sessionManager.setGitHelper(gitHelper)
+sessionManager.orchestrator = agentOrchestrator
 
 async function autoSaveSessions() {
   const ws = sessionManager.getWorkspace()
@@ -456,14 +459,127 @@ io.on('connection', (socket) => {
 
   socket.on('start-parallel-task', async (data: any, callback?: Function) => {
     try {
+      const load = agentOrchestrator.getConcurrencyLoad()
+      const availableSlots = load.max - load.active
+      if (data.worktreeCount > availableSlots) {
+        if (callback) callback({ ok: false, error: `Only ${availableSlots} of ${data.worktreeCount} requested slots available. Try fewer agents.` })
+        return
+      }
       const { sessionIds, groupId } = sessionManager.createParallelTask(data)
       const states = sessionManager.getSessionStates()
       const groupSessions = sessionIds.map(id => states[id]).filter(Boolean)
-      if (callback) callback({ ok: true, sessionIds, groupId, sessions: groupSessions })
+      if (callback) callback({ ok: true, sessionIds, groupId, sessions: groupSessions, load: agentOrchestrator.getConcurrencyLoad() })
       for (const id of sessionIds) {
         io.emit('session-created', { sessionId: id, sessions: states })
       }
       await autoSaveSessions()
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-orchestrator-stats', async (_data: any, callback?: Function) => {
+    try {
+      callback({
+        ok: true,
+        concurrency: agentOrchestrator.getConcurrencyLoad(),
+        sessionCount: agentOrchestrator.getSessionCount(),
+        totalMemoryMB: agentOrchestrator.getTotalMemoryMB(),
+        resourceUsage: agentOrchestrator.getAllResourceUsage(),
+      })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-session-usage', async ({ sessionId }: { sessionId: string }, callback?: Function) => {
+    try {
+      const usage = agentOrchestrator.getResourceUsage(sessionId)
+      callback({ ok: true, usage })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-session-history', async (_data: any, callback?: Function) => {
+    try {
+      callback({ ok: true, history: sessionManager.getSessionHistory() })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-token-usage', async ({ sessionId }: { sessionId: string }, callback?: Function) => {
+    try {
+      const all = sessionManager.tokenUsageTracker.getAllUsage()
+      if (sessionId) {
+        callback({ ok: true, usage: sessionManager.tokenUsageTracker.getUsage(sessionId) })
+      } else {
+        callback({ ok: true, usage: all, totalTokens: all.reduce((s: number, u: any) => s + u.totalTokens, 0), totalCost: all.reduce((s: number, u: any) => s + u.estimatedCost, 0) })
+      }
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-log', async ({ worktreePath, maxCount }: { worktreePath: string, maxCount?: number }, callback?: Function) => {
+    try {
+      const log = await gitHelper.getLog(worktreePath, maxCount)
+      callback({ ok: true, log })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-diff', async ({ worktreePath, base, head }: { worktreePath: string, base?: string, head?: string }, callback?: Function) => {
+    try {
+      const diff = await gitHelper.getDiff(worktreePath, base, head)
+      callback({ ok: true, diff })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-branches', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const branches = await gitHelper.getBranches(worktreePath)
+      callback({ ok: true, branches })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-working-tree-diff', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const diff = await gitHelper.getWorkingTreeDiff(worktreePath)
+      callback({ ok: true, diff })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-commit-files', async ({ worktreePath, commitHash }: { worktreePath: string, commitHash: string }, callback?: Function) => {
+    try {
+      const files = await gitHelper.getCommitFiles(worktreePath, commitHash)
+      callback({ ok: true, files })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-working-tree-files', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const files = await gitHelper.getWorkingTreeFiles(worktreePath)
+      callback({ ok: true, files })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('get-git-file-diff', async ({ worktreePath, filePath, base, head }: { worktreePath: string, filePath: string, base?: string, head?: string }, callback?: Function) => {
+    try {
+      const diff = await gitHelper.getFileDiff(worktreePath, filePath, base, head)
+      callback({ ok: true, diff })
     } catch (error: any) {
       if (callback) callback({ ok: false, error: error.message })
     }
@@ -519,6 +635,12 @@ io.on('connection', (socket) => {
       if (callback) callback(wtList)
     } catch {
       if (callback) callback([])
+    }
+  })
+
+  socket.on('set-user-settings', (settings: { autoRestartSessions?: boolean }) => {
+    if (typeof settings.autoRestartSessions === 'boolean') {
+      sessionManager.autoRestartSessions = settings.autoRestartSessions
     }
   })
 })
@@ -622,6 +744,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('will-quit', () => {
+  agentOrchestrator.shutdownAll()
   sessionManager.saveAllSessionBuffers()
   autoSaveSessions()
 })

@@ -11,6 +11,12 @@ export interface AgentMode {
   description: string
 }
 
+export interface AgentCapabilities {
+  supportsWorktree: boolean
+  requiresGitRepo: boolean
+  supportsParallel: boolean
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -29,6 +35,7 @@ export interface AgentConfig {
   defaultReasoning?: string
   verbosityLevels?: string[]
   defaultVerbosity?: string
+  capabilities: AgentCapabilities
 }
 
 export interface AgentUIConfig {
@@ -45,6 +52,7 @@ export interface AgentUIConfig {
   defaultReasoning?: string
   verbosityLevels?: string[]
   defaultVerbosity?: string
+  capabilities: AgentCapabilities
 }
 
 export interface AgentStartConfig {
@@ -106,6 +114,11 @@ export class AgentManager {
         permissions: { name: 'Permissions', mutuallyExclusive: false },
         output: { name: 'Output Options', mutuallyExclusive: false },
       },
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('opencode', {
@@ -123,6 +136,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('gemini', {
@@ -141,6 +159,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
 
     this.agentConfigs.set('codex', {
@@ -204,6 +227,11 @@ export class AgentManager {
         sandbox: { name: 'Sandbox Mode', mutuallyExclusive: true },
         approvals: { name: 'Approval Policy', mutuallyExclusive: true },
       },
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('cursor-agent', {
@@ -223,6 +251,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('copilot', {
@@ -241,6 +274,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
 
     this.agentConfigs.set('mastracode', {
@@ -258,6 +296,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('droid', {
@@ -275,6 +318,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('amp', {
@@ -292,6 +340,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('pi', {
@@ -309,6 +362,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
   }
 
@@ -345,6 +403,7 @@ export class AgentManager {
       defaultReasoning: agent.defaultReasoning,
       verbosityLevels: agent.verbosityLevels,
       defaultVerbosity: agent.defaultVerbosity,
+      capabilities: agent.capabilities,
     }
   }
 

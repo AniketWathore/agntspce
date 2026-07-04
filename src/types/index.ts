@@ -72,6 +72,12 @@ export interface AgentFlag {
   default: boolean
 }
 
+export interface AgentCapabilities {
+  supportsWorktree: boolean
+  requiresGitRepo: boolean
+  supportsParallel: boolean
+}
+
 export interface AgentConfig {
   id: string
   name: string
@@ -86,6 +92,7 @@ export interface AgentConfig {
   defaultReasoning?: string
   verbosityLevels?: string[]
   defaultVerbosity?: string
+  capabilities?: AgentCapabilities
 }
 
 export interface AgentStartConfig {

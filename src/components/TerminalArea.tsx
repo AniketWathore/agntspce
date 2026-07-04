@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
 import AgentPicker from './AgentPicker'
+import ProjectBoard from './ProjectBoard'
 import { getAgentColorImage } from '../agentImages'
 
 export type LayoutPreset = 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
@@ -204,13 +205,14 @@ export default function TerminalArea({
   onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
   activeSessionId, writeBuffers, agentConfigs,
   layoutPreset, focusMode, agentsList, bottomShellOpen, onToggleShell,
-  chatSidebarOpen, onToggleChatSidebar, onParallelTask,
-}: Props) {
+  chatSidebarOpen, onToggleChatSidebar, onParallelTask, onLayoutChange,
+}: Props & { onLayoutChange?: (preset: LayoutPreset) => void }) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const [activeShellId, setActiveShellId] = useState<string | null>(null)
   const [terminalFullscreen, setTerminalFullscreen] = useState(false)
+  const [showBoard, setShowBoard] = useState(false)
   const prevShellCount = useRef(shellSessions.length)
 
   const typeCounts = useMemo(() => {
@@ -349,6 +351,10 @@ export default function TerminalArea({
       .map(t => ({ id: t.id, label: t.label, icon: t.icon, count: typeCounts[t.id] })),
   ]
 
+  function handleBoardClick() {
+    setShowBoard(o => !o)
+  }
+
   function handleAddAgentClick() {
     if (agentsList && agentsList.length > 0) {
       setShowDropdown(o => !o)
@@ -385,7 +391,7 @@ export default function TerminalArea({
               <div
                 key={tab.id}
                 className={`tab-item ${isActive ? 'active' : ''}`}
-                onClick={() => { setActiveGroupTab(tab.id); if (terminalFullscreen) setTerminalFullscreen(false) }}
+                onClick={() => { setActiveGroupTab(tab.id); setShowBoard(false); if (terminalFullscreen) setTerminalFullscreen(false) }}
               >
                 {tab.icon === '⊞' ? (
                   <span className="tab-icon">{tab.icon}</span>
@@ -399,6 +405,22 @@ export default function TerminalArea({
           })}
         </div>
         <div className="tab-bar-actions" style={{ position: 'relative' }}>
+          <div className="layout-presets">
+            {(['auto', '1x1', '2x2', '1+2', '3x3'] as LayoutPreset[]).map(p => (
+              <button
+                key={p}
+                className={`layout-preset-btn ${layoutPreset === p ? 'active' : ''}`}
+                onClick={() => onLayoutChange?.(p)}
+                title={`Layout: ${p}`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          {focusMode && <span className="focus-indicator" title="Focus mode active (Cmd+Shift+F)">Focus</span>}
+          <button className={`new-terminal-btn board-btn ${showBoard ? 'active' : ''}`} onClick={handleBoardClick} title="Project Board">
+            Board
+          </button>
           <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={handleAddAgentClick}>+ Agent</button>
           {onParallelTask && (
             <button className="new-terminal-btn parallel-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={onParallelTask}>Parallel</button>
@@ -416,7 +438,15 @@ export default function TerminalArea({
         </div>
       </div>
 
-      {showAgents && (
+      {showBoard ? (
+        <ProjectBoard
+          sessions={filteredSessions}
+          onSelect={(sid) => { setShowBoard(false); onActiveSessionChange(sid) }}
+          onRestart={onRestart}
+          onClose={onCloseTab}
+          onNewAgent={() => {}}
+        />
+      ) : showAgents && (
         <div
           className={useHorizontalScroll ? 'terminal-area-hscroll' : 'terminal-area'}
           style={useHorizontalScroll ? { flex: 1, minHeight: 0 } : tilingStyle}

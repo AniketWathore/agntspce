@@ -11,8 +11,15 @@ import ParallelTaskModal from './components/ParallelTaskModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
+import CommanderPanel from './components/CommanderPanel'
+import NotificationPanel from './components/NotificationPanel'
+import HistoryPanel from './components/HistoryPanel'
+import type { Notification } from './components/NotificationPanel'
+import type { HistoryEntry } from './components/HistoryPanel'
+
 import { useSocket } from './hooks/useSocket'
-import type { TerminalOutput, AgentConfig, AgentStartConfig, WorkspaceInfo } from './types'
+import PRPanel from './components/PRPanel'
+import type { TerminalOutput, AgentConfig, AgentStartConfig, WorkspaceInfo, SessionState } from './types'
 import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
@@ -108,6 +115,8 @@ function App() {
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
     createWorkspaceFromGit, updateWorkspaceConfig,
     addWorktree, removeWorktree, listWorktrees, startParallelTask,
+    getSessionHistory, getGitLog, getGitDiff, getGitBranches, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
+    setUserSettings,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -128,6 +137,18 @@ function App() {
   const [editingWorkspace, setEditingWorkspace] = useState<WorkspaceInfo | null>(null)
   const [parallelTaskModalOpen, setParallelTaskModalOpen] = useState(false)
   const [worktreesForEdit, setWorktreesForEdit] = useState<any[]>([])
+  const [commanderOpen, setCommanderOpen] = useState(false)
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
+  const [prPanelOpen, setPrPanelOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
+  const [fontSize, setFontSize] = useState(() => {
+    try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
+  })
+  const [fontFamily, setFontFamily] = useState(() => {
+    try { return localStorage.getItem('agent-workspace-font-family') || "'JetBrains Mono', 'Fira Code', Menlo, monospace'" } catch { return "'JetBrains Mono', 'Fira Code', Menlo, monospace'" }
+  })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
@@ -152,6 +173,20 @@ function App() {
     localStorage.setItem('agent-workspace-theme', theme)
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-font-size', String(fontSize))
+    document.documentElement.style.setProperty('--terminal-font-size', `${fontSize}px`)
+  }, [fontSize])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-font-family', fontFamily)
+    document.documentElement.style.setProperty('--terminal-font-family', fontFamily)
+  }, [fontFamily])
+
+  useEffect(() => {
+    getSessionHistory().then(h => setSessionHistory(h))
+  }, [sessions])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -193,6 +228,48 @@ function App() {
     })
     return unsub
   }, [onTerminalOutput])
+
+  const prevSessionRef = useRef<Record<string, SessionState>>({})
+  const firstMountRef = useRef(true)
+  const notifDebounceRef = useRef<Record<string, number>>({})
+  useEffect(() => {
+    if (firstMountRef.current) {
+      firstMountRef.current = false
+      prevSessionRef.current = sessions
+      return
+    }
+    const prev = prevSessionRef.current
+    const newNots: Notification[] = []
+    const now = Date.now()
+
+    for (const [id, s] of Object.entries(sessions)) {
+      const prevS = prev[id]
+      if (!prevS) continue
+      if (prevS.status !== s.status) {
+        if (prevS.status === 'busy' && s.status === 'idle') {
+          const key = `complete-${id}`
+          if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
+          notifDebounceRef.current[key] = now
+          newNots.push({ id: `not-complete-${id}-${now}`, type: 'session-complete', title: 'Task complete', detail: `${s.type} session ${id.slice(-8)} finished`, timestamp: now, read: false })
+        }
+      }
+    }
+
+    for (const id of Object.keys(prev)) {
+      if (!sessions[id]) {
+        const key = `exit-${id}`
+        if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
+        notifDebounceRef.current[key] = now
+        newNots.push({ id: `not-exited-${id}-${now}`, type: 'session-exited', title: 'Session closed', detail: `${prev[id].type} session ${id.slice(-8)} ended`, timestamp: now, read: false })
+      }
+    }
+
+    if (newNots.length > 0) {
+      setNotifications(prev => [...newNots, ...prev].slice(0, 100))
+    }
+
+    prevSessionRef.current = sessions
+  }, [sessions])
 
   useEffect(() => {
     if (activeWorkspace?.id && activeWorkspaceId !== activeWorkspace.id) {
@@ -275,6 +352,39 @@ function App() {
     const res = await startParallelTask(config)
     if (!res?.ok) throw new Error(res?.error || 'Failed to launch parallel task')
   }
+
+  function dismissNotification(id: string) {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+  }
+
+  function dismissAllNotifications() {
+    setNotifications([])
+  }
+
+  function handleRestoreHistory(entry: HistoryEntry) {
+    createRawSession(entry.type, entry.worktreeId !== 'default' ? undefined : undefined)
+    setHistoryPanelOpen(false)
+  }
+
+  const commanderCommands = useMemo(() => [
+    { id: 'new-agent', category: 'Terminals', label: 'New Agent Session', description: 'Create a new AI agent terminal', shortcut: '⌘⇧A', action: () => { createRawSession('claude') } },
+    { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', shortcut: '⌘⇧S', action: () => { handleNewShell() } },
+    { id: 'new-workspace', category: 'Workspaces', label: 'Create Workspace', description: 'Create a new workspace', shortcut: '⌘⇧N', action: () => { setCreateWorkspaceModalOpen(true) } },
+    { id: 'focus-mode', category: 'View', label: 'Toggle Focus Mode', description: 'Dim inactive terminals', shortcut: '⌘⇧F', action: () => { setFocusMode(o => !o) } },
+    { id: 'layout-auto', category: 'View', label: 'Auto Layout', description: 'Automatic terminal grid layout', action: () => { setLayoutPreset('auto') } },
+    { id: 'layout-1x1', category: 'View', label: '1x1 Layout', description: 'Single terminal view', action: () => { setLayoutPreset('1x1') } },
+    { id: 'layout-2x2', category: 'View', label: '2x2 Layout', description: 'Four terminal grid', action: () => { setLayoutPreset('2x2') } },
+    { id: 'layout-1+2', category: 'View', label: '1+2 Layout', description: 'Detail + two terminals', action: () => { setLayoutPreset('1+2') } },
+    { id: 'toggle-chat', category: 'View', label: 'Toggle Chat Sidebar', description: 'Show/hide the chat panel', shortcut: '⌘B', action: () => { handleToggleChatSidebar() } },
+    { id: 'toggle-workspace-sidebar', category: 'View', label: 'Toggle Workspace Sidebar', description: 'Show/hide workspace list', shortcut: '⌘⇧B', action: () => { handleToggleWorkspaceSidebar() } },
+    { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', action: () => { handleToggleBottomShell() } },
+    { id: 'show-board', category: 'View', label: 'Show Project Board', description: 'View session cards', action: () => { setActiveView(null) } },
+    { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', action: () => { setActiveView('dashboard') } },
+    { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', action: () => { setActiveView('settings') } },
+    { id: 'show-history', category: 'View', label: 'Show Session History', description: 'View past sessions', action: () => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) } },
+    { id: 'clear-notifications', category: 'Notifications', label: 'Clear Notifications', description: 'Dismiss all notifications', action: () => { dismissAllNotifications() } },
+    { id: 'parallel-task', category: 'Terminals', label: 'Launch Parallel Task', description: 'Run the same prompt across multiple agents', action: () => { setParallelTaskModalOpen(true) } },
+  ], [createRawSession, handleNewShell, setFocusMode, setLayoutPreset, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, getSessionHistory, setSessionHistory])
 
   async function handleAddWorktree(workspaceId: string) {
     const res = await addWorktree(workspaceId)
@@ -423,6 +533,12 @@ function App() {
       const isMeta = e.metaKey || e.ctrlKey
       if (!isMeta) return
 
+      if (e.key === 'k') {
+        e.preventDefault()
+        setCommanderOpen(o => !o)
+        return
+      }
+
       if (e.key === 'F' && e.shiftKey) {
         e.preventDefault()
         setFocusMode(o => !o)
@@ -543,6 +659,30 @@ function App() {
               <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
             </button>
             <button
+              className="activity-bar-btn"
+              onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
+              title="Session History"
+            >
+              <span className="activity-bar-text-icon">📋</span>
+            </button>
+            <button
+              className="activity-bar-btn"
+              onClick={() => setPrPanelOpen(o => !o)}
+              title="Git Review"
+            >
+              <span className="activity-bar-text-icon">🔀</span>
+            </button>
+            <button
+              className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
+              onClick={() => setNotificationPanelOpen(o => !o)}
+              title="Notifications"
+            >
+              <span className="activity-bar-text-icon">🔔</span>
+              {notifications.filter(n => !n.read).length > 0 && (
+                <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
+              )}
+            </button>
+            <button
               className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
               onClick={() => setView('profile')}
               title="Profile"
@@ -598,7 +738,7 @@ function App() {
           ) : activeView === 'profile' ? (
             <Profile onClose={() => setActiveView(null)} />
           ) : activeView === 'settings' ? (
-            <Settings theme={theme} onThemeChange={setTheme} onClose={() => setActiveView(null)} />
+            <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
           ) : (
             <TerminalArea
               sessions={agentSessions}
@@ -624,6 +764,7 @@ function App() {
               onToggleShell={handleToggleBottomShell}
               chatSidebarOpen={chatSidebarOpen}
               onToggleChatSidebar={handleToggleChatSidebar}
+              onLayoutChange={setLayoutPreset}
             />
           )}
         </main>
@@ -673,6 +814,37 @@ function App() {
         onClose={() => setParallelTaskModalOpen(false)}
         onLaunch={handleLaunchParallelTask}
       />
+      {commanderOpen && (
+        <CommanderPanel commands={commanderCommands} onClose={() => setCommanderOpen(false)} />
+      )}
+      {notificationPanelOpen && (
+        <NotificationPanel
+          notifications={notifications}
+          onDismiss={dismissNotification}
+          onDismissAll={dismissAllNotifications}
+          onClose={() => setNotificationPanelOpen(false)}
+        />
+      )}
+      {historyPanelOpen && (
+        <HistoryPanel
+          history={sessionHistory}
+          onRestore={handleRestoreHistory}
+          onClose={() => setHistoryPanelOpen(false)}
+        />
+      )}
+      {prPanelOpen && activeWorkspace?.repository?.path && (
+        <PRPanel
+          worktreePath={activeWorkspace.repository.path}
+          onClose={() => setPrPanelOpen(false)}
+          onSelectDiff={() => {}}
+          fetchLog={getGitLog}
+          fetchDiff={getGitDiff}
+          fetchWorkingTreeDiff={getGitWorkingTreeDiff}
+          fetchCommitFiles={getGitCommitFiles}
+          fetchWorkingTreeFiles={getGitWorkingTreeFiles}
+          fetchFileDiff={getGitFileDiff}
+        />
+      )}
     </div>
   )
 }

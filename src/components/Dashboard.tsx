@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
 import { useSocket } from '../hooks/useSocket'
+import ActivityFeed from './ActivityFeed'
 
 interface DeletedWs {
   id: string
@@ -107,6 +108,9 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
             <span className="dashboard-overview-change neutral">{totalSessions - activeCount} idle</span>
           </div>
         </div>
+
+        {/* Activity Feed */}
+        <ActivityFeed sessions={sessions} maxEvents={30} />
 
         {/* Token Reduction Section */}
         {compressionStats.linesCompressed > 0 && (

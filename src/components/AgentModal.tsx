@@ -251,24 +251,43 @@ export default function AgentModal({ open, sessionId, agentConfigs, onStart, onC
             )}
 
             <div className="quick-presets">
-              <button
-                className={`preset-btn ${activePreset === 'default' ? 'active' : ''}`}
-                onClick={() => applyPreset('default')}
-              >
-                🛡️ Default (Safe)
-              </button>
-              <button
-                className={`preset-btn ${activePreset === 'powerful' ? 'active' : ''}`}
-                onClick={() => applyPreset('powerful')}
-              >
-                🚀 Most Powerful
-              </button>
-              <button
-                className={`preset-btn ${activePreset === 'readOnly' ? 'active' : ''}`}
-                onClick={() => applyPreset('readOnly')}
-              >
-                👀 Read Only
-              </button>
+              <div className="presets-label">Quick Presets</div>
+              <div className="preset-buttons">
+                <button
+                  className={`preset-btn ${activePreset === 'default' ? 'active' : ''}`}
+                  onClick={() => applyPreset('default')}
+                  title="Default safe configuration with recommended settings"
+                >
+                  <span className="preset-btn-icon">🛡️</span>
+                  <span className="preset-btn-label">Default</span>
+                  {activePreset === 'default' && <span className="preset-btn-check">✓</span>}
+                </button>
+                <button
+                  className={`preset-btn ${activePreset === 'powerful' ? 'active' : ''}`}
+                  onClick={() => applyPreset('powerful')}
+                  title="Maximum capabilities: all flags, best model, highest reasoning"
+                >
+                  <span className="preset-btn-icon">🚀</span>
+                  <span className="preset-btn-label">Powerful</span>
+                  {activePreset === 'powerful' && <span className="preset-btn-check">✓</span>}
+                </button>
+                <button
+                  className={`preset-btn ${activePreset === 'readOnly' ? 'active' : ''}`}
+                  onClick={() => applyPreset('readOnly')}
+                  title="Read-only access, no file modifications"
+                >
+                  <span className="preset-btn-icon">👀</span>
+                  <span className="preset-btn-label">Read Only</span>
+                  {activePreset === 'readOnly' && <span className="preset-btn-check">✓</span>}
+                </button>
+              </div>
+              {activePreset && (
+                <div className="preset-summary">
+                  {activePreset === 'default' && 'Safe configuration: default flags and model settings'}
+                  {activePreset === 'powerful' && 'Max power: all permissions, highest model/reasoning/verbosity'}
+                  {activePreset === 'readOnly' && 'Read only: no file writes, safe for review'}
+                </div>
+              )}
             </div>
           </>
         )}
