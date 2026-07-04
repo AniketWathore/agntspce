@@ -249,7 +249,7 @@ export default function TerminalArea({
               }
             }}>+ Agent</button>
             <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
-              <img src="/img/chat.png" alt="Chat" className="shell-btn-icon shell-btn-icon-chat" />
+              <i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i>
             </button>
             {showAgentDropdown && agentsList && (
               <AgentPicker
@@ -271,9 +271,9 @@ export default function TerminalArea({
                 }
               }}>+ Agent</button>
               <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
-                <img src="/img/terminal.png" alt="Shell" className="shell-btn-icon" />
+                <i className="codicon codicon-terminal" style={{ fontSize: 16 }}></i>
               </button>
-              <button className="shell-btn" onClick={onToggleChatSidebar} title="Chat Assistance">💬 Assist</button>
+              <button className="shell-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
               {showDropdown && agentsList && (
                 <AgentPicker
                   agents={agentsList}
@@ -382,7 +382,7 @@ export default function TerminalArea({
           <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={handleAddAgentClick}>+ Agent</button>
 
           <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
-            <img src="/img/chat.png" alt="Chat" className="shell-btn-icon shell-btn-icon-chat" />
+            <i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i>
           </button>
           {showDropdown && agentsList && (
             <AgentPicker
@@ -415,7 +415,7 @@ export default function TerminalArea({
               dimmed={focusMode && session.id !== activeSessionId}
             />
           ))}
-          <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance">💬 Assist</button>
+          <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
         </div>
       )}
 

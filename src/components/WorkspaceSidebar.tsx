@@ -34,19 +34,7 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
 }
 
 function FolderIcon({ open }: { open: boolean }) {
-  if (open) {
-    return (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-        <path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3.38a1.5 1.5 0 0 1 1.06.44L8.5 4.5H12A1.5 1.5 0 0 1 13.5 6v.5H5a1.5 1.5 0 0 0-1.44 1.03l-.97 3.27A.5.5 0 0 0 3.07 11h-.57A1.5 1.5 0 0 1 1 9.5V4.5z" fill="#DCB67A"/>
-        <path d="M5.07 6H14.5A1.5 1.5 0 0 1 16 7.5v4.94a1.5 1.5 0 0 1-1.5 1.5H3.14a1.5 1.5 0 0 1-1.44-1.97l.93-3.1A1.5 1.5 0 0 1 4.07 7.5H5.1L5.07 6z" fill="#DCB67A" opacity="0.7"/>
-      </svg>
-    )
-  }
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-      <path d="M1.5 3.5a1 1 0 0 1 1-1h3.172a1 1 0 0 1 .707.293L7.5 3.5H13a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H2.5a1 1 0 0 1-1-1V3.5z" fill="#DCB67A"/>
-    </svg>
-  )
+  return <i className={`codicon ${open ? 'codicon-folder-opened' : 'codicon-folder'}`} style={{ fontSize: 16 }}></i>
 }
 
 export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onEdit, onDelete, onRestore, onPermanentDelete, onOpenCreateModal, showModal, closeModal }: Props) {
