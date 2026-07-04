@@ -22,7 +22,6 @@ interface Props {
   showModal: (title: string, onSubmit: (value: string) => void, defaultValue?: string) => void
   closeModal: () => void
   onOpenCreateModal: () => void
-  onEditConfig: (ws: WorkspaceInfo) => void
 }
 
 function getSessionCount(ws: WorkspaceInfo): number {
@@ -34,7 +33,7 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
   return Object.values(sessions).filter(s => s.status === 'busy' || s.status === 'waiting').length
 }
 
-export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onOpenCreateModal, onEditConfig }: Props) {
+export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onOpenCreateModal }: Props) {
   const [showTrash, setShowTrash] = useState(false)
   const activeCount = getActiveCount(sessions)
 
@@ -65,13 +64,7 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
                 <span className="workspace-session-count">{getSessionCount(ws)}</span>
               </div>
               <div className="workspace-item-actions">
-                <button
-                  className="action-btn"
-                  onClick={(e) => { e.stopPropagation(); onEditConfig(ws) }}
-                  title="Configure"
-                >
-                  Config
-                </button>
+
                 <button
                   className="action-btn danger"
                   onClick={(e) => {

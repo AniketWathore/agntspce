@@ -5,10 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
 import AgentPicker from './AgentPicker'
-import ProjectBoard from './ProjectBoard'
 import { getAgentColorImage } from '../agentImages'
-
-export type LayoutPreset = 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
 
 interface Props {
   sessions: SessionState[]
@@ -33,7 +30,6 @@ interface Props {
   onToggleShell: () => void
   chatSidebarOpen: boolean
   onToggleChatSidebar: () => void
-  onParallelTask?: () => void
 }
 
 const AGENT_TYPES = [
@@ -43,37 +39,18 @@ const AGENT_TYPES = [
   { id: 'gemini', label: 'Gemini CLI', icon: '✨' },
 ]
 
-function getTilingStyle(count: number, preset: LayoutPreset): CSSProperties {
+function getTilingStyle(count: number): CSSProperties {
   const base: CSSProperties = { display: 'grid', gap: 4, padding: '0 4px 4px', minHeight: 0, flex: 1 }
-  switch (preset) {
-    case '1x1':
-      return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-    case '2x2':
-      return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-    case '1+2':
-      return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-    case '3x3':
-      return { ...base, gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr' }
-    case 'auto':
-    default:
-      if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-      if (count === 2) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
-      if (count <= 4) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-      const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
-      const rows = Math.ceil(count / cols)
-      return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
-  }
+  if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
+  if (count === 2) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
+  if (count <= 4) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
+  const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
+  const rows = Math.ceil(count / cols)
+  return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
 }
 
-function getItemStyle(index: number, count: number, preset: LayoutPreset, activeIndex: number): CSSProperties {
-  if (preset === '1x1') {
-    if (index !== activeIndex) return { display: 'none' }
-    return {}
-  }
-  if (preset === '1+2' && count > 1 && index === activeIndex) {
-    return { gridRow: 'span 2' }
-  }
-  if (preset === 'auto' && count === 3 && index === 0) {
+function getItemStyle(index: number, count: number, activeIndex: number): CSSProperties {
+  if (count === 3 && index === 0) {
     return { gridRow: 'span 2' }
   }
   return {}
@@ -204,15 +181,14 @@ export default function TerminalArea({
   sessions, shellSessions, onInput, onResize, onRestart, onStartAgent,
   onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
   activeSessionId, writeBuffers, agentConfigs,
-  layoutPreset, focusMode, agentsList, bottomShellOpen, onToggleShell,
-  chatSidebarOpen, onToggleChatSidebar, onParallelTask, onLayoutChange,
-}: Props & { onLayoutChange?: (preset: LayoutPreset) => void }) {
+  focusMode, agentsList, bottomShellOpen, onToggleShell,
+  chatSidebarOpen, onToggleChatSidebar,
+}: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
   const [showAgentDropdown, setShowAgentDropdown] = useState(false)
   const [activeShellId, setActiveShellId] = useState<string | null>(null)
   const [terminalFullscreen, setTerminalFullscreen] = useState(false)
-  const [showBoard, setShowBoard] = useState(false)
   const prevShellCount = useRef(shellSessions.length)
 
   const typeCounts = useMemo(() => {
@@ -351,10 +327,6 @@ export default function TerminalArea({
       .map(t => ({ id: t.id, label: t.label, icon: t.icon, count: typeCounts[t.id] })),
   ]
 
-  function handleBoardClick() {
-    setShowBoard(o => !o)
-  }
-
   function handleAddAgentClick() {
     if (agentsList && agentsList.length > 0) {
       setShowDropdown(o => !o)
@@ -379,7 +351,7 @@ export default function TerminalArea({
   const activeIdx = activeSessionId
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
     : 0
-  const tilingStyle = getTilingStyle(filteredSessions.length, layoutPreset)
+  const tilingStyle = getTilingStyle(filteredSessions.length)
 
   return (
     <div className="terminal-area-wrapper">
@@ -391,7 +363,7 @@ export default function TerminalArea({
               <div
                 key={tab.id}
                 className={`tab-item ${isActive ? 'active' : ''}`}
-                onClick={() => { setActiveGroupTab(tab.id); setShowBoard(false); if (terminalFullscreen) setTerminalFullscreen(false) }}
+                onClick={() => { setActiveGroupTab(tab.id); if (terminalFullscreen) setTerminalFullscreen(false) }}
               >
                 {tab.icon === '⊞' ? (
                   <span className="tab-icon">{tab.icon}</span>
@@ -405,26 +377,9 @@ export default function TerminalArea({
           })}
         </div>
         <div className="tab-bar-actions" style={{ position: 'relative' }}>
-          <div className="layout-presets">
-            {(['auto', '1x1', '2x2', '1+2', '3x3'] as LayoutPreset[]).map(p => (
-              <button
-                key={p}
-                className={`layout-preset-btn ${layoutPreset === p ? 'active' : ''}`}
-                onClick={() => onLayoutChange?.(p)}
-                title={`Layout: ${p}`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
           {focusMode && <span className="focus-indicator" title="Focus mode active (Cmd+Shift+F)">Focus</span>}
-          <button className={`new-terminal-btn board-btn ${showBoard ? 'active' : ''}`} onClick={handleBoardClick} title="Project Board">
-            Board
-          </button>
           <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={handleAddAgentClick}>+ Agent</button>
-          {onParallelTask && (
-            <button className="new-terminal-btn parallel-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={onParallelTask}>Parallel</button>
-          )}
+
           <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
             <img src="/img/chat.png" alt="Chat" className="shell-btn-icon shell-btn-icon-chat" />
           </button>
@@ -438,15 +393,7 @@ export default function TerminalArea({
         </div>
       </div>
 
-      {showBoard ? (
-        <ProjectBoard
-          sessions={filteredSessions}
-          onSelect={(sid) => { setShowBoard(false); onActiveSessionChange(sid) }}
-          onRestart={onRestart}
-          onClose={onCloseTab}
-          onNewAgent={() => {}}
-        />
-      ) : showAgents && (
+      {showAgents && (
         <div
           className={useHorizontalScroll ? 'terminal-area-hscroll' : 'terminal-area'}
           style={useHorizontalScroll ? { flex: 1, minHeight: 0 } : tilingStyle}
@@ -462,7 +409,7 @@ export default function TerminalArea({
               onShowAgentModal={onShowAgentModal}
               writeData={writeBuffers[session.id] || ''}
               agentConfigs={agentConfigs}
-              style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, layoutPreset, activeIdx)}
+              style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, activeIdx)}
               onClose={onCloseTab}
               dimmed={focusMode && session.id !== activeSessionId}
             />

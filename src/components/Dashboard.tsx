@@ -270,10 +270,6 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
                     <span className="card-stat-value">{count}</span>
                     <span className="card-stat-label">sessions</span>
                   </div>
-                  <div className="card-stat">
-                    <span className="card-stat-value">{ws.worktrees?.enabled ? ws.worktrees.count || 1 : 0}</span>
-                    <span className="card-stat-label">worktrees</span>
-                  </div>
                 </div>
                 <div className="dashboard-card-footer">
                   <button

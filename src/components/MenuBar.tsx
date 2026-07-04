@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 
-type LayoutPreset = 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
 
 interface Props {
   onNewAgent: () => void
@@ -9,8 +8,6 @@ interface Props {
   onCloseTerminal: () => void
   onToggleShellSidebar: () => void
   onToggleWorkspaceSidebar: () => void
-  onSetLayoutPreset: (preset: LayoutPreset) => void
-  layoutPreset: LayoutPreset
   hasActiveSession: boolean
 }
 
@@ -32,7 +29,7 @@ interface MenuGroup {
 export default function MenuBar({
   onNewAgent, onNewShell, onNewWorkspace, onCloseTerminal,
   onToggleShellSidebar, onToggleWorkspaceSidebar,
-  onSetLayoutPreset, layoutPreset, hasActiveSession,
+  hasActiveSession,
 }: Props) {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const barRef = useRef<HTMLDivElement>(null)
@@ -85,17 +82,6 @@ export default function MenuBar({
       items: [
         { label: 'Toggle Shell Sidebar', action: onToggleShellSidebar, shortcut: '⌘B' },
         { label: 'Toggle Workspace Sidebar', action: onToggleWorkspaceSidebar },
-        { separator: true },
-        {
-          label: 'Layout',
-          submenu: [
-            { label: 'Auto', action: () => onSetLayoutPreset('auto'), checked: layoutPreset === 'auto' },
-            { label: '1×1', action: () => onSetLayoutPreset('1x1'), checked: layoutPreset === '1x1' },
-            { label: '2×2', action: () => onSetLayoutPreset('2x2'), checked: layoutPreset === '2x2' },
-            { label: '1+2', action: () => onSetLayoutPreset('1+2'), checked: layoutPreset === '1+2' },
-            { label: '3×3', action: () => onSetLayoutPreset('3x3'), checked: layoutPreset === '3x3' },
-          ],
-        },
       ],
     },
     {

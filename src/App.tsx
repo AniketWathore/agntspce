@@ -6,8 +6,6 @@ import ChatSidebar from './components/ChatSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
 import CreateWorkspaceModal from './components/CreateWorkspaceModal'
-import WorkspaceConfigModal from './components/WorkspaceConfigModal'
-import ParallelTaskModal from './components/ParallelTaskModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
@@ -20,7 +18,6 @@ import type { HistoryEntry } from './components/HistoryPanel'
 import { useSocket } from './hooks/useSocket'
 import PRPanel from './components/PRPanel'
 import type { TerminalOutput, AgentConfig, AgentStartConfig, WorkspaceInfo, SessionState } from './types'
-import type { LayoutPreset } from './components/TerminalArea'
 import './App.css'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
@@ -114,7 +111,6 @@ function App() {
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
     createWorkspaceFromGit, updateWorkspaceConfig,
-    addWorktree, removeWorktree, listWorktrees, startParallelTask,
     getSessionHistory, getGitLog, getGitDiff, getGitBranches, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
     setUserSettings,
   } = useSocket()
@@ -125,7 +121,6 @@ function App() {
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
   const [chatSidebarOpen, setChatSidebarOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
   const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | null>(null)
@@ -133,10 +128,6 @@ function App() {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
   const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false)
-  const [workspaceConfigModalOpen, setWorkspaceConfigModalOpen] = useState(false)
-  const [editingWorkspace, setEditingWorkspace] = useState<WorkspaceInfo | null>(null)
-  const [parallelTaskModalOpen, setParallelTaskModalOpen] = useState(false)
-  const [worktreesForEdit, setWorktreesForEdit] = useState<any[]>([])
   const [commanderOpen, setCommanderOpen] = useState(false)
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
@@ -337,21 +328,6 @@ function App() {
     }
   }
 
-  function handleEditConfig(ws: WorkspaceInfo) {
-    setEditingWorkspace(ws)
-    setWorkspaceConfigModalOpen(true)
-    listWorktrees(ws.id).then(setWorktreesForEdit)
-  }
-
-  async function handleSaveConfig(workspaceId: string, updates: any) {
-    const res = await updateWorkspaceConfig(workspaceId, updates)
-    if (!res?.ok) throw new Error(res?.error || 'Failed to save')
-  }
-
-  async function handleLaunchParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number }) {
-    const res = await startParallelTask(config)
-    if (!res?.ok) throw new Error(res?.error || 'Failed to launch parallel task')
-  }
 
   function dismissNotification(id: string) {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
@@ -371,35 +347,15 @@ function App() {
     { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', shortcut: '⌘⇧S', action: () => { handleNewShell() } },
     { id: 'new-workspace', category: 'Workspaces', label: 'Create Workspace', description: 'Create a new workspace', shortcut: '⌘⇧N', action: () => { setCreateWorkspaceModalOpen(true) } },
     { id: 'focus-mode', category: 'View', label: 'Toggle Focus Mode', description: 'Dim inactive terminals', shortcut: '⌘⇧F', action: () => { setFocusMode(o => !o) } },
-    { id: 'layout-auto', category: 'View', label: 'Auto Layout', description: 'Automatic terminal grid layout', action: () => { setLayoutPreset('auto') } },
-    { id: 'layout-1x1', category: 'View', label: '1x1 Layout', description: 'Single terminal view', action: () => { setLayoutPreset('1x1') } },
-    { id: 'layout-2x2', category: 'View', label: '2x2 Layout', description: 'Four terminal grid', action: () => { setLayoutPreset('2x2') } },
-    { id: 'layout-1+2', category: 'View', label: '1+2 Layout', description: 'Detail + two terminals', action: () => { setLayoutPreset('1+2') } },
     { id: 'toggle-chat', category: 'View', label: 'Toggle Chat Sidebar', description: 'Show/hide the chat panel', shortcut: '⌘B', action: () => { handleToggleChatSidebar() } },
     { id: 'toggle-workspace-sidebar', category: 'View', label: 'Toggle Workspace Sidebar', description: 'Show/hide workspace list', shortcut: '⌘⇧B', action: () => { handleToggleWorkspaceSidebar() } },
     { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', action: () => { handleToggleBottomShell() } },
-    { id: 'show-board', category: 'View', label: 'Show Project Board', description: 'View session cards', action: () => { setActiveView(null) } },
     { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', action: () => { setActiveView('dashboard') } },
     { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', action: () => { setActiveView('settings') } },
     { id: 'show-history', category: 'View', label: 'Show Session History', description: 'View past sessions', action: () => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) } },
     { id: 'clear-notifications', category: 'Notifications', label: 'Clear Notifications', description: 'Dismiss all notifications', action: () => { dismissAllNotifications() } },
-    { id: 'parallel-task', category: 'Terminals', label: 'Launch Parallel Task', description: 'Run the same prompt across multiple agents', action: () => { setParallelTaskModalOpen(true) } },
-  ], [createRawSession, handleNewShell, setFocusMode, setLayoutPreset, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, getSessionHistory, setSessionHistory])
+  ], [createRawSession, handleNewShell, setFocusMode, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, getSessionHistory, setSessionHistory])
 
-  async function handleAddWorktree(workspaceId: string) {
-    const res = await addWorktree(workspaceId)
-    if (res?.ok) {
-      setWorktreesForEdit(prev => [...prev, { id: res.worktree.id, path: res.worktree.path }])
-    }
-  }
-
-  async function handleRemoveWorktree(workspaceId: string, worktreeId: string) {
-    if (!confirm(`Remove worktree "${worktreeId}"?`)) return
-    const res = await removeWorktree(workspaceId, worktreeId)
-    if (res?.ok) {
-      setWorktreesForEdit(prev => prev.filter(w => w.id !== worktreeId))
-    }
-  }
 
   function handleSelectWorkspace(id: string) {
     switchWorkspace(id)
@@ -515,7 +471,6 @@ function App() {
         case 'toggle-shell-sidebar': handleToggleChatSidebar(); break
         case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
         case 'toggle-focus': setFocusMode(o => !o); break
-        case 'set-layout': setLayoutPreset(data); break
         case 'show-shortcuts': alert(
           '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
           '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
@@ -716,7 +671,6 @@ function App() {
                   showModal={showModal}
                   closeModal={closeModal}
                   onOpenCreateModal={handleCreateWorkspace}
-                  onEditConfig={handleEditConfig}
                 />
             </div>
             <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
@@ -751,20 +705,17 @@ function App() {
               onNewAgent={() => {}}
               onSelectAgent={handleSelectAgent}
               onNewShell={handleNewShell}
-              onParallelTask={() => setParallelTaskModalOpen(true)}
               onCloseTab={handleCloseAgentTab}
               onActiveSessionChange={setActiveSessionId}
               activeSessionId={activeSessionId}
               writeBuffers={writeBuffers}
               agentConfigs={agentConfigs}
-              layoutPreset={layoutPreset}
               focusMode={focusMode}
               agentsList={AGENTS_LIST}
               bottomShellOpen={bottomShellOpen}
               onToggleShell={handleToggleBottomShell}
               chatSidebarOpen={chatSidebarOpen}
               onToggleChatSidebar={handleToggleChatSidebar}
-              onLayoutChange={setLayoutPreset}
             />
           )}
         </main>
@@ -785,15 +736,6 @@ function App() {
         onCreateLocal={handleCreateWorkspaceLocal}
         onCreateFromGit={handleCreateWorkspaceFromGit}
       />
-      <WorkspaceConfigModal
-        open={workspaceConfigModalOpen}
-        workspace={editingWorkspace}
-        onClose={() => setWorkspaceConfigModalOpen(false)}
-        onSave={handleSaveConfig}
-        worktrees={worktreesForEdit}
-        onAddWorktree={handleAddWorktree}
-        onRemoveWorktree={handleRemoveWorktree}
-      />
       <InputModal
         open={modal?.open || false}
         title={modal?.title || ''}
@@ -807,12 +749,6 @@ function App() {
         agentConfigs={agentConfigs}
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
-      />
-      <ParallelTaskModal
-        open={parallelTaskModalOpen}
-        agentConfigs={agentConfigs}
-        onClose={() => setParallelTaskModalOpen(false)}
-        onLaunch={handleLaunchParallelTask}
       />
       {commanderOpen && (
         <CommanderPanel commands={commanderCommands} onClose={() => setCommanderOpen(false)} />
