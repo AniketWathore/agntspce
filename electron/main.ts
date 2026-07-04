@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
 import express from 'express'
@@ -516,6 +516,16 @@ ipcMain.handle('duplicate-workspace', async (_event, newName: string) => {
   const dup = await workspaceManager.duplicateWorkspace(activeId, newName)
   rebuildMenu()
   return dup
+})
+
+ipcMain.handle('open-in-explorer', async (_event, filePath: string) => {
+  if (!filePath) return false
+  try {
+    await shell.openPath(filePath)
+    return true
+  } catch {
+    return false
+  }
 })
 
 app.whenReady().then(async () => {

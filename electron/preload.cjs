@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportWorkspace: () => ipcRenderer.invoke('export-workspace'),
   importWorkspace: () => ipcRenderer.invoke('import-workspace'),
   duplicateWorkspace: (newName) => ipcRenderer.invoke('duplicate-workspace', newName),
+  openInExplorer: (filePath) => ipcRenderer.invoke('open-in-explorer', filePath),
   onMenuAction: (callback) => {
     const handler = (_event, action, data) => callback(action, data)
     ipcRenderer.on('menu-action', handler)

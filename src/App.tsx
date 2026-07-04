@@ -8,6 +8,7 @@ import AgentModal from './components/AgentModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
+import StatusBar from './components/StatusBar'
 import { useSocket } from './hooks/useSocket'
 import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
 import type { LayoutPreset } from './components/TerminalArea'
@@ -159,6 +160,7 @@ function App() {
     }).then((res: any) => {
       if (res?.ok) {
         switchWorkspace(id)
+        window.electronAPI?.openInExplorer(path)
       }
     })
   }
@@ -429,13 +431,6 @@ function App() {
     }
   }
 
-  function iconPath(name: string): string {
-    if (name === 'settings') {
-      return theme === 'dark' ? '/img/settings-white.png' : '/img/setting.png'
-    }
-    return `/img/${name}${theme === 'dark' ? '-white' : ''}.png`
-  }
-
   function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
     setActiveView(activeView === view ? null : view)
   }
@@ -446,14 +441,18 @@ function App() {
         <div className="activity-bar">
           <div className="activity-bar-top">
             <div className="activity-logo" title="AgntSpce">
-              <img src="/img/logo-icon.png" alt="AgntSpce" className="activity-logo-img" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#22C55E">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15l-5-5 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/>
+              </svg>
             </div>
             <button
               className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
               onClick={handleToggleWorkspaceSidebar}
-              title="Workspaces"
+              title="Explorer (Workspaces)"
             >
-              <img src={iconPath('workspace')} alt="Workspaces" className="activity-bar-icon" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M4 4h7l2 2h7v12H4V4zm2 2v10h14V8h-7.5L12.5 6H6z"/>
+              </svg>
             </button>
           </div>
           <div className="activity-bar-bottom">
@@ -462,28 +461,36 @@ function App() {
               onClick={handleToggleBottomShell}
               title="Terminal"
             >
-              <img src={iconPath('terminal')} alt="Terminal" className="activity-bar-icon" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm3.5 3.5L12 11l-3.5 2.5L9 15l5-4-5-4-.5.5z"/>
+              </svg>
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
               onClick={() => setView('dashboard')}
               title="Dashboard"
             >
-              <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+              </svg>
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
               onClick={() => setView('profile')}
               title="Profile"
             >
-              <img src={iconPath('profile')} alt="Profile" className="activity-bar-icon" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+              </svg>
             </button>
             <button
               className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
               onClick={() => setView('settings')}
               title="Settings"
             >
-              <img src={iconPath('settings')} alt="Settings" className="activity-bar-icon" />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+              </svg>
             </button>
           </div>
         </div>
@@ -577,6 +584,12 @@ function App() {
         agentConfigs={agentConfigs}
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
+      />
+      <StatusBar
+        sessions={sessions}
+        workspaces={workspaces}
+        activeWorkspace={activeWorkspace}
+        theme={theme}
       />
     </div>
   )
