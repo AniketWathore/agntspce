@@ -63,7 +63,7 @@
   --terminal-bright-magenta: #C084FC;
   --terminal-bright-cyan: #67E8F9;
   --terminal-bright-white: #E8E8E8;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
 [data-theme="light"] {
@@ -464,9 +464,11 @@
   display: none;
   gap: 2px;
   flex-shrink: 0;
+  position: relative;
 }
 
-.workspace-item:hover .workspace-item-actions {
+.workspace-item:hover .workspace-item-actions,
+.workspace-item-actions.show {
   display: flex;
 }
 
@@ -3053,7 +3055,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px 12px;
+  padding: 0 12px;
+  min-height: 35px;
   border-bottom: 1px solid var(--border);
 }
 

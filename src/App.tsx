@@ -113,7 +113,7 @@ function App() {
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
     createWorkspaceFromGit,
     getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
-    setUserSettings,
+    setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -284,7 +284,9 @@ function App() {
     })
   }
 
-  function editWorkspace(_id: string, _name: string, _path: string) { }
+  function editWorkspace(id: string, name: string, _path: string) {
+    updateWorkspaceConfig(id, { name }).then(() => refreshWorkspaces())
+  }
 
   function removeWorkspace(id: string) {
     const wsSessions = Object.entries(sessions)
