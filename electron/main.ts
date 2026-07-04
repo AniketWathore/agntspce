@@ -35,6 +35,7 @@ function createNewWindow() {
       nodeIntegration: false,
     },
   })
+  win.maximize()
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL!)
   } else {
@@ -684,6 +685,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   })
+  mainWindow.maximize()
 
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
