@@ -33,22 +33,22 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
   return Object.values(sessions).filter(s => s.status === 'busy' || s.status === 'waiting').length
 }
 
-export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onOpenCreateModal }: Props) {
+export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onEdit, onDelete, onRestore, onPermanentDelete, onOpenCreateModal, showModal, closeModal }: Props) {
   const [showTrash, setShowTrash] = useState(false)
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const activeCount = getActiveCount(sessions)
 
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
         <div className="sidebar-header">
-          <h2>AgntSpce</h2>
+          <h2>Workspace</h2>
           <div className="sidebar-header-buttons">
             <button className="add-btn" onClick={onOpenCreateModal} title="New workspace">+</button>
           </div>
         </div>
 
         <div className="sidebar-stats">
-          <span className="stat">{Object.keys(sessions).length} terminals</span>
           {activeCount > 0 && <span className="stat active">{activeCount} active</span>}
         </div>
 
@@ -63,19 +63,42 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
                 <span className="workspace-name">{ws.name}</span>
                 <span className="workspace-session-count">{getSessionCount(ws)}</span>
               </div>
-              <div className="workspace-item-actions">
-
+              <div className="workspace-item-actions" style={{ position: 'relative' }}>
                 <button
-                  className="action-btn danger"
+                  className="action-btn dots-btn"
                   onClick={(e) => {
                     e.stopPropagation()
-                    if (confirm(`Delete workspace "${ws.name}"?`)) onDelete(ws.id)
+                    setMenuOpenId(menuOpenId === ws.id ? null : ws.id)
                   }}
-                  title="Delete"
-                >Delete</button>
+                  title="Options"
+                >⋮</button>
+                {menuOpenId === ws.id && (
+                  <div className="workspace-menu" onClick={e => e.stopPropagation()}>
+                    <button
+                      className="workspace-menu-item"
+                      onClick={() => {
+                        setMenuOpenId(null)
+                        showModal('Rename workspace:', (name) => {
+                          onEdit(ws.id, name, ws.repository?.path || '')
+                          closeModal()
+                        }, ws.name)
+                      }}
+                    >Rename</button>
+                    <button
+                      className="workspace-menu-item danger"
+                      onClick={() => {
+                        setMenuOpenId(null)
+                        if (confirm(`Delete workspace "${ws.name}"?`)) onDelete(ws.id)
+                      }}
+                    >Delete</button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
+          {menuOpenId && (
+            <div className="workspace-menu-overlay" onClick={() => setMenuOpenId(null)} />
+          )}
         </div>
 
         {deletedWorkspaces.length > 0 && (

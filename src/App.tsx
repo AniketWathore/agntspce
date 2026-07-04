@@ -9,6 +9,7 @@ import CreateWorkspaceModal from './components/CreateWorkspaceModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
+import StatusBar from './components/StatusBar'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import HistoryPanel from './components/HistoryPanel'
@@ -17,7 +18,7 @@ import type { HistoryEntry } from './components/HistoryPanel'
 
 import { useSocket } from './hooks/useSocket'
 import PRPanel from './components/PRPanel'
-import type { TerminalOutput, AgentConfig, AgentStartConfig, WorkspaceInfo, SessionState } from './types'
+import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState } from './types'
 import './App.css'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
@@ -110,8 +111,8 @@ function App() {
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
-    createWorkspaceFromGit, updateWorkspaceConfig,
-    getSessionHistory, getGitLog, getGitDiff, getGitBranches, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
+    createWorkspaceFromGit,
+    getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
     setUserSettings,
   } = useSocket()
   const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
@@ -143,7 +144,7 @@ function App() {
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
-  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.15))
+  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.20))
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
 
@@ -537,7 +538,7 @@ function App() {
         const totalW = bodyRect.width
         const chatMin = Math.round(totalW * 0.10)
         const leftMax = Math.round(totalW * 0.12)
-        const chatMax = Math.round(totalW * 0.15)
+        const chatMax = Math.round(totalW * 0.20)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
@@ -571,13 +572,6 @@ function App() {
     }
   }
 
-  function iconPath(name: string): string {
-    if (name === 'settings') {
-      return theme === 'dark' ? '/img/settings-white.png' : '/img/setting.png'
-    }
-    return `/img/${name}${theme === 'dark' ? '-white' : ''}.png`
-  }
-
   function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
     setActiveView(activeView === view ? null : view)
   }
@@ -585,74 +579,92 @@ function App() {
   return (
     <div className="app">
       <div className="app-body" ref={appBodyRef}>
-        <div className="activity-bar">
-          <div className="activity-bar-top">
-            <div className="activity-logo" title="AgntSpce">
-              <img src="/img/logo-icon.png" alt="AgntSpce" className="activity-logo-img" />
+          <div className="activity-bar">
+            <div className="activity-bar-top">
+              <div className="activity-logo" title="AgntSpce">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#22C55E">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15l-5-5 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/>
+                </svg>
+              </div>
+              <button
+                className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
+                onClick={handleToggleWorkspaceSidebar}
+                title="Explorer (Workspaces)"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M4 4h7l2 2h7v12H4V4zm2 2v10h14V8h-7.5L12.5 6H6z"/>
+                </svg>
+              </button>
             </div>
-            <button
-              className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
-              onClick={handleToggleWorkspaceSidebar}
-              title="Workspaces"
-            >
-              <img src={iconPath('workspace')} alt="Workspaces" className="activity-bar-icon" />
-            </button>
+            <div className="activity-bar-bottom">
+              <button
+                className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
+                onClick={handleToggleBottomShell}
+                title="Terminal"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm3.5 3.5L12 11l-3.5 2.5L9 15l5-4-5-4-.5.5z"/>
+                </svg>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
+                onClick={() => setView('dashboard')}
+                title="Dashboard"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+                </svg>
+              </button>
+              <button
+                className="activity-bar-btn"
+                onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
+                title="Session History"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
+                </svg>
+              </button>
+              <button
+                className="activity-bar-btn"
+                onClick={() => setPrPanelOpen(o => !o)}
+                title="Git Review"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 5v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.89-2-2-2H5c-1.11 0-2 .9-2 2zm16 14H5V5h14v14zm-4-4v-2a2 2 0 0 0-2-2h-2V9h4V7H9v6h4v2H9v2h4a2 2 0 0 0 2-2z"/>
+                </svg>
+              </button>
+              <button
+                className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
+                onClick={() => setNotificationPanelOpen(o => !o)}
+                title="Notifications"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+                </svg>
+                {notifications.filter(n => !n.read).length > 0 && (
+                  <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
+                )}
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
+                onClick={() => setView('profile')}
+                title="Profile"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
+                onClick={() => setView('settings')}
+                title="Settings"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+                </svg>
+              </button>
+            </div>
           </div>
-          <div className="activity-bar-bottom">
-            <button
-              className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
-              onClick={handleToggleBottomShell}
-              title="Terminal"
-            >
-              <img src={iconPath('terminal')} alt="Terminal" className="activity-bar-icon" />
-            </button>
-            <button
-              className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setView('dashboard')}
-              title="Dashboard"
-            >
-              <img src="/img/dashboard.png" alt="Dashboard" className="activity-bar-icon" />
-            </button>
-            <button
-              className="activity-bar-btn"
-              onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
-              title="Session History"
-            >
-              <span className="activity-bar-text-icon">📋</span>
-            </button>
-            <button
-              className="activity-bar-btn"
-              onClick={() => setPrPanelOpen(o => !o)}
-              title="Git Review"
-            >
-              <span className="activity-bar-text-icon">🔀</span>
-            </button>
-            <button
-              className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
-              onClick={() => setNotificationPanelOpen(o => !o)}
-              title="Notifications"
-            >
-              <span className="activity-bar-text-icon">🔔</span>
-              {notifications.filter(n => !n.read).length > 0 && (
-                <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
-              )}
-            </button>
-            <button
-              className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
-              onClick={() => setView('profile')}
-              title="Profile"
-            >
-              <img src={iconPath('profile')} alt="Profile" className="activity-bar-icon" />
-            </button>
-            <button
-              className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
-              onClick={() => setView('settings')}
-              title="Settings"
-            >
-              <img src={iconPath('settings')} alt="Settings" className="activity-bar-icon" />
-            </button>
-          </div>
-        </div>
         {workspaceSidebarOpen && (
           <>
             <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
@@ -781,6 +793,12 @@ function App() {
           fetchFileDiff={getGitFileDiff}
         />
       )}
+      <StatusBar
+        sessions={sessions}
+        workspaces={workspaces}
+        activeWorkspace={activeWorkspace}
+        theme={theme}
+      />
     </div>
   )
 }

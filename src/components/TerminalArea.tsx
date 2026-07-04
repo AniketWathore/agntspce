@@ -23,7 +23,7 @@ interface Props {
   activeSessionId: string | null
   writeBuffers: Record<string, string>
   agentConfigs: AgentConfig[]
-  layoutPreset: LayoutPreset
+  layoutPreset?: 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
   focusMode: boolean
   agentsList?: { id: string; name: string; icon: string }[]
   bottomShellOpen: boolean
@@ -49,7 +49,7 @@ function getTilingStyle(count: number): CSSProperties {
   return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
 }
 
-function getItemStyle(index: number, count: number, activeIndex: number): CSSProperties {
+function getItemStyle(index: number, count: number, _activeIndex: number): CSSProperties {
   if (count === 3 && index === 0) {
     return { gridRow: 'span 2' }
   }
@@ -273,6 +273,7 @@ export default function TerminalArea({
               <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
                 <img src="/img/terminal.png" alt="Shell" className="shell-btn-icon" />
               </button>
+              <button className="shell-btn" onClick={onToggleChatSidebar} title="Chat Assistance">💬 Assist</button>
               {showDropdown && agentsList && (
                 <AgentPicker
                   agents={agentsList}
@@ -414,6 +415,7 @@ export default function TerminalArea({
               dimmed={focusMode && session.id !== activeSessionId}
             />
           ))}
+          <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance">💬 Assist</button>
         </div>
       )}
 
