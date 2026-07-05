@@ -586,17 +586,13 @@ function App() {
     setActiveView(activeView === view ? null : view)
   }
 
-  const isMac = navigator.platform?.startsWith('Mac')
-
   return (
     <div className="app">
-      {isMac && (
-        <TitleBar
-          unreadCount={notifications.filter(n => !n.read).length}
-          notificationPanelOpen={notificationPanelOpen}
-          onNotificationClick={() => setNotificationPanelOpen(o => !o)}
-        />
-      )}
+      <TitleBar
+        unreadCount={notifications.filter(n => !n.read).length}
+        notificationPanelOpen={notificationPanelOpen}
+        onNotificationClick={() => setNotificationPanelOpen(o => !o)}
+      />
       <div className="app-body" ref={appBodyRef}>
           <div className="activity-bar">
             <div className="activity-bar-top">
