@@ -5,22 +5,29 @@ interface Props {
 }
 
 export default function TitleBar({ unreadCount, notificationPanelOpen, onNotificationClick }: Props) {
+  const isMac = navigator.platform?.startsWith('Mac')
+
   return (
     <div className="title-bar">
+      {!isMac && (
+        <div className="title-bar-menu-area">
+          <span className="title-bar-app-name">AgntSpce</span>
+        </div>
+      )}
       <div className="title-bar-drag" />
-      <button
-        className={`title-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
-        onClick={onNotificationClick}
-        title="Notifications"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-        </svg>
-        {unreadCount > 0 && (
-          <span className="title-bar-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
-        )}
-      </button>
+      {!isMac && (
+        <div className="title-bar-window-controls">
+          <button className="title-bar-win-btn" onClick={() => window.electronAPI?.windowMinimize?.()} title="Minimize">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="4.5" width="8" height="1" fill="currentColor"/></svg>
+          </button>
+          <button className="title-bar-win-btn" onClick={() => window.electronAPI?.windowMaximize?.()} title="Maximize">
+            <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1"/></svg>
+          </button>
+          <button className="title-bar-win-btn title-bar-win-close" onClick={() => window.electronAPI?.windowClose?.()} title="Close">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.2" fill="none"/></svg>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

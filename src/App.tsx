@@ -150,9 +150,13 @@ function App() {
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
+  const leftWidthRef = useRef(leftWidth)
   const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.20))
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
+  const closingLeft = useRef(false)
+
+  useEffect(() => { leftWidthRef.current = leftWidth }, [leftWidth])
 
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
@@ -551,13 +555,30 @@ function App() {
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
-          let newW = Math.max(120, startLeft + dx)
+          let newW = Math.max(20, startLeft + dx)
           if (chatSidebarOpen) {
             newW = Math.min(newW, leftMax, totalW - chatWidth - 200)
           } else {
             newW = Math.min(newW, leftMax)
           }
+
+          if (newW < Math.round(totalW * 0.04)) {
+            document.removeEventListener('mousemove', onMove)
+            document.removeEventListener('mouseup', onUp)
+            document.body.style.cursor = ''
+            document.body.style.userSelect = ''
+            dragging.current = null
+            closingLeft.current = true
+            setLeftWidth(0)
+            setTimeout(() => {
+              closingLeft.current = false
+              setWorkspaceSidebarOpen(false)
+            }, 80)
+            return
+          }
+
           setLeftWidth(newW)
+          leftWidthRef.current = newW
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
           let newW = Math.max(chatMin, startChat + dx)
@@ -572,6 +593,15 @@ function App() {
         document.removeEventListener('mouseup', onUp)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
+
+        if (appBodyRef.current && leftWidthRef.current < Math.round(appBodyRef.current.getBoundingClientRect().width * 0.08)) {
+          closingLeft.current = true
+          setLeftWidth(0)
+          setTimeout(() => {
+            closingLeft.current = false
+            setWorkspaceSidebarOpen(false)
+          }, 80)
+        }
       }
 
       document.addEventListener('mousemove', onMove)
@@ -589,13 +619,11 @@ function App() {
 
   return (
     <div className="app">
-      {isMac && (
-        <TitleBar
-          unreadCount={notifications.filter(n => !n.read).length}
-          notificationPanelOpen={notificationPanelOpen}
-          onNotificationClick={() => setNotificationPanelOpen(o => !o)}
-        />
-      )}
+      <TitleBar
+        unreadCount={notifications.filter(n => !n.read).length}
+        notificationPanelOpen={notificationPanelOpen}
+        onNotificationClick={() => setNotificationPanelOpen(o => !o)}
+      />
       <div className="app-body" ref={appBodyRef}>
           <div className="activity-bar">
             <div className="activity-bar-top">
@@ -606,7 +634,7 @@ function App() {
               </div>
               <button
                 className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
-                onClick={handleToggleWorkspaceSidebar}
+                onClick={() => { handleToggleWorkspaceSidebar(); setActiveView(null) }}
                 title="Explorer (Workspaces)"
               >
                 <i className="codicon codicon-files" style={{ fontSize: 24 }}></i>
@@ -615,7 +643,7 @@ function App() {
             <div className="activity-bar-bottom">
               <button
                 className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
-                onClick={handleToggleBottomShell}
+                onClick={() => { if (!bottomShellOpen && shellSessions.length === 0) handleNewTerminal('shell'); setBottomShellOpen(true); setActiveView(null) }}
                 title="Terminal"
               >
                 <i className="codicon codicon-terminal" style={{ fontSize: 24 }}></i>
@@ -649,16 +677,6 @@ function App() {
                 <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
-                onClick={() => setNotificationPanelOpen(o => !o)}
-                title="Notifications"
-              >
-                <i className="codicon codicon-bell" style={{ fontSize: 24 }}></i>
-                {notifications.filter(n => !n.read).length > 0 && (
-                  <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
-                )}
-              </button>
-              <button
                 className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
                 onClick={() => setView('profile')}
                 title="Profile"
@@ -674,29 +692,27 @@ function App() {
               </button>
             </div>
           </div>
-        {workspaceSidebarOpen && (
-          <>
-            <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
-                <WorkspaceSidebar
-                  workspaces={workspaces}
-                  sessions={sessions}
-                  activeWorkspace={activeWorkspace}
-                  deletedWorkspaces={deletedWorkspaces}
-                  onSelect={handleSelectWorkspace}
-                  onAdd={addWorkspace}
-                  onEdit={editWorkspace}
-                  onRemove={removeWorkspace}
-                  onDelete={handleDeleteWorkspace}
-                  onRestore={handleRestoreWorkspace}
-                  onPermanentDelete={handlePermanentDelete}
-                  showModal={showModal}
-                  closeModal={closeModal}
-                  onOpenCreateModal={handleCreateWorkspace}
-                />
-            </div>
-            <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
-          </>
-        )}
+        <div className={`panel-left${closingLeft.current ? ' closing' : ''}`} style={{ width: workspaceSidebarOpen ? leftWidth : 0, minWidth: workspaceSidebarOpen ? leftWidth : 0 }}>
+          {workspaceSidebarOpen && (
+            <WorkspaceSidebar
+              workspaces={workspaces}
+              sessions={sessions}
+              activeWorkspace={activeWorkspace}
+              deletedWorkspaces={deletedWorkspaces}
+              onSelect={handleSelectWorkspace}
+              onAdd={addWorkspace}
+              onEdit={editWorkspace}
+              onRemove={removeWorkspace}
+              onDelete={handleDeleteWorkspace}
+              onRestore={handleRestoreWorkspace}
+              onPermanentDelete={handlePermanentDelete}
+              showModal={showModal}
+              closeModal={closeModal}
+              onOpenCreateModal={handleCreateWorkspace}
+            />
+          )}
+        </div>
+        {workspaceSidebarOpen && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
         <main className="main-content">
           {activeView === 'dashboard' ? (
             <Dashboard
@@ -814,6 +830,9 @@ function App() {
         sessions={sessions}
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
+        notificationPanelOpen={notificationPanelOpen}
+        onNotificationClick={() => setNotificationPanelOpen(o => !o)}
+        unreadCount={notifications.filter(n => !n.read).length}
       />
     </div>
   )

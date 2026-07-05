@@ -29,7 +29,7 @@ function createNewWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'AgntSpce',
-    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : { frame: false }),
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
@@ -681,7 +681,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'AgntSpce',
-    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : { frame: false }),
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
@@ -698,6 +698,14 @@ function createWindow() {
 }
 
 // IPC handlers
+ipcMain.handle('window-minimize', () => mainWindow?.minimize())
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+  else mainWindow?.maximize()
+})
+ipcMain.handle('window-close', () => mainWindow?.close())
+ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized())
+
 ipcMain.handle('select-directory', async () => {
   const result = await dialog.showOpenDialog({
     parent: mainWindow || undefined,

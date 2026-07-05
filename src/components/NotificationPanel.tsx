@@ -55,8 +55,8 @@ export default function NotificationPanel({ notifications, onDismiss, onDismissA
   }, [onDismissAll])
 
   return (
-    <div className="notification-panel-overlay" onClick={onClose}>
-      <div className="notification-panel" onClick={e => e.stopPropagation()}>
+    <div className="notification-panel-overlay">
+      <div className="notification-panel">
         <div className="notification-panel-header">
           <h3>Notifications</h3>
           <div className="notification-panel-actions">

@@ -4,6 +4,9 @@ interface Props {
   sessions: Record<string, SessionState>
   workspaces: WorkspaceInfo[]
   activeWorkspace: WorkspaceInfo | null
+  notificationPanelOpen: boolean
+  onNotificationClick: () => void
+  unreadCount: number
 }
 
 function getSessionStats(sessions: Record<string, SessionState>) {
@@ -14,7 +17,7 @@ function getSessionStats(sessions: Record<string, SessionState>) {
   return { total, busy, shells }
 }
 
-export default function StatusBar({ sessions, workspaces, activeWorkspace }: Props) {
+export default function StatusBar({ sessions, workspaces, activeWorkspace, notificationPanelOpen, onNotificationClick, unreadCount }: Props) {
   const stats = getSessionStats(sessions)
 
   return (
@@ -34,6 +37,14 @@ export default function StatusBar({ sessions, workspaces, activeWorkspace }: Pro
         </span>
       </div>
       <div className="status-bar-right">
+        <button
+          className={`status-bar-item status-bar-notif-btn ${notificationPanelOpen ? 'active' : ''}`}
+          onClick={onNotificationClick}
+          title="Notifications"
+        >
+          <i className="codicon codicon-bell" style={{ fontSize: 14 }}></i>
+          {unreadCount > 0 && <span className="status-bar-badge">{unreadCount}</span>}
+        </button>
         <span className="status-bar-item" title="Workspaces">
           <i className="codicon codicon-folder" style={{ fontSize: 14 }}></i>
           {workspaces.length}

@@ -149,16 +149,59 @@
   height: 22px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding-right: 8px;
   flex-shrink: 0;
   -webkit-app-region: drag;
   background: var(--bg-primary);
 }
 
+.title-bar-menu-area {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding-left: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-app-name {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 0 8px;
+}
+
 .title-bar-drag {
   flex: 1;
   height: 100%;
+}
+
+.title-bar-window-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-win-btn {
+  width: 36px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.title-bar-win-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.title-bar-win-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 .title-bar-btn {
@@ -382,6 +425,10 @@
   overflow: hidden;
   display: flex;
   background: #252526;
+}
+
+.panel-left.closing {
+  transition: width 0.08s ease !important;
 }
 
 .panel-right {
@@ -4008,25 +4055,6 @@
   position: relative;
 }
 
-.activity-bar-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 4px;
-  background: var(--danger);
-  color: #fff;
-  border-radius: 7px;
-  font-size: 9px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  pointer-events: none;
-}
-
 /* ── Commander Panel ─────────────────────── */
 .commander-overlay {
   position: fixed;
@@ -4154,26 +4182,21 @@
 /* ── Notification Panel ──────────────────── */
 .notification-panel-overlay {
   position: fixed;
-  inset: 0;
+  bottom: 28px;
+  right: 8px;
   z-index: 1000;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding-top: 50px;
-  background: rgba(0, 0, 0, 0.2);
 }
 
 .notification-panel {
   width: 380px;
-  max-height: 70vh;
+  max-height: 50vh;
   background: var(--bg-elevated);
   border: 1px solid var(--border-light);
   border-radius: 10px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  margin-right: 12px;
 }
 
 .notification-panel-header {
@@ -5194,6 +5217,32 @@
 
 .status-bar-branch {
   font-weight: 500;
+}
+
+.status-bar-notif-btn {
+  cursor: pointer;
+  position: relative;
+}
+.status-bar-notif-btn.active {
+  background: rgba(255, 255, 255, 0.18);
+}
+.status-bar-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 10px;
+  height: 10px;
+  padding: 0 3px;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
 }
 
 /* ── Output Filter Debug ────────────────── */
