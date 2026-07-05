@@ -6,10 +6,10 @@ import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } fr
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
-import { TokenReductionService } from './tokenReduction'
+import { OutputFilterService } from './outputFilter'
 import { WorkspaceManager } from './workspaceManager'
 import { AgentOrchestrator } from './agentOrchestrator'
-import { TokenUsageTracker, OutputCompressor, PromptOptimizer } from './outputCompressor'
+import { TokenUsageTracker } from './outputCompressor'
 import { RingBuffer } from './ringBuffer'
 
 let pty: any = null
@@ -74,18 +74,16 @@ export class SessionManager extends EventEmitter {
   private agentManager: any = null
   orchestrator: AgentOrchestrator | null = null
   sessionHistory: { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] = []
-  tokenReduction = new TokenReductionService()
   tokenUsageTracker = new TokenUsageTracker()
-  outputCompressor = new OutputCompressor()
-  promptOptimizer = new PromptOptimizer()
+  outputFilter = new OutputFilterService()
 
   constructor(io: any, agentManager?: any) {
     super()
     this.io = io
     if (agentManager) this.agentManager = agentManager
-    this.tokenReduction.setOnCompression((event) => {
+    this.outputFilter.setOnEvent((event) => {
       try {
-        this.io.emit('compression-event', event)
+        this.io.emit('filter-event', event)
       } catch {}
     })
   }
@@ -308,9 +306,17 @@ export class SessionManager extends EventEmitter {
       claudeLaunchState: null,
     }
 
+    const agentTypes = ['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'server']
+    if (agentTypes.includes(config.type)) {
+      this.outputFilter.setSessionConfig(sessionId, { name: config.type })
+    }
+
     ptyProcess.onData((data: string) => {
       session.buffer.write(data)
       session.lastActivity = Date.now()
+
+      this.outputFilter.processOutput(sessionId, data)
+
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
       const isActive = this.sessions.get(sessionId) === session
@@ -367,7 +373,7 @@ export class SessionManager extends EventEmitter {
     const session = this.sessions.get(sessionId)
     if (!session?.pty) return false
     try {
-      const processed = this.tokenReduction.processInput(sessionId, data)
+      const processed = data
       session.pty.write(processed)
       return true
     } catch { return false }
@@ -400,7 +406,7 @@ export class SessionManager extends EventEmitter {
         try { session.pty.kill() } catch { }
       }
     } catch { }
-    this.tokenReduction.cleanup(sessionId)
+    this.outputFilter.cleanup(sessionId)
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)

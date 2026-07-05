@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs/promises'
 import os from 'node:os'
 import express from 'express'
 import { createServer } from 'http'
@@ -29,7 +30,7 @@ function createNewWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'AgntSpce',
-    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : { frame: false }),
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
@@ -298,33 +299,25 @@ io.on('connection', (socket) => {
     sessionManager.resizeSession(sessionId, cols, rows)
   })
 
-  socket.on('toggle-token-reduction', ({ sessionId, enabled }) => {
-    if (enabled !== undefined) {
-      sessionManager.tokenReduction.setEnabled(sessionId, enabled)
-    } else {
-      const state = sessionManager.tokenReduction.toggle(sessionId)
-      socket.emit('token-reduction-state', { sessionId, enabled: state })
-    }
-  })
-
-  socket.on('get-token-reduction-state', ({ sessionId }) => {
-    const config = sessionManager.tokenReduction.getConfig(sessionId)
-    socket.emit('token-reduction-state', { sessionId, enabled: config.enabled })
-  })
-
-  socket.on('get-compression-stats', ({ sessionId }) => {
-    if (sessionId) {
-      const stats = sessionManager.tokenReduction.getSessionStats(sessionId)
-      const history = sessionManager.tokenReduction.getSessionHistory(sessionId)
-      socket.emit('compression-stats', { sessionId, stats, history })
-    } else {
-      const allStats = sessionManager.tokenReduction.getAllStats()
-      socket.emit('compression-stats-all', allStats)
-    }
-  })
-
   socket.on('restart-session', ({ sessionId }) => {
     sessionManager.restartSession(sessionId)
+  })
+
+  socket.on('get-filter-stats', () => {
+    const allSessions = sessionManager.outputFilter.getAllStats()
+    const aggregated = {
+      totalOriginalBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalBytes, 0),
+      totalFilteredBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredBytes, 0),
+      totalOriginalTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalTokens, 0),
+      totalFilteredTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredTokens, 0),
+      eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
+    }
+    const allHistory = sessionManager.outputFilter.getAllHistory()
+    socket.emit('filter-stats', { stats: aggregated, history: allHistory })
+  })
+
+  socket.on('reset-filter-stats', () => {
+    sessionManager.outputFilter.reset()
   })
 
   socket.on('switch-workspace', async ({ workspaceId }) => {
@@ -647,6 +640,110 @@ io.on('connection', (socket) => {
     }
   })
 
+  // ── Filesystem Operations ──────────────────────────────
+  async function getRepoRoot(wsPath: string): Promise<string> {
+    try {
+      const { execSync } = await import('child_process')
+      return execSync(`git rev-parse --show-toplevel`, { cwd: wsPath, encoding: 'utf8' }).trim()
+    } catch {
+      return wsPath
+    }
+  }
+
+  socket.on('get-workspace-tree', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const root = await getRepoRoot(worktreePath)
+      async function readDir(dirPath: string, relativeRoot: string): Promise<any[]> {
+        const entries: any[] = []
+        const dirEntries = await fs.readdir(dirPath, { withFileTypes: true })
+        dirEntries.sort((a, b) => {
+          if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+        for (const entry of dirEntries) {
+          if (entry.name.startsWith('.')) continue
+          const fullPath = path.join(dirPath, entry.name)
+          const relativePath = path.relative(relativeRoot, fullPath).replace(/\\/g, '/')
+          if (entry.isDirectory()) {
+            const children = await readDir(fullPath, relativeRoot)
+            entries.push({ name: entry.name, path: relativePath, type: 'directory', children })
+          } else {
+            entries.push({ name: entry.name, path: relativePath, type: 'file' })
+          }
+        }
+        return entries
+      }
+      const tree = await readDir(root, root)
+      if (callback) callback({ ok: true, tree, root })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('read-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+    try {
+      const stat = await fs.stat(absolutePath)
+      if (stat.isDirectory()) {
+        if (callback) callback({ ok: false, error: 'Is a directory' })
+        return
+      }
+      const content = await fs.readFile(absolutePath, 'utf-8')
+      if (callback) callback({ ok: true, content })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('write-file', async ({ absolutePath, content }: { absolutePath: string, content: string }, callback?: Function) => {
+    try {
+      await fs.writeFile(absolutePath, content, 'utf-8')
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('create-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+    try {
+      await fs.writeFile(absolutePath, '', 'utf-8')
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('create-folder', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+    try {
+      await fs.mkdir(absolutePath, { recursive: true })
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('rename-file', async ({ oldPath, newPath }: { oldPath: string, newPath: string }, callback?: Function) => {
+    try {
+      await fs.rename(oldPath, newPath)
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('delete-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+    try {
+      const stat = await fs.stat(absolutePath)
+      if (stat.isDirectory()) {
+        await fs.rm(absolutePath, { recursive: true, force: true })
+      } else {
+        await fs.unlink(absolutePath)
+      }
+      if (callback) callback({ ok: true })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
   socket.on('save-workspace', async () => {
     const ws = sessionManager.getWorkspace()
     if (!ws?.id) return
@@ -689,7 +786,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'AgntSpce',
-    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : { frame: false }),
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
@@ -706,6 +803,14 @@ function createWindow() {
 }
 
 // IPC handlers
+ipcMain.handle('window-minimize', () => mainWindow?.minimize())
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow?.isMaximized()) mainWindow.unmaximize()
+  else mainWindow?.maximize()
+})
+ipcMain.handle('window-close', () => mainWindow?.close())
+ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized())
+
 ipcMain.handle('select-directory', async () => {
   const result = await dialog.showOpenDialog({
     parent: mainWindow || undefined,

@@ -105,44 +105,39 @@ export interface AgentStartConfig {
   resumeId?: string
 }
 
-export interface CompressionStats {
-  totalOriginalChars: number
-  totalCompressedChars: number
-  totalOriginalTokens: number
-  totalCompressedTokens: number
-  linesCompressed: number
-}
-
-export interface CompressionDebugDetail {
-  word: string
-  kept: boolean
-  reason?: string
-}
-
-export interface CompressionDebugRecord {
-  original: string
-  compressed: string
-  details: CompressionDebugDetail[]
-  originalChars: number
-  compressedChars: number
-  originalTokens: number
-  compressedTokens: number
-  reduction: number
-}
-
-export interface CompressionEvent {
+export interface FilterEvent {
   sessionId: string
-  stats: {
-    originalChars: number
-    compressedChars: number
-    originalTokens: number
-    compressedTokens: number
-    reduction: number
-    charsSaved: number
-    tokensSaved: number
-  }
-  cumulative: CompressionStats
-  debug: CompressionDebugRecord
+  original: string
+  filtered: string
+  originalBytes: number
+  filteredBytes: number
+  originalTokens: number
+  filteredTokens: number
+  reduction: number
+  rulesApplied: string[]
+}
+
+export interface FilterStats {
+  totalOriginalBytes: number
+  totalFilteredBytes: number
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  eventsProcessed: number
+}
+
+export interface FileTreeNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  children?: FileTreeNode[]
+}
+
+export interface OpenFile {
+  id: string        // unique tab id (same as filePath for single files)
+  filePath: string
+  fileName: string
+  language: string
+  isDirty: boolean
 }
 
 declare global {
@@ -155,6 +150,10 @@ declare global {
       importWorkspace: () => Promise<{ workspace: any; path: string } | null>
       duplicateWorkspace: (newName: string) => Promise<any>
       onMenuAction: (callback: (action: string, data?: any) => void) => () => void
+      windowMinimize: () => Promise<void>
+      windowMaximize: () => Promise<void>
+      windowClose: () => Promise<void>
+      windowIsMaximized: () => Promise<boolean>
     }
   }
 }

@@ -11,16 +11,18 @@ import Profile from './components/Profile'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
-import PromptDebug from './components/PromptDebug'
+import OutputFilterDebug from './components/OutputFilterDebug'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import HistoryPanel from './components/HistoryPanel'
+import { EditorTabs } from './components/EditorTabs'
+import { CodeEditor } from './components/CodeEditor'
 import type { Notification } from './components/NotificationPanel'
 import type { HistoryEntry } from './components/HistoryPanel'
 
 import { useSocket } from './hooks/useSocket'
 import PRPanel from './components/PRPanel'
-import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState } from './types'
+import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenFile } from './types'
 import '@vscode/codicons/dist/codicon.css'
 import './App.css'
 
@@ -117,8 +119,8 @@ function App() {
     createWorkspaceFromGit,
     getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
-    compressionStats, compressionHistory,
-    onCompressionEvent, requestCompressionStats,
+    filterStats, filterHistory, onFilterEvent,
+    getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
@@ -131,7 +133,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -139,6 +141,15 @@ function App() {
   const [commanderOpen, setCommanderOpen] = useState(false)
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
+
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
+  const [activeFileId, setActiveFileId] = useState<string | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
+  const [fileContents, setFileContents] = useState<Record<string, string>>({})
+  const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set())
+  const [editorScrollPositions, setEditorScrollPositions] = useState<Record<string, { line: number; column: number }>>({})
+  const [viewMode, setViewMode] = useState<'agents' | 'files'>('agents')
 
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
@@ -151,9 +162,14 @@ function App() {
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
+  const leftWidthRef = useRef(leftWidth)
   const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.20))
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
+  const closingLeft = useRef(false)
+  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => { leftWidthRef.current = leftWidth }, [leftWidth])
 
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
@@ -371,6 +387,14 @@ function App() {
   function handleSelectWorkspace(id: string) {
     switchWorkspace(id)
     setWorkspaceSidebarOpen(true)
+    setViewMode('agents')
+    // Auto-expand the selected workspace's file tree
+    setExpandedFolders(prev => {
+      if (prev.has(`ws:${id}`)) return prev
+      const next = new Set(prev)
+      next.add(`ws:${id}`)
+      return next
+    })
     if (appBodyRef.current) {
       const totalW = appBodyRef.current.getBoundingClientRect().width
       setLeftWidth(Math.round(totalW * 0.12))
@@ -552,13 +576,37 @@ function App() {
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
-          let newW = Math.max(120, startLeft + dx)
+          let newW = Math.max(20, startLeft + dx)
           if (chatSidebarOpen) {
             newW = Math.min(newW, leftMax, totalW - chatWidth - 200)
           } else {
             newW = Math.min(newW, leftMax)
           }
+
+          const collapseThreshold = Math.round(totalW * 0.05)
+
+          if (newW < collapseThreshold) {
+            newW = Math.max(newW, collapseThreshold)
+            if (!collapseTimerRef.current) {
+              collapseTimerRef.current = setTimeout(() => {
+                collapseTimerRef.current = null
+                closingLeft.current = true
+                setLeftWidth(0)
+                setTimeout(() => {
+                  closingLeft.current = false
+                  setWorkspaceSidebarOpen(false)
+                }, 80)
+              }, 250)
+            }
+          } else {
+            if (collapseTimerRef.current) {
+              clearTimeout(collapseTimerRef.current)
+              collapseTimerRef.current = null
+            }
+          }
+
           setLeftWidth(newW)
+          leftWidthRef.current = newW
         } else if (dragging.current === 'right') {
           const dx = startX - ev.clientX
           let newW = Math.max(chatMin, startChat + dx)
@@ -569,6 +617,10 @@ function App() {
 
       function onUp() {
         dragging.current = null
+        if (collapseTimerRef.current) {
+          clearTimeout(collapseTimerRef.current)
+          collapseTimerRef.current = null
+        }
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
         document.body.style.cursor = ''
@@ -585,6 +637,143 @@ function App() {
   function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
     setActiveView(activeView === view ? null : view)
   }
+
+  const toggleFolder = useCallback((path: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev)
+      if (path === '__collapse_all__') {
+        next.clear()
+        return next
+      }
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+      return next
+    })
+  }, [])
+
+  const detectLanguage = useCallback((filePath: string): string => {
+    const ext = filePath.split('.').pop()?.toLowerCase() || ''
+    const langMap: Record<string, string> = {
+      ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+      json: 'json', md: 'markdown', css: 'css', html: 'html',
+      py: 'python', rs: 'rust', go: 'go', rb: 'ruby', java: 'java',
+      cpp: 'cpp', c: 'c', h: 'c', sh: 'shell', bash: 'shell',
+      yml: 'yaml', yaml: 'yaml', toml: 'toml', sql: 'sql',
+      svg: 'xml', xml: 'xml', env: 'plaintext', gitignore: 'plaintext',
+      lock: 'json', vue: 'html', svelte: 'html',
+    }
+    return langMap[ext] || 'plaintext'
+  }, [])
+
+  const selectFile = useCallback(async (filePath: string) => {
+    setSelectedFilePath(filePath)
+    setViewMode('files')
+    const absPath = wsPath ? wsPath.replace(/\\/g, '/') + '/' + filePath : filePath
+
+    const existingFile = openFiles.find(f => f.filePath === filePath)
+    if (existingFile) {
+      setActiveFileId(existingFile.id)
+      return
+    }
+
+    try {
+      const res = await readFile(absPath)
+      if (res?.ok) {
+        const fileName = filePath.split('/').pop() || filePath
+        const newFile: OpenFile = {
+          id: filePath,
+          filePath,
+          fileName,
+          language: detectLanguage(filePath),
+          isDirty: false,
+        }
+        setOpenFiles(prev => [...prev, newFile])
+        setActiveFileId(filePath)
+        setFileContents(prev => ({ ...prev, [filePath]: res.content }))
+      }
+    } catch (err) {
+      console.error('Failed to read file:', err)
+    }
+  }, [wsPath, openFiles, readFile, detectLanguage])
+
+  const closeFile = useCallback((fileId: string) => {
+    setOpenFiles(prev => {
+      const idx = prev.findIndex(f => f.id === fileId)
+      const next = prev.filter(f => f.id !== fileId)
+      if (activeFileId === fileId) {
+        if (next.length > 0) {
+          const newIdx = Math.min(idx, next.length - 1)
+          setActiveFileId(next[newIdx].id)
+        } else {
+          setActiveFileId(null)
+        }
+      }
+      return next
+    })
+    setFileContents(prev => {
+      const next = { ...prev }
+      delete next[fileId]
+      return next
+    })
+    setDirtyFiles(prev => {
+      const next = new Set(prev)
+      next.delete(fileId)
+      return next
+    })
+  }, [activeFileId])
+
+  const handleFileContentChange = useCallback((value: string | undefined) => {
+    if (!activeFileId || value === undefined) return
+    setFileContents(prev => ({ ...prev, [activeFileId]: value }))
+    setDirtyFiles(prev => {
+      const next = new Set(prev)
+      next.add(activeFileId)
+      return next
+    })
+    setOpenFiles(prev => prev.map(f =>
+      f.id === activeFileId ? { ...f, isDirty: true } : f
+    ))
+  }, [activeFileId])
+
+  const handleSaveFile = useCallback(async () => {
+    if (!activeFileId) return
+    const absPath = wsPath ? wsPath.replace(/\\/g, '/') + '/' + activeFileId : activeFileId
+    const content = fileContents[activeFileId]
+    if (content === undefined) return
+    try {
+      const res = await writeFile(absPath, content)
+      if (res?.ok) {
+        setDirtyFiles(prev => {
+          const next = new Set(prev)
+          next.delete(activeFileId)
+          return next
+        })
+        setOpenFiles(prev => prev.map(f =>
+          f.id === activeFileId ? { ...f, isDirty: false } : f
+        ))
+      }
+    } catch (err) {
+      console.error('Failed to save file:', err)
+    }
+  }, [activeFileId, wsPath, fileContents, writeFile])
+
+  const handleEditorScrollChange = useCallback((line: number, column: number) => {
+    if (!activeFileId) return
+    setEditorScrollPositions(prev => ({
+      ...prev,
+      [activeFileId]: { line, column },
+    }))
+  }, [activeFileId])
+
+  const activeFile = useMemo(
+    () => openFiles.find(f => f.id === activeFileId) || null,
+    [openFiles, activeFileId],
+  )
+  const activeFileContent = activeFileId ? fileContents[activeFileId] : ''
+  const isActiveFileDirty = activeFileId ? dirtyFiles.has(activeFileId) : false
 
   return (
     <div className="app">
@@ -603,7 +792,7 @@ function App() {
               </div>
               <button
                 className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
-                onClick={handleToggleWorkspaceSidebar}
+                onClick={() => { handleToggleWorkspaceSidebar(); setActiveView(null) }}
                 title="Explorer (Workspaces)"
               >
                 <i className="codicon codicon-files" style={{ fontSize: 24 }}></i>
@@ -612,7 +801,7 @@ function App() {
             <div className="activity-bar-bottom">
               <button
                 className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
-                onClick={handleToggleBottomShell}
+                onClick={() => { if (bottomShellOpen) { setBottomShellOpen(false) } else { if (shellSessions.length === 0) handleNewTerminal('shell'); setBottomShellOpen(true); setActiveView(null) } }}
                 title="Terminal"
               >
                 <i className="codicon codicon-terminal" style={{ fontSize: 24 }}></i>
@@ -632,11 +821,11 @@ function App() {
                 <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className={`activity-bar-btn ${activeView === 'debug' ? 'active' : ''}`}
-                onClick={() => setActiveView(prev => prev === 'debug' ? null : 'debug')}
-                title="Prompt Optimizer Debug"
+                className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'output-filter' ? null : 'output-filter')}
+                title="Output Filter Debug"
               >
-                <i className="codicon codicon-debug" style={{ fontSize: 24 }}></i>
+                <i className="codicon codicon-output" style={{ fontSize: 24 }}></i>
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
@@ -644,16 +833,6 @@ function App() {
                 title="Git Review"
               >
                 <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
-              </button>
-              <button
-                className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
-                onClick={() => setNotificationPanelOpen(o => !o)}
-                title="Notifications"
-              >
-                <i className="codicon codicon-bell" style={{ fontSize: 24 }}></i>
-                {notifications.filter(n => !n.read).length > 0 && (
-                  <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
-                )}
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
@@ -671,91 +850,133 @@ function App() {
               </button>
             </div>
           </div>
-        {workspaceSidebarOpen && (
-          <>
-            <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
-                <WorkspaceSidebar
-                  workspaces={workspaces}
-                  sessions={sessions}
-                  activeWorkspace={activeWorkspace}
-                  deletedWorkspaces={deletedWorkspaces}
-                  onSelect={handleSelectWorkspace}
-                  onAdd={addWorkspace}
-                  onEdit={editWorkspace}
-                  onRemove={removeWorkspace}
-                  onDelete={handleDeleteWorkspace}
-                  onRestore={handleRestoreWorkspace}
-                  onPermanentDelete={handlePermanentDelete}
-                  showModal={showModal}
-                  closeModal={closeModal}
-                  onOpenCreateModal={handleCreateWorkspace}
-                />
-            </div>
-            <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
-          </>
-        )}
-        <main className="main-content">
-          {activeView === 'dashboard' ? (
-            <Dashboard
+        <div className={`panel-left${closingLeft.current ? ' closing' : ''}`} style={{ width: workspaceSidebarOpen ? leftWidth : 0, minWidth: workspaceSidebarOpen ? leftWidth : 0 }}>
+          {workspaceSidebarOpen && (
+            <WorkspaceSidebar
               workspaces={workspaces}
               sessions={sessions}
               activeWorkspace={activeWorkspace}
               deletedWorkspaces={deletedWorkspaces}
-              onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+              onSelect={handleSelectWorkspace}
+              onAdd={addWorkspace}
+              onEdit={editWorkspace}
+              onRemove={removeWorkspace}
               onDelete={handleDeleteWorkspace}
               onRestore={handleRestoreWorkspace}
               onPermanentDelete={handlePermanentDelete}
-              onNewWorkspace={handleCreateWorkspace}
-              onClose={() => setActiveView(null)}
+              showModal={showModal}
+              closeModal={closeModal}
+              onOpenCreateModal={handleCreateWorkspace}
+              expandedFolders={expandedFolders}
+              onToggleFolder={toggleFolder}
+              selectedFilePath={selectedFilePath}
+              onSelectFile={selectFile}
+              getWorkspaceTree={getWorkspaceTree}
+              createFile={createFile}
+              createFolder={createFolder}
+              renameFile={renameFile}
+              deleteFile={deleteFile}
             />
-          ) : activeView === 'debug' ? (
-            <PromptDebug
-              compressionStats={compressionStats}
-              compressionHistory={compressionHistory}
-              onCompressionEvent={onCompressionEvent}
-              requestCompressionStats={requestCompressionStats}
-            />
-          ) : activeView === 'git-review' ? (
-            <PRPanel
-              worktreePath={activeWorkspace?.repository?.path || ''}
-              onClose={() => setActiveView(null)}
-              onSelectDiff={() => {}}
-              fetchLog={getGitLog}
-              fetchDiff={getGitDiff}
-              fetchWorkingTreeDiff={getGitWorkingTreeDiff}
-              fetchCommitFiles={getGitCommitFiles}
-              fetchWorkingTreeFiles={getGitWorkingTreeFiles}
-              fetchFileDiff={getGitFileDiff}
-            />
-          ) : activeView === 'profile' ? (
-            <Profile onClose={() => setActiveView(null)} />
-          ) : activeView === 'settings' ? (
-            <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
+          )}
+        </div>
+        {workspaceSidebarOpen && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
+        <main className="main-content">
+          {viewMode === 'files' && openFiles.length > 0 ? (
+            <div className="editor-area">
+              <EditorTabs
+                openFiles={openFiles}
+                activeFileId={activeFileId}
+                onSelectFile={(id) => {
+                  setActiveFileId(id)
+                  setSelectedFilePath(id)
+                }}
+                onCloseFile={closeFile}
+              />
+              {activeFile && (
+                <CodeEditor
+                  key={activeFile.id + (activeFileContent ? '' : '-empty')}
+                  filePath={activeFile.filePath}
+                  content={activeFileContent}
+                  language={activeFile.language}
+                  isDirty={isActiveFileDirty}
+                  theme={theme}
+                  scrollPosition={editorScrollPositions[activeFile.id] || null}
+                  onContentChange={handleFileContentChange}
+                  onSave={handleSaveFile}
+                  onScrollChange={handleEditorScrollChange}
+                />
+              )}
+            </div>
           ) : (
             <TerminalArea
-              sessions={agentSessions}
-              shellSessions={shellSessions}
-              onInput={sendTerminalInput}
-              onResize={sendTerminalResize}
-              onRestart={restartSession}
-              onStartAgent={handleStartAgent}
-              onShowAgentModal={handleShowAgentModal}
-              onNewAgent={() => {}}
-              onSelectAgent={handleSelectAgent}
-              onNewShell={handleNewShell}
-              onCloseTab={handleCloseAgentTab}
-              onActiveSessionChange={setActiveSessionId}
-              activeSessionId={activeSessionId}
-              writeBuffersRef={writeBuffersRef}
-              agentConfigs={agentConfigs}
-              focusMode={focusMode}
-              agentsList={AGENTS_LIST}
-              bottomShellOpen={bottomShellOpen}
-              onToggleShell={handleToggleBottomShell}
-              chatSidebarOpen={chatSidebarOpen}
-              onToggleChatSidebar={handleToggleChatSidebar}
-              onTerminalOutput={onTerminalOutput}
-            />
+            sessions={agentSessions}
+            shellSessions={shellSessions}
+            onInput={sendTerminalInput}
+            onResize={sendTerminalResize}
+            onRestart={restartSession}
+            onStartAgent={handleStartAgent}
+            onShowAgentModal={handleShowAgentModal}
+            onNewAgent={() => {}}
+            onSelectAgent={handleSelectAgent}
+            onNewShell={handleNewShell}
+            onCloseTab={handleCloseAgentTab}
+            onActiveSessionChange={setActiveSessionId}
+            activeSessionId={activeSessionId}
+            writeBuffersRef={writeBuffersRef}
+            agentConfigs={agentConfigs}
+            focusMode={focusMode}
+            agentsList={AGENTS_LIST}
+            bottomShellOpen={bottomShellOpen}
+            onToggleShell={handleToggleBottomShell}
+            chatSidebarOpen={chatSidebarOpen}
+            onToggleChatSidebar={handleToggleChatSidebar}
+            onTerminalOutput={onTerminalOutput}
+            pageViews={[
+              { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
+                <Dashboard
+                  workspaces={workspaces}
+                  sessions={sessions}
+                  activeWorkspace={activeWorkspace}
+                  deletedWorkspaces={deletedWorkspaces}
+                  onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+                  onDelete={handleDeleteWorkspace}
+                  onRestore={handleRestoreWorkspace}
+                  onPermanentDelete={handlePermanentDelete}
+                  onNewWorkspace={handleCreateWorkspace}
+                  onClose={() => setActiveView(null)}
+                />
+              )},
+              { id: 'git-review', label: 'Git Review', icon: '⑂', render: () => (
+                <PRPanel
+                  worktreePath={activeWorkspace?.repository?.path || ''}
+                  onClose={() => setActiveView(null)}
+                  onSelectDiff={() => {}}
+                  fetchLog={getGitLog}
+                  fetchDiff={getGitDiff}
+                  fetchWorkingTreeDiff={getGitWorkingTreeDiff}
+                  fetchCommitFiles={getGitCommitFiles}
+                  fetchWorkingTreeFiles={getGitWorkingTreeFiles}
+                  fetchFileDiff={getGitFileDiff}
+                />
+              )},
+              { id: 'output-filter', label: 'Filter', icon: '◈', render: () => (
+                <OutputFilterDebug
+                  filterStats={filterStats}
+                  filterHistory={filterHistory}
+                  onFilterEvent={onFilterEvent}
+                  onClose={() => setActiveView(null)}
+                />
+              )},
+              { id: 'profile', label: 'Profile', icon: '◎', render: () => (
+                <Profile onClose={() => setActiveView(null)} />
+              )},
+              { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
+                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
+              )},
+            ]}
+            activeView={activeView}
+            onViewChange={(view) => setActiveView(view as typeof activeView)}
+          />
           )}
         </main>
         {chatSidebarOpen && (
@@ -811,6 +1032,9 @@ function App() {
         sessions={sessions}
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
+        notificationPanelOpen={notificationPanelOpen}
+        onNotificationClick={() => setNotificationPanelOpen(o => !o)}
+        unreadCount={notifications.filter(n => !n.read).length}
       />
     </div>
   )

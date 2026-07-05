@@ -163,20 +163,6 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
           </div>
           <div className="settings-row">
             <div>
-              <span className="settings-label">Token Compression</span>
-              <span className="settings-label-desc">Enable real-time token reduction</span>
-            </div>
-            <label className="settings-toggle">
-              <input
-                type="checkbox"
-                checked={prefs.tokenCompression}
-                onChange={e => updatePrefs({ tokenCompression: e.target.checked })}
-              />
-              <span className="settings-toggle-slider" />
-            </label>
-          </div>
-          <div className="settings-row">
-            <div>
               <span className="settings-label">Auto-start agents</span>
               <span className="settings-label-desc">Auto-launch agent sessions on workspace open</span>
             </div>

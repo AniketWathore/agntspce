@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { useState, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -6,6 +6,13 @@ import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
 import AgentPicker from './AgentPicker'
 import { getAgentColorImage } from '../agentImages'
+
+export interface PageView {
+  id: string
+  label: string
+  icon: string
+  render: () => ReactNode
+}
 
 interface Props {
   sessions: SessionState[]
@@ -31,6 +38,9 @@ interface Props {
   chatSidebarOpen: boolean
   onToggleChatSidebar: () => void
   onTerminalOutput: (cb: (data: any) => void) => () => void
+  pageViews?: PageView[]
+  activeView: string | null
+  onViewChange: (view: string | null) => void
 }
 
 const AGENT_TYPES = [
@@ -190,6 +200,7 @@ export default function TerminalArea({
   activeSessionId, writeBuffersRef, agentConfigs,
   focusMode, agentsList, bottomShellOpen, onToggleShell,
   chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
+  pageViews, activeView, onViewChange,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -244,90 +255,7 @@ export default function TerminalArea({
 
   const showAgents = !(terminalFullscreen && bottomShellOpen)
 
-  if (sessions.length === 0) {
-    return (
-      <div className="terminal-area-wrapper">
-        <div className="tab-bar">
-          <div className="tab-bar-tabs" />
-          <div className="tab-bar-actions" style={{ position: 'relative' }}>
-            <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={() => {
-              if (agentsList && agentsList.length > 0) {
-                setShowAgentDropdown(o => !o)
-              }
-            }}>+ Agent</button>
-            <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
-              <i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i>
-            </button>
-            {showAgentDropdown && agentsList && (
-              <AgentPicker
-                agents={agentsList}
-                onSelect={(agentId) => { setShowAgentDropdown(false); onSelectAgent(agentId) }}
-                onClose={() => setShowAgentDropdown(false)}
-              />
-            )}
-          </div>
-        </div>
-        <div className="terminal-area-empty" style={!showAgents ? { display: 'none' } : {}}>
-          <div className="empty-state">
-            <p>No agent terminals</p>
-            <p className="empty-hint">Add an AI coding agent or open a terminal</p>
-            <div className="empty-actions" style={{ position: 'relative' }}>
-              <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={() => {
-                if (agentsList && agentsList.length > 0) {
-                  setShowDropdown(o => !o)
-                }
-              }}>+ Agent</button>
-              <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
-                <i className="codicon codicon-terminal" style={{ fontSize: 16 }}></i>
-              </button>
-              <button className="shell-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
-              {showDropdown && agentsList && (
-                <AgentPicker
-                  agents={agentsList}
-                  onSelect={(agentId) => { setShowDropdown(false); onSelectAgent(agentId) }}
-                  onClose={() => setShowDropdown(false)}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-        {bottomShellOpen && shellSessions.length > 0 && (
-          <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : '0 0 50%' }}>
-            <div className="bottom-shell-header">
-              <div className="bottom-shell-header-actions">
-                <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
-                <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-                  {terminalFullscreen ? '⊠' : '⊡'}
-                </button>
-                <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
-              </div>
-            </div>
-            <div className="bottom-shell-body">
-              <div className="bottom-shell-terminal-area" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                {shellSessions.map(s => (
-                  <ShellTerminal
-                    key={s.id}
-                    session={s}
-                    onInput={onInput}
-                    onResize={onResize}
-                    writeData={writeBuffersRef.current[s.id] || ''}
-                    hidden={s.id !== activeShellId}
-                    onTerminalOutput={onTerminalOutput}
-                  />
-                ))}
-              </div>
-              <ShellTabList
-                shells={shellSessions}
-                activeShellId={activeShellId}
-                onSelect={setActiveShellId}
-                onClose={handleShellClose}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
+  const activePage = activeView && pageViews?.find(p => p.id === activeView)
 
   const groupTabs = [
     { id: 'all', label: 'All', icon: '⊞', count: sessions.length },
@@ -367,12 +295,12 @@ export default function TerminalArea({
       <div className="tab-bar">
         <div className="tab-bar-tabs">
           {groupTabs.map(tab => {
-            const isActive = tab.id === activeGroupTab
+            const isActive = tab.id === activeGroupTab && !activeView
             return (
               <div
                 key={tab.id}
                 className={`tab-item ${isActive ? 'active' : ''}`}
-                onClick={() => { setActiveGroupTab(tab.id); if (terminalFullscreen) setTerminalFullscreen(false) }}
+                onClick={() => { onViewChange(null); setActiveGroupTab(tab.id); if (terminalFullscreen) setTerminalFullscreen(false) }}
               >
                 {tab.icon === '⊞' ? (
                   <span className="tab-icon">{tab.icon}</span>
@@ -402,72 +330,103 @@ export default function TerminalArea({
         </div>
       </div>
 
-      {showAgents && (
-        <div
-          className={useHorizontalScroll ? 'terminal-area-hscroll' : 'terminal-area'}
-          style={useHorizontalScroll ? { flex: 1, minHeight: 0 } : tilingStyle}
-        >
-          {filteredSessions.map((session, i) => (
-            <TerminalPane
-              key={session.id}
-              session={session}
-              onInput={onInput}
-              onResize={onResize}
-              onRestart={onRestart}
-              onStartAgent={onStartAgent}
-              onShowAgentModal={onShowAgentModal}
-              writeData={writeBuffersRef.current[session.id] || ''}
-              agentConfigs={agentConfigs}
-              style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, activeIdx)}
-              onClose={onCloseTab}
-              dimmed={focusMode && session.id !== activeSessionId}
-              onTerminalOutput={onTerminalOutput}
-            />
-          ))}
-          <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
+      {activePage ? (
+        <div className="terminal-area-page-content">
+          {activePage.render()}
         </div>
-      )}
-
-      {bottomShellOpen && (
-        <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : '0 0 50%' }}>
-          <div className="bottom-shell-header">
-            <div className="bottom-shell-header-actions">
-              <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
-              <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-                {terminalFullscreen ? '⊠' : '⊡'}
+      ) : sessions.length === 0 ? (
+        <div className="terminal-area-empty" style={!showAgents ? { display: 'none' } : {}}>
+          <div className="empty-state">
+            <p>No agent terminals</p>
+            <p className="empty-hint">Add an AI coding agent or open a terminal</p>
+            <div className="empty-actions" style={{ position: 'relative' }}>
+              <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={() => {
+                if (agentsList && agentsList.length > 0) {
+                  setShowAgentDropdown(o => !o)
+                }
+              }}>+ Agent</button>
+              <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
+                <i className="codicon codicon-terminal" style={{ fontSize: 16 }}></i>
               </button>
-              <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
-            </div>
-          </div>
-          <div className="bottom-shell-body">
-            <div className="bottom-shell-terminal-area">
-              {shellSessions.length === 0 ? (
-                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-                  No shell terminals
-                </div>
-              ) : (
-                shellSessions.map(s => (
-                  <ShellTerminal
-                    key={s.id}
-                    session={s}
-                    onInput={onInput}
-                    onResize={onResize}
-                    writeData={writeBuffersRef.current[s.id] || ''}
-                    hidden={s.id !== activeShellId}
-                    onTerminalOutput={onTerminalOutput}
-                  />
-                ))
+              {showAgentDropdown && agentsList && (
+                <AgentPicker
+                  agents={agentsList}
+                  onSelect={(agentId) => { setShowAgentDropdown(false); onSelectAgent(agentId) }}
+                  onClose={() => setShowAgentDropdown(false)}
+                />
               )}
             </div>
-            <ShellTabList
-              shells={shellSessions}
-              activeShellId={activeShellId}
-              onSelect={setActiveShellId}
-              onClose={handleShellClose}
-            />
           </div>
         </div>
-      )}
-    </div>
+      ) : (
+        <>
+          {showAgents && (
+            <div
+              className={useHorizontalScroll ? 'terminal-area-hscroll' : 'terminal-area'}
+              style={useHorizontalScroll ? { flex: 1, minHeight: 0 } : tilingStyle}
+            >
+              {filteredSessions.map((session, i) => (
+                <TerminalPane
+                  key={session.id}
+                  session={session}
+                  onInput={onInput}
+                  onResize={onResize}
+                  onRestart={onRestart}
+                  onStartAgent={onStartAgent}
+                  onShowAgentModal={onShowAgentModal}
+                  writeData={writeBuffersRef.current[session.id] || ''}
+                  agentConfigs={agentConfigs}
+                  style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, activeIdx)}
+                  onClose={onCloseTab}
+                  dimmed={focusMode && session.id !== activeSessionId}
+                  onTerminalOutput={onTerminalOutput}
+                />
+              ))}
+            </div>
+          )}
+
+          {bottomShellOpen && (
+            <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : '0 0 50%' }}>
+              <div className="bottom-shell-header">
+                <div className="bottom-shell-header-actions">
+                  <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
+                  <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                    {terminalFullscreen ? '⊠' : '⊡'}
+                  </button>
+                  <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
+                </div>
+              </div>
+              <div className="bottom-shell-body">
+                <div className="bottom-shell-terminal-area">
+                  {shellSessions.length === 0 ? (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
+                      No shell terminals
+                    </div>
+                  ) : (
+                    shellSessions.map(s => (
+                      <ShellTerminal
+                        key={s.id}
+                        session={s}
+                        onInput={onInput}
+                        onResize={onResize}
+                        writeData={writeBuffersRef.current[s.id] || ''}
+                        hidden={s.id !== activeShellId}
+                        onTerminalOutput={onTerminalOutput}
+                      />
+                    ))
+                  )}
+                </div>
+                <ShellTabList
+                  shells={shellSessions}
+                  activeShellId={activeShellId}
+                  onSelect={setActiveShellId}
+                  onClose={handleShellClose}
+                />
+              </div>
+            </div>
+          )}
+          </>
+        )}
+      </div>
   )
 }

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
+import { FileExplorer } from './FileExplorer'
 
 interface DeletedWs {
   id: string
@@ -22,29 +23,45 @@ interface Props {
   showModal: (title: string, onSubmit: (value: string) => void, defaultValue?: string) => void
   closeModal: () => void
   onOpenCreateModal: () => void
+  expandedFolders: Set<string>
+  onToggleFolder: (path: string) => void
+  selectedFilePath: string | null
+  onSelectFile: (path: string) => void
+  getWorkspaceTree: (worktreePath: string) => Promise<any>
+  createFile: (absolutePath: string) => Promise<any>
+  createFolder: (absolutePath: string) => Promise<any>
+  renameFile: (oldPath: string, newPath: string) => Promise<any>
+  deleteFile: (absolutePath: string) => Promise<any>
 }
 
-function getSessionCount(ws: WorkspaceInfo): number {
-  if (Array.isArray(ws.terminals)) return ws.terminals.length
-  return ws.terminals?.pairs ? ws.terminals.pairs * 2 : 0
+function wsExpandKey(wsId: string) {
+  return `ws:${wsId}`
 }
 
-function getActiveCount(sessions: Record<string, SessionState>): number {
-  return Object.values(sessions).filter(s => s.status === 'busy' || s.status === 'waiting').length
-}
-
-function FolderIcon({ open }: { open: boolean }) {
-  return <i className={`codicon ${open ? 'codicon-folder-opened' : 'codicon-folder'}`} style={{ fontSize: 16 }}></i>
-}
-
-export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onEdit, onDelete, onRestore, onPermanentDelete, onOpenCreateModal, showModal, closeModal }: Props) {
+export default function WorkspaceSidebar({
+  workspaces, activeWorkspace, deletedWorkspaces,
+  onSelect, onEdit, onDelete, onRestore, onPermanentDelete,
+  onOpenCreateModal, showModal,
+  expandedFolders, onToggleFolder, selectedFilePath, onSelectFile,
+  getWorkspaceTree, createFile, createFolder, renameFile, deleteFile,
+}: Props) {
   const [showTrash, setShowTrash] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
-  const activeCount = getActiveCount(sessions)
+
+  const closeContextMenu = useCallback(() => setMenuOpenId(null), [])
+
+  useEffect(() => {
+    if (menuOpenId) {
+      const handler = () => closeContextMenu()
+      document.addEventListener('click', handler)
+      return () => document.removeEventListener('click', handler)
+    }
+  }, [menuOpenId, closeContextMenu])
 
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
+        {/* Header */}
         <div className="sidebar-header">
           <h2>Workspace</h2>
           <div className="sidebar-header-buttons">
@@ -52,72 +69,115 @@ export default function WorkspaceSidebar({ workspaces, sessions, activeWorkspace
           </div>
         </div>
 
-        <div className="sidebar-stats">
-          {activeCount > 0 && <span className="stat active">{activeCount} active</span>}
-        </div>
-
+        {/* Workspace list */}
         <div className="workspace-list">
-          {workspaces.map(ws => (
-            <div
-              key={ws.id}
-              className={`workspace-item ${activeWorkspace?.id === ws.id ? 'active' : ''}`}
-              onClick={() => onSelect(ws.id)}
-            >
-              <div className="workspace-item-header">
-                <FolderIcon open={activeWorkspace?.id === ws.id} />
-                <span className="workspace-name">{ws.name}</span>
-                {getSessionCount(ws) > 0 && <span className="workspace-session-count">{getSessionCount(ws)}</span>}
-              </div>
-              <div className={`workspace-item-actions${menuOpenId === ws.id ? ' show' : ''}`}>
-                <button
-                  className="action-btn dots-btn"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setMenuOpenId(menuOpenId === ws.id ? null : ws.id)
-                  }}
-                  title="Options"
-                >⋮</button>
-                {menuOpenId === ws.id && (
-                  <div className="workspace-menu" onClick={e => e.stopPropagation()}>
+          {workspaces.map(ws => {
+            const isActive = activeWorkspace?.id === ws.id
+            const isExpanded = expandedFolders.has(wsExpandKey(ws.id))
+            const wsPath = ws.repository?.path || ''
+
+            return (
+              <div key={ws.id} className={`workspace-tree-item${isActive ? ' active' : ''}`}>
+                {/* Workspace row: arrow + name */}
+                <div className="workspace-tree-row">
+                  <div
+                    className="workspace-tree-arrow"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onToggleFolder(wsExpandKey(ws.id))
+                    }}
+                  >
+                    <i
+                      className={`codicon codicon-chevron-${isExpanded ? 'down' : 'right'}`}
+                      style={{ fontSize: 12, width: 16 }}
+                    />
+                  </div>
+                  <div
+                    className={`workspace-tree-name${isActive ? ' active' : ''}`}
+                    onClick={() => onSelect(ws.id)}
+                    title={ws.name}
+                  >
+                    {ws.name}
+                  </div>
+                  <div className="workspace-tree-actions">
                     <button
-                      className="workspace-menu-item"
-                      onClick={() => {
-                        setMenuOpenId(null)
-                        showModal('Rename workspace:', (name) => {
-                          onEdit(ws.id, name, ws.repository?.path || '')
-                          closeModal()
-                        }, ws.name)
+                      className="workspace-tree-dots"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuOpenId(menuOpenId === ws.id ? null : ws.id)
                       }}
-                    >Rename</button>
-                    <button
-                      className="workspace-menu-item danger"
-                      onClick={() => {
-                        setMenuOpenId(null)
-                        if (confirm(`Delete workspace "${ws.name}"?`)) onDelete(ws.id)
-                      }}
-                    >Delete</button>
+                      title="Options"
+                    >⋮</button>
+                    {menuOpenId === ws.id && (
+                      <div className="workspace-tree-menu" onClick={e => e.stopPropagation()}>
+                        <button
+                          className="workspace-tree-menu-item"
+                          onClick={() => {
+                            setMenuOpenId(null)
+                            showModal('Rename workspace:', (name) => {
+                              onEdit(ws.id, name, ws.repository?.path || '')
+                            }, ws.name)
+                          }}
+                        >Rename</button>
+                        <button
+                          className="workspace-tree-menu-item danger"
+                          onClick={() => {
+                            setMenuOpenId(null)
+                            if (confirm(`Delete workspace "${ws.name}"?`)) onDelete(ws.id)
+                          }}
+                        >Delete</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Inline file tree when expanded */}
+                {isExpanded && wsPath && (
+                  <div className="workspace-inline-tree">
+                    <FileExplorer
+                      workspacePath={wsPath}
+                      selectedFilePath={selectedFilePath}
+                      expandedFolders={expandedFolders}
+                      onToggleFolder={onToggleFolder}
+                      onSelectFile={onSelectFile}
+                      getWorkspaceTree={getWorkspaceTree}
+                      createFile={createFile}
+                      createFolder={createFolder}
+                      renameFile={renameFile}
+                      deleteFile={deleteFile}
+                    />
+                  </div>
+                )}
+                {isExpanded && !wsPath && (
+                  <div className="workspace-inline-tree">
+                    <div className="sidebar-empty">No path available</div>
                   </div>
                 )}
               </div>
+            )
+          })}
+
+          {workspaces.length === 0 && (
+            <div className="sidebar-empty">
+              No workspaces yet. Click + to create one.
             </div>
-          ))}
-          {menuOpenId && (
-            <div className="workspace-menu-overlay" onClick={() => setMenuOpenId(null)} />
           )}
         </div>
 
+        {/* Trash section */}
         {deletedWorkspaces.length > 0 && (
-          <div className="sidebar-section">
-            <div className="sidebar-section-header" onClick={() => setShowTrash(o => !o)}>
-              <span className="trash-icon">{showTrash ? '▾' : '▸'}</span>
+          <div className="workspace-trash">
+            <div className="workspace-trash-header" onClick={() => setShowTrash(o => !o)}>
+              <i
+                className={`codicon codicon-chevron-${showTrash ? 'down' : 'right'}`}
+                style={{ fontSize: 10, width: 14, flexShrink: 0 }}
+              />
               <span>Trash ({deletedWorkspaces.length})</span>
             </div>
             {showTrash && deletedWorkspaces.map(dws => (
-              <div key={dws.id} className="workspace-item deleted">
-                <div className="workspace-item-header">
-                  <span className="workspace-name">{dws.name}</span>
-                </div>
-                <div className="workspace-item-actions">
+              <div key={dws.id} className="workspace-trash-item">
+                <span className="workspace-trash-name">{dws.name}</span>
+                <div className="workspace-trash-actions">
                   <button className="action-btn" onClick={() => onRestore(dws.id)} title="Restore">Restore</button>
                   <button className="action-btn danger" onClick={() => {
                     if (confirm(`Permanently delete "${dws.name}"?`)) onPermanentDelete(dws.id)

@@ -190,16 +190,53 @@ export class GitHelper {
     const state = this.getPathState(worktreePath)
     if (!state.ok) return null
     try {
-      const { stdout } = await this.execGit(['diff', '--numstat'], { cwd: state.normalized, timeout: 10000 })
-      if (!stdout.trim()) return []
-      return stdout.trim().split('\n').filter(Boolean).map(line => {
-        const parts = line.split('\t')
-        const adds = parseInt(parts[0])
-        const dels = parseInt(parts[1])
-        const filePath = parts[2] || ''
-        const status = adds === 0 && dels === 0 ? 'M' : adds > 0 && dels === 0 ? 'A' : adds === 0 && dels > 0 ? 'D' : 'M'
-        return { filePath, status, additions: isNaN(adds) ? 0 : adds, deletions: isNaN(dels) ? 0 : dels }
-      })
+      const [statusResult, unstagedResult, stagedResult] = await Promise.all([
+        this.execGit(['status', '--porcelain'], { cwd: state.normalized, timeout: 5000 }),
+        this.execGit(['diff', '--numstat'], { cwd: state.normalized, timeout: 10000 }).catch(() => ({ stdout: '' })),
+        this.execGit(['diff', '--cached', '--numstat'], { cwd: state.normalized, timeout: 10000 }).catch(() => ({ stdout: '' })),
+      ])
+
+      const numstatMap = new Map<string, { additions: number, deletions: number }>()
+      const addNumstat = (output: string) => {
+        for (const line of output.trim().split('\n').filter(Boolean)) {
+          const parts = line.split('\t')
+          const adds = parseInt(parts[0])
+          const dels = parseInt(parts[1])
+          const fp = parts.slice(2).join('\t')
+          if (!fp) continue
+          const existing = numstatMap.get(fp) || { additions: 0, deletions: 0 }
+          existing.additions += isNaN(adds) ? 0 : adds
+          existing.deletions += isNaN(dels) ? 0 : dels
+          numstatMap.set(fp, existing)
+        }
+      }
+      addNumstat(unstagedResult.stdout)
+      addNumstat(stagedResult.stdout)
+
+      const statusLines = statusResult.stdout.trim().split('\n').filter(Boolean)
+      const files: { filePath: string, status: string, additions: number, deletions: number }[] = []
+      for (const line of statusLines) {
+        const stagedStatus = line[0]
+        const workingStatus = line[1]
+        let rawPath = line.slice(3).trim()
+        if (stagedStatus === 'R' || workingStatus === 'R') {
+          const parts = rawPath.split(' -> ')
+          rawPath = parts[parts.length - 1].trim()
+        }
+        let status: string
+        if (stagedStatus === '?' && workingStatus === '?') {
+          status = 'U'
+        } else if (stagedStatus === 'A' || workingStatus === 'A' || stagedStatus === '?') {
+          status = 'A'
+        } else if (stagedStatus === 'D' || workingStatus === 'D') {
+          status = 'D'
+        } else {
+          status = 'M'
+        }
+        const stats = numstatMap.get(rawPath) || { additions: 0, deletions: 0 }
+        files.push({ filePath: rawPath, status, additions: stats.additions, deletions: stats.deletions })
+      }
+      return files
     } catch { return null }
   }
 
@@ -207,6 +244,15 @@ export class GitHelper {
     const state = this.getPathState(worktreePath)
     if (!state.ok) return null
     try {
+      if (base === 'EMPTY') {
+        const fullPath = path.resolve(state.normalized, filePath)
+        if (!fs.existsSync(fullPath)) return null
+        const content = await fs.promises.readFile(fullPath, 'utf-8')
+        const lines = content.split('\n')
+        const header = `--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${lines.length} @@\n`
+        const body = lines.map((l, i) => `+${l}`).join('\n')
+        return header + body + '\n'
+      }
       const args = base ? ['diff', base] : ['diff']
       if (head) args.push(head)
       args.push('--', filePath)

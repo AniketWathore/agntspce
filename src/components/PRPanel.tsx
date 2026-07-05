@@ -87,7 +87,12 @@ export default function PRPanel({
     const load = async () => {
       let diff: string | null = null
       if (tab === 'working') {
-        diff = await fetchFileDiff(worktreePath, selectedFile)
+        const file = workingFiles?.find(f => f.filePath === selectedFile)
+        if (file?.status === 'U') {
+          diff = await fetchFileDiff(worktreePath, selectedFile, 'EMPTY')
+        } else {
+          diff = await fetchFileDiff(worktreePath, selectedFile)
+        }
       } else if (tab === 'commits' && selectedCommit) {
         diff = await fetchFileDiff(worktreePath, selectedFile, `${selectedCommit}^`, selectedCommit)
       }
@@ -119,10 +124,23 @@ export default function PRPanel({
     switch (status) {
       case 'A': return <span className="scm-status-added">A</span>
       case 'D': return <span className="scm-status-deleted">D</span>
+      case 'U': return <span className="scm-status-untracked">U</span>
       case 'M': return <span className="scm-status-modified">M</span>
       default: return <span className="scm-status-modified">M</span>
     }
   }
+
+  const groupedFiles = useCallback((files: ChangedFile[] | null) => {
+    if (!files || files.length === 0) return {}
+    const groups: Record<string, ChangedFile[]> = {}
+    for (const f of files) {
+      const parts = f.filePath.split('/')
+      const dir = parts.length > 1 ? parts.slice(0, -1).join('/') : '/'
+      if (!groups[dir]) groups[dir] = []
+      groups[dir].push(f)
+    }
+    return groups
+  }, [])
 
   return (
     <div className="pr-fullpage">
@@ -161,18 +179,23 @@ export default function PRPanel({
                   ) : workingFiles.length === 0 ? (
                     <div className="scm-empty">No changes</div>
                   ) : (
-                    workingFiles.map(f => (
-                      <div
-                        key={f.filePath}
-                        className={`scm-file-item ${selectedFile === f.filePath ? 'selected' : ''}`}
-                        onClick={() => setSelectedFile(f.filePath)}
-                      >
-                        {statusIcon(f.status)}
-                        <span className="scm-file-path">{f.filePath}</span>
-                        <span className="scm-file-stats">
-                          {f.additions > 0 && <span className="diff-stat-add">+{f.additions}</span>}
-                          {f.deletions > 0 && <span className="diff-stat-del">-{f.deletions}</span>}
-                        </span>
+                    Object.entries(groupedFiles(workingFiles)).map(([dir, files]) => (
+                      <div key={dir} className="scm-folder">
+                        {dir !== '/' && <div className="scm-folder-label">{dir}/</div>}
+                        {files.map(f => (
+                          <div
+                            key={f.filePath}
+                            className={`scm-file-item ${selectedFile === f.filePath ? 'selected' : ''}`}
+                            onClick={() => setSelectedFile(f.filePath)}
+                          >
+                            {statusIcon(f.status)}
+                            <span className="scm-file-path">{f.filePath.split('/').pop()}</span>
+                            <span className="scm-file-stats">
+                              {f.additions > 0 && <span className="diff-stat-add">+{f.additions}</span>}
+                              {f.deletions > 0 && <span className="diff-stat-del">-{f.deletions}</span>}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     ))
                   )}
@@ -200,18 +223,23 @@ export default function PRPanel({
                         <div className="scm-commit-author">{entry.author}</div>
                         {selectedCommit === entry.hash && commitFiles && (
                           <div className="scm-commit-files">
-                            {commitFiles.map(f => (
-                              <div
-                                key={f.filePath}
-                                className={`scm-file-item ${selectedFile === f.filePath ? 'selected' : ''}`}
-                                onClick={(e) => { e.stopPropagation(); setSelectedFile(f.filePath) }}
-                              >
-                                {statusIcon(f.status)}
-                                <span className="scm-file-path">{f.filePath}</span>
-                                <span className="scm-file-stats">
-                                  {f.additions > 0 && <span className="diff-stat-add">+{f.additions}</span>}
-                                  {f.deletions > 0 && <span className="diff-stat-del">-{f.deletions}</span>}
-                                </span>
+                            {Object.entries(groupedFiles(commitFiles)).map(([dir, files]) => (
+                              <div key={dir} className="scm-folder">
+                                {dir !== '/' && <div className="scm-folder-label">{dir}/</div>}
+                                {files.map(f => (
+                                  <div
+                                    key={f.filePath}
+                                    className={`scm-file-item ${selectedFile === f.filePath ? 'selected' : ''}`}
+                                    onClick={(e) => { e.stopPropagation(); setSelectedFile(f.filePath) }}
+                                  >
+                                    {statusIcon(f.status)}
+                                    <span className="scm-file-path">{f.filePath.split('/').pop()}</span>
+                                    <span className="scm-file-stats">
+                                      {f.additions > 0 && <span className="diff-stat-add">+{f.additions}</span>}
+                                      {f.deletions > 0 && <span className="diff-stat-del">-{f.deletions}</span>}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             ))}
                           </div>
