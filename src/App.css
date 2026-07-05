@@ -144,6 +144,67 @@
   overflow: hidden;
 }
 
+/* ── Title Bar ──────────────────────────── */
+.title-bar {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  background: var(--bg-primary);
+}
+
+.title-bar-drag {
+  flex: 1;
+  height: 100%;
+}
+
+.title-bar-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  position: relative;
+  -webkit-app-region: no-drag;
+  transition: all 0.15s;
+}
+
+.title-bar-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.title-bar-btn.active {
+  color: var(--text-primary);
+}
+
+.title-bar-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 10px;
+  height: 10px;
+  padding: 0 3px;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 5px;
+  font-size: 7px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
+}
+
 /* ── Modals ─────────────────────────────── */
 .modal-overlay {
   position: fixed;

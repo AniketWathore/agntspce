@@ -29,6 +29,7 @@ function createNewWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'AgntSpce',
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
@@ -679,6 +680,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'AgntSpce',
+    ...(isMac ? { titleBarStyle: 'hiddenInset' as const } : {}),
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
