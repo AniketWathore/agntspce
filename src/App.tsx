@@ -165,7 +165,8 @@ function App() {
   const leftWidthRef = useRef(leftWidth)
   const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.20))
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
-  const dragging = useRef<'left' | 'right' | null>(null)
+  const [terminalHeight, setTerminalHeight] = useState(40)
+  const dragging = useRef<'left' | 'right' | 'terminal' | null>(null)
   const closingLeft = useRef(false)
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -198,6 +199,10 @@ function App() {
     localStorage.setItem('agent-workspace-font-family', fontFamily)
     document.documentElement.style.setProperty('--terminal-font-family', fontFamily)
   }, [fontFamily])
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--terminal-height', `${terminalHeight}%`)
+  }, [terminalHeight])
 
   useEffect(() => {
     getSessionHistory().then(h => setSessionHistory(h))
@@ -388,13 +393,6 @@ function App() {
     switchWorkspace(id)
     setWorkspaceSidebarOpen(true)
     setViewMode('agents')
-    // Auto-expand the selected workspace's file tree
-    setExpandedFolders(prev => {
-      if (prev.has(`ws:${id}`)) return prev
-      const next = new Set(prev)
-      next.add(`ws:${id}`)
-      return next
-    })
     if (appBodyRef.current) {
       const totalW = appBodyRef.current.getBoundingClientRect().width
       setLeftWidth(Math.round(totalW * 0.12))
@@ -633,6 +631,35 @@ function App() {
       document.body.style.userSelect = 'none'
     }
   }
+
+  const onTerminalResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = 'terminal'
+    const startY = e.clientY
+    const startHeight = terminalHeight
+    const mainContent = e.currentTarget.closest('.main-content')
+    const mainHeight = mainContent ? mainContent.getBoundingClientRect().height : window.innerHeight
+
+    function onMove(ev: MouseEvent) {
+      if (dragging.current !== 'terminal') return
+      const dy = startY - ev.clientY
+      const newHeight = Math.max(10, Math.min(80, startHeight + (dy / mainHeight) * 100))
+      setTerminalHeight(newHeight)
+    }
+
+    function onUp() {
+      dragging.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+  }, [terminalHeight])
 
   function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
     setActiveView(activeView === view ? null : view)
@@ -880,8 +907,8 @@ function App() {
           )}
         </div>
         {workspaceSidebarOpen && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
-        <main className="main-content">
-          {viewMode === 'files' && openFiles.length > 0 ? (
+        <main className={`main-content${viewMode === 'files' && openFiles.length > 0 ? ' file-viewer' : ''}`}>
+          {viewMode === 'files' && openFiles.length > 0 && (
             <div className="editor-area">
               <EditorTabs
                 openFiles={openFiles}
@@ -907,8 +934,11 @@ function App() {
                 />
               )}
             </div>
-          ) : (
-            <TerminalArea
+          )}
+          {viewMode === 'files' && openFiles.length > 0 && bottomShellOpen && (
+            <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
+          )}
+          <TerminalArea
             sessions={agentSessions}
             shellSessions={shellSessions}
             onInput={sendTerminalInput}
@@ -929,6 +959,7 @@ function App() {
             bottomShellOpen={bottomShellOpen}
             onToggleShell={handleToggleBottomShell}
             chatSidebarOpen={chatSidebarOpen}
+            shellOnly={viewMode === 'files'}
             onToggleChatSidebar={handleToggleChatSidebar}
             onTerminalOutput={onTerminalOutput}
             pageViews={[
@@ -977,7 +1008,6 @@ function App() {
             activeView={activeView}
             onViewChange={(view) => setActiveView(view as typeof activeView)}
           />
-          )}
         </main>
         {chatSidebarOpen && (
           <>
