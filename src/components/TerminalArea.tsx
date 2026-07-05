@@ -21,7 +21,7 @@ interface Props {
   onCloseTab: (sessionId: string) => void
   onActiveSessionChange: (id: string | null) => void
   activeSessionId: string | null
-  writeBuffers: Record<string, string>
+  writeBuffersRef: { current: Record<string, string> }
   agentConfigs: AgentConfig[]
   layoutPreset?: 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
   focusMode: boolean
@@ -30,6 +30,7 @@ interface Props {
   onToggleShell: () => void
   chatSidebarOpen: boolean
   onToggleChatSidebar: () => void
+  onTerminalOutput: (cb: (data: any) => void) => () => void
 }
 
 const AGENT_TYPES = [
@@ -56,12 +57,13 @@ function getItemStyle(index: number, count: number, _activeIndex: number): CSSPr
   return {}
 }
 
-function ShellTerminal({ session, onInput, onResize, writeData, hidden }: {
+function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTerminalOutput }: {
   session: SessionState
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
   writeData: string
   hidden: boolean
+  onTerminalOutput?: (cb: (data: any) => void) => () => void
 }) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
@@ -116,17 +118,22 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden }: {
     termInstance.current = term
     const themeObserver = new MutationObserver(() => { try { term.options.theme = buildTheme() } catch {} })
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-    return () => { themeObserver.disconnect(); term.dispose(); termInstance.current = null }
-  }, [session.id])
 
-  const lastWriteLenRef = useRef(0)
-  useEffect(() => {
-    if (writeData.length > lastWriteLenRef.current && termInstance.current) {
-      const newData = writeData.slice(lastWriteLenRef.current)
-      lastWriteLenRef.current = writeData.length
-      if (newData) termInstance.current.write(newData)
+    if (writeData) term.write(writeData)
+
+    const unsub = onTerminalOutput?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
+      if (sid === session.id && termInstance.current) {
+        termInstance.current.write(data)
+      }
+    })
+
+    return () => {
+      unsub?.()
+      themeObserver.disconnect()
+      term.dispose()
+      termInstance.current = null
     }
-  }, [writeData])
+  }, [session.id, onTerminalOutput])
 
   useEffect(() => {
     if (terminalRef.current && !hidden && termInstance.current && fitAddonRef.current) {
@@ -180,9 +187,9 @@ function ShellTabList({ shells, activeShellId, onSelect, onClose }: {
 export default function TerminalArea({
   sessions, shellSessions, onInput, onResize, onRestart, onStartAgent,
   onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
-  activeSessionId, writeBuffers, agentConfigs,
+  activeSessionId, writeBuffersRef, agentConfigs,
   focusMode, agentsList, bottomShellOpen, onToggleShell,
-  chatSidebarOpen, onToggleChatSidebar,
+  chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -303,8 +310,9 @@ export default function TerminalArea({
                     session={s}
                     onInput={onInput}
                     onResize={onResize}
-                    writeData={writeBuffers[s.id] || ''}
+                    writeData={writeBuffersRef.current[s.id] || ''}
                     hidden={s.id !== activeShellId}
+                    onTerminalOutput={onTerminalOutput}
                   />
                 ))}
               </div>
@@ -408,11 +416,12 @@ export default function TerminalArea({
               onRestart={onRestart}
               onStartAgent={onStartAgent}
               onShowAgentModal={onShowAgentModal}
-              writeData={writeBuffers[session.id] || ''}
+              writeData={writeBuffersRef.current[session.id] || ''}
               agentConfigs={agentConfigs}
               style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, activeIdx)}
               onClose={onCloseTab}
               dimmed={focusMode && session.id !== activeSessionId}
+              onTerminalOutput={onTerminalOutput}
             />
           ))}
           <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
@@ -443,8 +452,9 @@ export default function TerminalArea({
                     session={s}
                     onInput={onInput}
                     onResize={onResize}
-                    writeData={writeBuffers[s.id] || ''}
+                    writeData={writeBuffersRef.current[s.id] || ''}
                     hidden={s.id !== activeShellId}
+                    onTerminalOutput={onTerminalOutput}
                   />
                 ))
               )}

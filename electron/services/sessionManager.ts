@@ -10,6 +10,7 @@ import { TokenReductionService } from './tokenReduction'
 import { WorkspaceManager } from './workspaceManager'
 import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker, OutputCompressor, PromptOptimizer } from './outputCompressor'
+import { RingBuffer } from './ringBuffer'
 
 let pty: any = null
 try {
@@ -42,6 +43,22 @@ function buildShellArgs(commands: string | string[]): string[] {
   return ['-c', keepOpen]
 }
 
+const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
+
+function applyBackpressure(io: any): void {
+  try {
+    for (const [, socket] of io.sockets.sockets) {
+      const transport = (socket as any)?.conn?.transport
+      if (transport?.name === 'websocket') {
+        const ws = transport.socket as any
+        if (ws && ws.bufferedAmount > OUTBOUND_BUFFER_CAP) {
+          ws.terminate()
+        }
+      }
+    }
+  } catch {}
+}
+
 export class SessionManager extends EventEmitter {
   sessions = new Map<string, Session>()
   workspace: Workspace | null = null
@@ -53,7 +70,6 @@ export class SessionManager extends EventEmitter {
   private io: any
   private branchRefreshInterval: NodeJS.Timeout | null = null
   private isWorkspaceSwitching = false
-  private maxBufferSize = 100000
   autoRestartSessions = false
   private agentManager: any = null
   orchestrator: AgentOrchestrator | null = null
@@ -279,7 +295,7 @@ export class SessionManager extends EventEmitter {
       repositoryType: config.repositoryType,
       status: 'idle',
       branch: 'unknown',
-      buffer: '',
+      buffer: new RingBuffer(),
       deliveredBufferLength: 0,
       lastActivity: Date.now(),
       tokenUsage: 0,
@@ -293,25 +309,17 @@ export class SessionManager extends EventEmitter {
     }
 
     ptyProcess.onData((data: string) => {
-      session.buffer += data
+      session.buffer.write(data)
       session.lastActivity = Date.now()
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
-      if (session.deliveredBufferLength > session.buffer.length) {
-        session.deliveredBufferLength = session.buffer.length
-      }
       const isActive = this.sessions.get(sessionId) === session
       if (isActive) {
+        applyBackpressure(this.io)
         try {
           this.io.emit('terminal-output', { sessionId, data })
         } catch { }
-        session.deliveredBufferLength = session.buffer.length
-      }
-      if (session.buffer.length > this.maxBufferSize) {
-        session.buffer = session.buffer.slice(-Math.floor(this.maxBufferSize / 2))
-        if (session.deliveredBufferLength > session.buffer.length) {
-          session.deliveredBufferLength = session.buffer.length
-        }
+        session.deliveredBufferLength = session.buffer.totalBytes
       }
       this.refreshSessionStatus(sessionId)
     })
@@ -396,11 +404,12 @@ export class SessionManager extends EventEmitter {
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)
+    this.statusDetector.reset(sessionId)
     return true
   }
 
-  createRawSession(type: string, workspacePath?: string): { sessionId: string } | null {
-    const sessionId = `raw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  createRawSession(type: string, workspacePath?: string, existingSessionId?: string): { sessionId: string } | null {
+    const sessionId = existingSessionId || `raw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const cwd = workspacePath || this.workspace?.repository?.path || process.env.HOME || os.homedir() || '/tmp'
     const args = type === 'shell'
       ? buildShellArgs([`cd "${cwd}"`, `echo "Welcome to AgntSpce"`])
@@ -439,8 +448,9 @@ export class SessionManager extends EventEmitter {
   private persistSessionBuffer(sessionId: string) {
     if (!this.workspace?.id) return
     const session = this.sessions.get(sessionId)
-    if (!session?.buffer) return
-    WorkspaceManager.getInstance().saveSessionBuffer(this.workspace.id, sessionId, session.buffer)
+    if (!session) return
+    const buf = session.buffer.snapshot()
+    if (buf) WorkspaceManager.getInstance().saveSessionBuffer(this.workspace.id, sessionId, buf)
   }
 
   private cleanupSessionBuffer(sessionId: string) {
@@ -450,7 +460,22 @@ export class SessionManager extends EventEmitter {
 
   async saveAllSessionBuffers() {
     if (!this.workspace?.id) return
-    await WorkspaceManager.getInstance().saveAllSessionBuffers(this.workspace.id, this.sessions)
+    const snapshots = new Map<string, string>()
+    for (const [id, s] of this.sessions) {
+      const buf = s.buffer.snapshot()
+      if (buf) snapshots.set(id, buf)
+    }
+    await WorkspaceManager.getInstance().saveAllSessionBuffers(this.workspace.id, snapshots)
+  }
+
+  saveAllSessionBuffersSync() {
+    if (!this.workspace?.id) return
+    const snapshots = new Map<string, string>()
+    for (const [id, s] of this.sessions) {
+      const buf = s.buffer.snapshot()
+      if (buf) snapshots.set(id, buf)
+    }
+    WorkspaceManager.getInstance().saveAllSessionBuffersSync(this.workspace.id, snapshots)
   }
 
   async restoreSessionBuffer(sessionId: string) {
@@ -459,7 +484,7 @@ export class SessionManager extends EventEmitter {
     if (!session) return
     const saved = await WorkspaceManager.getInstance().loadSessionBuffer(this.workspace.id, sessionId)
     if (saved) {
-      session.buffer = saved
+      session.buffer.write(saved)
       session.deliveredBufferLength = 0
     }
   }
@@ -493,30 +518,20 @@ export class SessionManager extends EventEmitter {
   }
 
   async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
-    if (!this.autoRestartSessions) return
     const restorePromises: Promise<void>[] = []
     for (const saved of sessions) {
+      if (this.sessions.has(saved.id)) continue
       const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
-      let sessionId: string | null = null
-      if (saved.type === 'shell') {
-        const result = this.createRawSession('shell', cwd)
-        if (result) sessionId = result.sessionId
-      } else {
-        const result = this.createRawSession(saved.type, cwd)
-        if (result) {
-          sessionId = result.sessionId
-          if (saved.agentConfig) {
-            const sid = result.sessionId
-            setTimeout(() => {
-              try {
-                this.startAgentWithConfig(sid, saved.agentConfig)
-              } catch {}
-            }, 300)
-          }
+      const result = this.createRawSession(saved.type, cwd, saved.id)
+      if (result) {
+        if (saved.agentConfig) {
+          setTimeout(() => {
+            try {
+              this.startAgentWithConfig(result.sessionId, saved.agentConfig)
+            } catch {}
+          }, 300)
         }
-      }
-      if (sessionId) {
-        restorePromises.push(this.restoreSessionBuffer(sessionId))
+        restorePromises.push(this.restoreSessionBuffer(result.sessionId))
       }
     }
     await Promise.all(restorePromises)
@@ -633,11 +648,14 @@ export class SessionManager extends EventEmitter {
   getUndeliveredOutputAndMarkDelivered(): Record<string, string> {
     const backlog: Record<string, string> = {}
     for (const [id, s] of this.sessions) {
-      const undelivered = s.buffer.slice(s.deliveredBufferLength)
-      if (undelivered) {
-        backlog[id] = undelivered
-        s.deliveredBufferLength = s.buffer.length
-      }
+      const totalWritten = s.buffer.totalBytes
+      const deliveredTotal = s.deliveredBufferLength
+      if (totalWritten <= deliveredTotal) continue
+      const snapshot = s.buffer.snapshot()
+      const undeliveredBytes = totalWritten - deliveredTotal
+      const undelivered = snapshot.slice(-undeliveredBytes)
+      if (undelivered) backlog[id] = undelivered
+      s.deliveredBufferLength = totalWritten
     }
     return backlog
   }
@@ -665,7 +683,7 @@ export class SessionManager extends EventEmitter {
     if (!this.statusDetector) return
     const session = this.sessions.get(sessionId)
     if (!session || session.status === 'exited') return
-    const status = this.statusDetector.detectStatus(sessionId, session.buffer)
+    const status = this.statusDetector.detectStatus(sessionId, session.buffer.snapshot())
     if (status !== session.status) {
       session.status = status as any
       session.statusChangedAt = Date.now()

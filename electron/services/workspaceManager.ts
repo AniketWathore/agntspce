@@ -150,11 +150,35 @@ export class WorkspaceManager {
     } catch {}
   }
 
-  async saveAllSessionBuffers(workspaceId: string, sessions: Map<string, any>): Promise<void> {
-    for (const [id, s] of sessions) {
-      if (s.buffer) {
-        await this.saveSessionBuffer(workspaceId, id, s.buffer)
-      }
+  async saveAllSessionBuffers(workspaceId: string, buffers: Map<string, string>): Promise<void> {
+    for (const [id, buf] of buffers) {
+      if (buf) await this.saveSessionBuffer(workspaceId, id, buf)
+    }
+  }
+
+  saveSessionStateSync(workspaceId: string, sessions: SavedSessionData[]): void {
+    try {
+      const dir = path.dirname(this.sessionStatePath(workspaceId))
+      fsSync.mkdirSync(dir, { recursive: true })
+      fsSync.writeFileSync(this.sessionStatePath(workspaceId), JSON.stringify(sessions, null, 2))
+    } catch (e) {
+      console.error('Failed to save session state:', e)
+    }
+  }
+
+  saveSessionBufferSync(workspaceId: string, sessionId: string, buffer: string): void {
+    try {
+      const dir = path.dirname(this.bufferPath(workspaceId, sessionId))
+      fsSync.mkdirSync(dir, { recursive: true })
+      fsSync.writeFileSync(this.bufferPath(workspaceId, sessionId), buffer.slice(-50000), 'utf-8')
+    } catch (e) {
+      console.error('Failed to save session buffer:', e)
+    }
+  }
+
+  saveAllSessionBuffersSync(workspaceId: string, buffers: Map<string, string>): void {
+    for (const [id, buf] of buffers) {
+      if (buf) this.saveSessionBufferSync(workspaceId, id, buf)
     }
   }
 

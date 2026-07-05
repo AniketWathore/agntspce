@@ -334,6 +334,7 @@ io.on('connection', (socket) => {
         try { await workspaceManager.runTeardownScript(prevWs) } catch (e) {
           console.warn('Teardown script failed:', e)
         }
+        await autoSaveSessions()
       }
       const newWs = await workspaceManager.switchWorkspace(workspaceId)
       await worktreeHelper.ensureWorktreesExist(newWs)
@@ -645,6 +646,14 @@ io.on('connection', (socket) => {
       sessionManager.autoRestartSessions = settings.autoRestartSessions
     }
   })
+
+  socket.on('save-workspace', async () => {
+    const ws = sessionManager.getWorkspace()
+    if (!ws?.id) return
+    const sessions = sessionManager.getSessionSaveData()
+    await workspaceManager.saveSessionState(ws.id, sessions)
+    await sessionManager.saveAllSessionBuffers()
+  })
 })
 
 // Start server
@@ -749,8 +758,12 @@ app.whenReady().then(async () => {
 
 app.on('will-quit', () => {
   agentOrchestrator.shutdownAll()
-  sessionManager.saveAllSessionBuffers()
-  autoSaveSessions()
+  const ws = sessionManager.getWorkspace()
+  if (ws?.id) {
+    const sessions = sessionManager.getSessionSaveData()
+    workspaceManager.saveSessionStateSync(ws.id, sessions)
+    sessionManager.saveAllSessionBuffersSync()
+  }
 })
 
 app.on('window-all-closed', () => {

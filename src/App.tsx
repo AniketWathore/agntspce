@@ -11,6 +11,7 @@ import Profile from './components/Profile'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
+import PromptDebug from './components/PromptDebug'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import HistoryPanel from './components/HistoryPanel'
@@ -116,8 +117,12 @@ function App() {
     createWorkspaceFromGit,
     getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
+    compressionStats, compressionHistory,
+    onCompressionEvent, requestCompressionStats,
+    emit,
   } = useSocket()
-  const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
+  const writeBuffersRef = useRef<Record<string, string>>({})
+  const MAX_BUFFER_BYTES = 65536
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
@@ -126,7 +131,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -215,10 +220,10 @@ function App() {
 
   useEffect(() => {
     const unsub = onTerminalOutput((data: TerminalOutput) => {
-      setWriteBuffers(prev => ({
-        ...prev,
-        [data.sessionId]: (prev[data.sessionId] || '') + data.data,
-      }))
+      const current = (writeBuffersRef.current[data.sessionId] || '') + data.data
+      writeBuffersRef.current[data.sessionId] = current.length > MAX_BUFFER_BYTES
+        ? current.slice(-MAX_BUFFER_BYTES)
+        : current
     })
     return unsub
   }, [onTerminalOutput])
@@ -255,6 +260,7 @@ function App() {
         if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
         notifDebounceRef.current[key] = now
         newNots.push({ id: `not-exited-${id}-${now}`, type: 'session-exited', title: 'Session closed', detail: `${prev[id].type} session ${id.slice(-8)} ended`, timestamp: now, read: false })
+        delete writeBuffersRef.current[id]
       }
     }
 
@@ -448,7 +454,7 @@ function App() {
         case 'new-agent': handleNewTerminal('claude'); break
         case 'new-shell': handleNewShell(); break
         case 'new-workspace': handleCreateWorkspace(); break
-        case 'save-workspace': alert('Workspace saved'); break
+        case 'save-workspace': emit('save-workspace'); break
         case 'save-workspace-as': {
           window.electronAPI?.exportWorkspace().then(path => {
             if (path) alert(`Workspace exported to ${path}`)
@@ -630,6 +636,13 @@ function App() {
                 <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
               </button>
               <button
+                className={`activity-bar-btn ${activeView === 'debug' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'debug' ? null : 'debug')}
+                title="Prompt Optimizer Debug"
+              >
+                <i className="codicon codicon-debug" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
                 className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
                 onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
                 title="Git Review"
@@ -699,6 +712,13 @@ function App() {
               onNewWorkspace={handleCreateWorkspace}
               onClose={() => setActiveView(null)}
             />
+          ) : activeView === 'debug' ? (
+            <PromptDebug
+              compressionStats={compressionStats}
+              compressionHistory={compressionHistory}
+              onCompressionEvent={onCompressionEvent}
+              requestCompressionStats={requestCompressionStats}
+            />
           ) : activeView === 'git-review' ? (
             <PRPanel
               worktreePath={activeWorkspace?.repository?.path || ''}
@@ -730,7 +750,7 @@ function App() {
               onCloseTab={handleCloseAgentTab}
               onActiveSessionChange={setActiveSessionId}
               activeSessionId={activeSessionId}
-              writeBuffers={writeBuffers}
+              writeBuffersRef={writeBuffersRef}
               agentConfigs={agentConfigs}
               focusMode={focusMode}
               agentsList={AGENTS_LIST}
@@ -738,6 +758,7 @@ function App() {
               onToggleShell={handleToggleBottomShell}
               chatSidebarOpen={chatSidebarOpen}
               onToggleChatSidebar={handleToggleChatSidebar}
+              onTerminalOutput={onTerminalOutput}
             />
           )}
         </main>

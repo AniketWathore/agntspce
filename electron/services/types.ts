@@ -1,3 +1,5 @@
+import { RingBuffer } from './ringBuffer'
+
 export interface Session {
   id: string
   pty?: any
@@ -7,7 +9,7 @@ export interface Session {
   repositoryType?: string
   status: 'idle' | 'busy' | 'waiting' | 'exited'
   branch: string
-  buffer: string
+  buffer: RingBuffer
   deliveredBufferLength: number
   lastActivity: number
   tokenUsage: number
