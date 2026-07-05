@@ -1,13 +1,15 @@
+import { RingBuffer } from './ringBuffer'
+
 export interface Session {
   id: string
   pty?: any
-  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'server' | 'shell'
+  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor-agent' | 'copilot' | 'mastracode' | 'droid' | 'amp' | 'pi' | 'server' | 'shell'
   worktreeId: string
   repositoryName?: string
   repositoryType?: string
   status: 'idle' | 'busy' | 'waiting' | 'exited'
   branch: string
-  buffer: string
+  buffer: RingBuffer
   deliveredBufferLength: number
   lastActivity: number
   tokenUsage: number
@@ -22,6 +24,7 @@ export interface Session {
   inactivityTimer?: NodeJS.Timeout | null
   processMonitor?: NodeJS.Timeout | null
   workspace?: string | null
+  sessionGroupId?: string
 }
 
 export interface SessionConfig {
@@ -63,6 +66,10 @@ export interface Workspace {
   terminals?: any
   projectType?: string
   lastAccess?: string
+  gitUrl?: string
+  envVars?: Record<string, string>
+  setupScript?: string
+  teardownScript?: string
 }
 
 export interface Worktree {
@@ -93,6 +100,10 @@ export interface SavedSessionData {
     agentId: string
     mode: string
     flags: string[]
+    model?: string
+    reasoning?: string
+    verbosity?: string
+    resumeId?: string
   }
 }
 

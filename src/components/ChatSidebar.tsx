@@ -41,17 +41,19 @@ export default function ChatSidebar({ onClose }: Props) {
     <aside className="chat-sidebar">
       <div className="chat-header">
         <div className="chat-header-left">
-          <span className="chat-header-icon">💬</span>
+          <i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i>
           <span className="chat-header-title">Assistant</span>
         </div>
-        <button className="chat-close-btn" onClick={onClose} title="Close">✕</button>
+        <button className="chat-close-btn" onClick={onClose} title="Close">
+          <i className="codicon codicon-close" style={{ fontSize: 14 }}></i>
+        </button>
       </div>
 
       <div className="chat-messages">
         {messages.map((msg, i) => (
           <div key={i} className={`chat-msg ${msg.role}`}>
             <div className="chat-msg-avatar">
-              {msg.role === 'assistant' ? 'AI' : 'U'}
+              <i className={`codicon ${msg.role === 'assistant' ? 'codicon-robot' : 'codicon-person'}`} style={{ fontSize: 14 }}></i>
             </div>
             <div className="chat-msg-content">
               <div className="chat-msg-sender">

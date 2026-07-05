@@ -7,7 +7,9 @@ export default function Profile({ onClose }: Props) {
     <div className="profile-page">
       <div className="profile-header">
         <h1>Profile</h1>
-        <button className="profile-close-btn" onClick={onClose}>✕</button>
+        <button className="profile-close-btn" onClick={onClose} title="Close">
+          <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
+        </button>
       </div>
       <div className="profile-content">
         <div className="profile-avatar-section">

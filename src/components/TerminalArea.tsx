@@ -7,8 +7,6 @@ import TerminalPane from './TerminalPane'
 import AgentPicker from './AgentPicker'
 import { getAgentColorImage } from '../agentImages'
 
-export type LayoutPreset = 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
-
 interface Props {
   sessions: SessionState[]
   shellSessions: SessionState[]
@@ -23,15 +21,16 @@ interface Props {
   onCloseTab: (sessionId: string) => void
   onActiveSessionChange: (id: string | null) => void
   activeSessionId: string | null
-  writeBuffers: Record<string, string>
+  writeBuffersRef: { current: Record<string, string> }
   agentConfigs: AgentConfig[]
-  layoutPreset: LayoutPreset
+  layoutPreset?: 'auto' | '1x1' | '2x2' | '1+2' | '3x3'
   focusMode: boolean
   agentsList?: { id: string; name: string; icon: string }[]
   bottomShellOpen: boolean
   onToggleShell: () => void
   chatSidebarOpen: boolean
   onToggleChatSidebar: () => void
+  onTerminalOutput: (cb: (data: any) => void) => () => void
 }
 
 const AGENT_TYPES = [
@@ -41,50 +40,30 @@ const AGENT_TYPES = [
   { id: 'gemini', label: 'Gemini CLI', icon: '✨' },
 ]
 
-function getTilingStyle(count: number, preset: LayoutPreset): CSSProperties {
+function getTilingStyle(count: number): CSSProperties {
   const base: CSSProperties = { display: 'grid', gap: 4, padding: '0 4px 4px', minHeight: 0, flex: 1 }
-  switch (preset) {
-    case '1x1':
-      return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-    case '2x2':
-      return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-    case '1+2':
-      return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-    case '3x3':
-      return { ...base, gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr' }
-    case 'auto':
-    default:
-      if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-      if (count === 2) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
-      if (count <= 4) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-      const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
-      const rows = Math.ceil(count / cols)
-      return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
-  }
+  if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
+  if (count === 2) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
+  if (count <= 4) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
+  const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
+  const rows = Math.ceil(count / cols)
+  return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
 }
 
-function getItemStyle(index: number, count: number, preset: LayoutPreset, activeIndex: number): CSSProperties {
-  if (preset === '1x1') {
-    if (index !== activeIndex) return { display: 'none' }
-    return {}
-  }
-  if (preset === '1+2' && count > 1 && index === activeIndex) {
-    return { gridRow: 'span 2' }
-  }
-  if (preset === 'auto' && count === 3 && index === 0) {
+function getItemStyle(index: number, count: number, _activeIndex: number): CSSProperties {
+  if (count === 3 && index === 0) {
     return { gridRow: 'span 2' }
   }
   return {}
 }
 
-function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeData, hidden }: {
+function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTerminalOutput }: {
   session: SessionState
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
-  onRestart: (sessionId: string) => void
-  onClose: (sessionId: string) => void
   writeData: string
   hidden: boolean
+  onTerminalOutput?: (cb: (data: any) => void) => () => void
 }) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
@@ -139,17 +118,22 @@ function ShellTerminal({ session, onInput, onResize, onRestart, onClose, writeDa
     termInstance.current = term
     const themeObserver = new MutationObserver(() => { try { term.options.theme = buildTheme() } catch {} })
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-    return () => { themeObserver.disconnect(); term.dispose(); termInstance.current = null }
-  }, [session.id])
 
-  const lastWriteLenRef = useRef(0)
-  useEffect(() => {
-    if (writeData.length > lastWriteLenRef.current && termInstance.current) {
-      const newData = writeData.slice(lastWriteLenRef.current)
-      lastWriteLenRef.current = writeData.length
-      if (newData) termInstance.current.write(newData)
+    if (writeData) term.write(writeData)
+
+    const unsub = onTerminalOutput?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
+      if (sid === session.id && termInstance.current) {
+        termInstance.current.write(data)
+      }
+    })
+
+    return () => {
+      unsub?.()
+      themeObserver.disconnect()
+      term.dispose()
+      termInstance.current = null
     }
-  }, [writeData])
+  }, [session.id, onTerminalOutput])
 
   useEffect(() => {
     if (terminalRef.current && !hidden && termInstance.current && fitAddonRef.current) {
@@ -203,9 +187,9 @@ function ShellTabList({ shells, activeShellId, onSelect, onClose }: {
 export default function TerminalArea({
   sessions, shellSessions, onInput, onResize, onRestart, onStartAgent,
   onShowAgentModal, onNewAgent, onSelectAgent, onNewShell, onCloseTab, onActiveSessionChange,
-  activeSessionId, writeBuffers, agentConfigs,
-  layoutPreset, focusMode, agentsList, bottomShellOpen, onToggleShell,
-  chatSidebarOpen, onToggleChatSidebar,
+  activeSessionId, writeBuffersRef, agentConfigs,
+  focusMode, agentsList, bottomShellOpen, onToggleShell,
+  chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -272,7 +256,7 @@ export default function TerminalArea({
               }
             }}>+ Agent</button>
             <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
-              <img src="/img/chat.png" alt="Chat" className="shell-btn-icon shell-btn-icon-chat" />
+              <i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i>
             </button>
             {showAgentDropdown && agentsList && (
               <AgentPicker
@@ -294,8 +278,9 @@ export default function TerminalArea({
                 }
               }}>+ Agent</button>
               <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
-                <img src="/img/terminal.png" alt="Shell" className="shell-btn-icon" />
+                <i className="codicon codicon-terminal" style={{ fontSize: 16 }}></i>
               </button>
+              <button className="shell-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
               {showDropdown && agentsList && (
                 <AgentPicker
                   agents={agentsList}
@@ -325,10 +310,9 @@ export default function TerminalArea({
                     session={s}
                     onInput={onInput}
                     onResize={onResize}
-                    onRestart={onRestart}
-                    onClose={handleShellClose}
-                    writeData={writeBuffers[s.id] || ''}
+                    writeData={writeBuffersRef.current[s.id] || ''}
                     hidden={s.id !== activeShellId}
+                    onTerminalOutput={onTerminalOutput}
                   />
                 ))}
               </div>
@@ -376,7 +360,7 @@ export default function TerminalArea({
   const activeIdx = activeSessionId
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
     : 0
-  const tilingStyle = getTilingStyle(filteredSessions.length, layoutPreset)
+  const tilingStyle = getTilingStyle(filteredSessions.length)
 
   return (
     <div className="terminal-area-wrapper">
@@ -402,9 +386,11 @@ export default function TerminalArea({
           })}
         </div>
         <div className="tab-bar-actions" style={{ position: 'relative' }}>
+          {focusMode && <span className="focus-indicator" title="Focus mode active (Cmd+Shift+F)">Focus</span>}
           <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={handleAddAgentClick}>+ Agent</button>
+
           <button className={`shell-btn ${chatSidebarOpen ? 'active' : ''}`} onClick={onToggleChatSidebar} title="Chat">
-            <img src="/img/chat.png" alt="Chat" className="shell-btn-icon shell-btn-icon-chat" />
+            <i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i>
           </button>
           {showDropdown && agentsList && (
             <AgentPicker
@@ -430,13 +416,15 @@ export default function TerminalArea({
               onRestart={onRestart}
               onStartAgent={onStartAgent}
               onShowAgentModal={onShowAgentModal}
-              writeData={writeBuffers[session.id] || ''}
+              writeData={writeBuffersRef.current[session.id] || ''}
               agentConfigs={agentConfigs}
-              style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, layoutPreset, activeIdx)}
+              style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, activeIdx)}
               onClose={onCloseTab}
               dimmed={focusMode && session.id !== activeSessionId}
+              onTerminalOutput={onTerminalOutput}
             />
           ))}
+          <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
         </div>
       )}
 
@@ -464,10 +452,9 @@ export default function TerminalArea({
                     session={s}
                     onInput={onInput}
                     onResize={onResize}
-                    onRestart={onRestart}
-                    onClose={handleShellClose}
-                    writeData={writeBuffers[s.id] || ''}
+                    writeData={writeBuffersRef.current[s.id] || ''}
                     hidden={s.id !== activeShellId}
+                    onTerminalOutput={onTerminalOutput}
                   />
                 ))
               )}

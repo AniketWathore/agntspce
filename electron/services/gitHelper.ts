@@ -116,6 +116,105 @@ export class GitHelper {
     }
   }
 
+  async getLog(worktreePath: string, maxCount = 20): Promise<{ hash: string, message: string, author: string, date: string }[] | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const { stdout } = await this.execGit(
+        ['log', `--max-count=${maxCount}`, '--format=%H|%s|%an|%ar'],
+        { cwd: state.normalized, timeout: 10000 },
+      )
+      return stdout.trim().split('\n').filter(Boolean).map(line => {
+        const [hash, message, author, date] = line.split('|')
+        return { hash: hash?.slice(0, 8) || '', message: message || '', author: author || '', date: date || '' }
+      })
+    } catch { return null }
+  }
+
+  async getDiff(worktreePath: string, base = 'HEAD', head?: string): Promise<string | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const args = ['diff', base]
+      if (head) args.push(head)
+      const { stdout } = await this.execGit(args, { cwd: state.normalized, timeout: 15000 })
+      return stdout
+    } catch { return null }
+  }
+
+  async getWorkingTreeDiff(worktreePath: string): Promise<string | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const { stdout } = await this.execGit(['diff'], { cwd: state.normalized, timeout: 15000 })
+      return stdout
+    } catch { return null }
+  }
+
+  async getBranches(worktreePath: string): Promise<{ name: string, current: boolean, date: string }[] | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const { stdout } = await this.execGit(
+        ['branch', '--sort=-committerdate', '--format=%(HEAD)|%(refname:short)|%(committerdate:relative)'],
+        { cwd: state.normalized, timeout: 10000 },
+      )
+      return stdout.trim().split('\n').filter(Boolean).map(line => {
+        const [head, name, date] = line.split('|')
+        return { name: name || '', current: head === '*', date: date || '' }
+      })
+    } catch { return null }
+  }
+
+  async getCommitFiles(worktreePath: string, commitHash: string): Promise<{ filePath: string, status: string, additions: number, deletions: number }[] | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const { stdout } = await this.execGit(
+        ['diff-tree', '--no-commit-id', '-r', '--numstat', commitHash],
+        { cwd: state.normalized, timeout: 10000 },
+      )
+      if (!stdout.trim()) return []
+      return stdout.trim().split('\n').filter(Boolean).map(line => {
+        const parts = line.split('\t')
+        const adds = parseInt(parts[0])
+        const dels = parseInt(parts[1])
+        const filePath = parts[2] || ''
+        const status = adds === 0 && dels === 0 ? 'M' : adds > 0 && dels === 0 ? 'A' : adds === 0 && dels > 0 ? 'D' : 'M'
+        return { filePath, status, additions: isNaN(adds) ? 0 : adds, deletions: isNaN(dels) ? 0 : dels }
+      })
+    } catch { return null }
+  }
+
+  async getWorkingTreeFiles(worktreePath: string): Promise<{ filePath: string, status: string, additions: number, deletions: number }[] | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const { stdout } = await this.execGit(['diff', '--numstat'], { cwd: state.normalized, timeout: 10000 })
+      if (!stdout.trim()) return []
+      return stdout.trim().split('\n').filter(Boolean).map(line => {
+        const parts = line.split('\t')
+        const adds = parseInt(parts[0])
+        const dels = parseInt(parts[1])
+        const filePath = parts[2] || ''
+        const status = adds === 0 && dels === 0 ? 'M' : adds > 0 && dels === 0 ? 'A' : adds === 0 && dels > 0 ? 'D' : 'M'
+        return { filePath, status, additions: isNaN(adds) ? 0 : adds, deletions: isNaN(dels) ? 0 : dels }
+      })
+    } catch { return null }
+  }
+
+  async getFileDiff(worktreePath: string, filePath: string, base?: string, head?: string): Promise<string | null> {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return null
+    try {
+      const args = base ? ['diff', base] : ['diff']
+      if (head) args.push(head)
+      args.push('--', filePath)
+      const { stdout } = await this.execGit(args, { cwd: state.normalized, timeout: 15000 })
+      return stdout
+    } catch { return null }
+  }
+
   clearCacheForPath(p: string): void {
     this.branchCache.delete(p)
   }

@@ -5,13 +5,23 @@ import TerminalArea from './components/TerminalArea'
 import ChatSidebar from './components/ChatSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
+import CreateWorkspaceModal from './components/CreateWorkspaceModal'
 import Dashboard from './components/Dashboard'
 import Profile from './components/Profile'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
+import TitleBar from './components/TitleBar'
+import PromptDebug from './components/PromptDebug'
+import CommanderPanel from './components/CommanderPanel'
+import NotificationPanel from './components/NotificationPanel'
+import HistoryPanel from './components/HistoryPanel'
+import type { Notification } from './components/NotificationPanel'
+import type { HistoryEntry } from './components/HistoryPanel'
+
 import { useSocket } from './hooks/useSocket'
-import type { TerminalOutput, AgentConfig, AgentStartConfig } from './types'
-import type { LayoutPreset } from './components/TerminalArea'
+import PRPanel from './components/PRPanel'
+import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState } from './types'
+import '@vscode/codicons/dist/codicon.css'
 import './App.css'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
@@ -19,6 +29,12 @@ const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'opencode', name: 'Opencode', icon: '🔧' },
   { id: 'codex', name: 'Codex', icon: '⚡' },
   { id: 'gemini', name: 'Gemini', icon: '✨' },
+  { id: 'cursor-agent', name: 'Cursor Agent', icon: '🖥️' },
+  { id: 'copilot', name: 'Copilot', icon: '🐙' },
+  { id: 'mastracode', name: 'Mastra Code', icon: '🔷' },
+  { id: 'droid', name: 'Droid', icon: '🤖' },
+  { id: 'amp', name: 'Amp', icon: '⚡' },
+  { id: 'pi', name: 'Pi', icon: '🥧' },
 ]
 
 const FALLBACK_AGENTS: AgentConfig[] = [
@@ -46,6 +62,42 @@ const FALLBACK_AGENTS: AgentConfig[] = [
     flags: [],
     defaultMode: 'fresh',
   },
+  {
+    id: 'cursor-agent', name: 'Cursor Agent', icon: '🖥️', description: 'Cursor AI coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'copilot', name: 'Copilot', icon: '🐙', description: 'GitHub Copilot CLI',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'explain', name: 'Explain', description: 'Explain code' }, { id: 'suggest', name: 'Suggest', description: 'Suggest code' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'mastracode', name: 'Mastra Code', icon: '🔷', description: 'Mastra Code AI agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'droid', name: 'Droid', icon: '🤖', description: 'Factory AI Droid coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'amp', name: 'Amp', icon: '⚡', description: 'Amplified Amp coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'agent', name: 'Agent', description: 'Run in agent mode' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'pi', name: 'Pi', icon: '🥧', description: 'Pi coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue last session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
 ]
 
 interface ModalState {
@@ -62,25 +114,44 @@ function App() {
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
+    createWorkspaceFromGit,
+    getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
+    setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
+    compressionStats, compressionHistory,
+    onCompressionEvent, requestCompressionStats,
+    emit,
   } = useSocket()
-  const [writeBuffers, setWriteBuffers] = useState<Record<string, string>>({})
+  const writeBuffersRef = useRef<Record<string, string>>({})
+  const MAX_BUFFER_BYTES = 65536
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
   const [chatSidebarOpen, setChatSidebarOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
-  const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>('auto')
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
+  })
+  const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false)
+  const [commanderOpen, setCommanderOpen] = useState(false)
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
+
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
+  const [fontSize, setFontSize] = useState(() => {
+    try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
+  })
+  const [fontFamily, setFontFamily] = useState(() => {
+    try { return localStorage.getItem('agent-workspace-font-family') || "'JetBrains Mono', 'Fira Code', Menlo, monospace'" } catch { return "'JetBrains Mono', 'Fira Code', Menlo, monospace'" }
   })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
   const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
-  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.15))
+  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.20))
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
 
@@ -101,6 +172,20 @@ function App() {
     localStorage.setItem('agent-workspace-theme', theme)
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-font-size', String(fontSize))
+    document.documentElement.style.setProperty('--terminal-font-size', `${fontSize}px`)
+  }, [fontSize])
+
+  useEffect(() => {
+    localStorage.setItem('agent-workspace-font-family', fontFamily)
+    document.documentElement.style.setProperty('--terminal-font-family', fontFamily)
+  }, [fontFamily])
+
+  useEffect(() => {
+    getSessionHistory().then(h => setSessionHistory(h))
+  }, [sessions])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -135,13 +220,56 @@ function App() {
 
   useEffect(() => {
     const unsub = onTerminalOutput((data: TerminalOutput) => {
-      setWriteBuffers(prev => ({
-        ...prev,
-        [data.sessionId]: (prev[data.sessionId] || '') + data.data,
-      }))
+      const current = (writeBuffersRef.current[data.sessionId] || '') + data.data
+      writeBuffersRef.current[data.sessionId] = current.length > MAX_BUFFER_BYTES
+        ? current.slice(-MAX_BUFFER_BYTES)
+        : current
     })
     return unsub
   }, [onTerminalOutput])
+
+  const prevSessionRef = useRef<Record<string, SessionState>>({})
+  const firstMountRef = useRef(true)
+  const notifDebounceRef = useRef<Record<string, number>>({})
+  useEffect(() => {
+    if (firstMountRef.current) {
+      firstMountRef.current = false
+      prevSessionRef.current = sessions
+      return
+    }
+    const prev = prevSessionRef.current
+    const newNots: Notification[] = []
+    const now = Date.now()
+
+    for (const [id, s] of Object.entries(sessions)) {
+      const prevS = prev[id]
+      if (!prevS) continue
+      if (prevS.status !== s.status) {
+        if (prevS.status === 'busy' && s.status === 'idle') {
+          const key = `complete-${id}`
+          if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
+          notifDebounceRef.current[key] = now
+          newNots.push({ id: `not-complete-${id}-${now}`, type: 'session-complete', title: 'Task complete', detail: `${s.type} session ${id.slice(-8)} finished`, timestamp: now, read: false })
+        }
+      }
+    }
+
+    for (const id of Object.keys(prev)) {
+      if (!sessions[id]) {
+        const key = `exit-${id}`
+        if ((notifDebounceRef.current[key] || 0) + 2000 > now) continue
+        notifDebounceRef.current[key] = now
+        newNots.push({ id: `not-exited-${id}-${now}`, type: 'session-exited', title: 'Session closed', detail: `${prev[id].type} session ${id.slice(-8)} ended`, timestamp: now, read: false })
+        delete writeBuffersRef.current[id]
+      }
+    }
+
+    if (newNots.length > 0) {
+      setNotifications(prev => [...newNots, ...prev].slice(0, 100))
+    }
+
+    prevSessionRef.current = sessions
+  }, [sessions])
 
   useEffect(() => {
     if (activeWorkspace?.id && activeWorkspaceId !== activeWorkspace.id) {
@@ -160,12 +288,13 @@ function App() {
     }).then((res: any) => {
       if (res?.ok) {
         switchWorkspace(id)
-        window.electronAPI?.openInExplorer(path)
       }
     })
   }
 
-  function editWorkspace(_id: string, _name: string, _path: string) { }
+  function editWorkspace(id: string, name: string, _path: string) {
+    updateWorkspaceConfig(id, { name }).then(() => refreshWorkspaces())
+  }
 
   function removeWorkspace(id: string) {
     const wsSessions = Object.entries(sessions)
@@ -179,8 +308,9 @@ function App() {
 
   const wsPath = activeWorkspace?.repository?.path
 
+  const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi'])
   const agentSessions = useMemo(
-    () => Object.values(sessions).filter(s => s.type === 'claude' || s.type === 'codex' || s.type === 'opencode' || s.type === 'gemini').slice(0, 12),
+    () => Object.values(sessions).filter(s => agentTypes.has(s.type)).slice(0, 12),
     [sessions]
   )
   const shellSessions = useMemo(
@@ -193,30 +323,50 @@ function App() {
   }, [createRawSession, wsPath])
 
   function handleCreateWorkspace() {
-    showModal('Workspace name:', (name) => {
-      const doCreate = async () => {
-        let path = ''
-        try {
-          if (window.electronAPI) {
-            try {
-              path = await window.electronAPI.getDefaultPath() || ''
-            } catch {}
-            const selected = await window.electronAPI.selectDirectory()
-            if (selected) path = selected
-          } else {
-            path = ''
-            const fallback = prompt('Workspace directory:', '')
-            if (fallback && fallback.trim()) path = fallback.trim()
-          }
-        } catch (e) {
-          console.error('Error selecting workspace directory:', e)
-        }
-        addWorkspace(name, path)
-        setModal(null)
-      }
-      doCreate()
-    })
+    setCreateWorkspaceModalOpen(true)
   }
+
+  async function handleCreateWorkspaceLocal(name: string, path: string) {
+    addWorkspace(name, path)
+  }
+
+  async function handleCreateWorkspaceFromGit(gitUrl: string, name?: string) {
+    const res = await createWorkspaceFromGit(gitUrl, name)
+    if (res?.ok) {
+      switchWorkspace(res.workspace.id)
+    } else {
+      throw new Error(res?.error || 'Failed to clone repository')
+    }
+  }
+
+
+  function dismissNotification(id: string) {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+  }
+
+  function dismissAllNotifications() {
+    setNotifications([])
+  }
+
+  function handleRestoreHistory(entry: HistoryEntry) {
+    createRawSession(entry.type, entry.worktreeId !== 'default' ? undefined : undefined)
+    setHistoryPanelOpen(false)
+  }
+
+  const commanderCommands = useMemo(() => [
+    { id: 'new-agent', category: 'Terminals', label: 'New Agent Session', description: 'Create a new AI agent terminal', shortcut: '⌘⇧A', action: () => { createRawSession('claude') } },
+    { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', shortcut: '⌘⇧S', action: () => { handleNewShell() } },
+    { id: 'new-workspace', category: 'Workspaces', label: 'Create Workspace', description: 'Create a new workspace', shortcut: '⌘⇧N', action: () => { setCreateWorkspaceModalOpen(true) } },
+    { id: 'focus-mode', category: 'View', label: 'Toggle Focus Mode', description: 'Dim inactive terminals', shortcut: '⌘⇧F', action: () => { setFocusMode(o => !o) } },
+    { id: 'toggle-chat', category: 'View', label: 'Toggle Chat Sidebar', description: 'Show/hide the chat panel', shortcut: '⌘B', action: () => { handleToggleChatSidebar() } },
+    { id: 'toggle-workspace-sidebar', category: 'View', label: 'Toggle Workspace Sidebar', description: 'Show/hide workspace list', shortcut: '⌘⇧B', action: () => { handleToggleWorkspaceSidebar() } },
+    { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', action: () => { handleToggleBottomShell() } },
+    { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', action: () => { setActiveView('dashboard') } },
+    { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', action: () => { setActiveView('settings') } },
+    { id: 'show-history', category: 'View', label: 'Show Session History', description: 'View past sessions', action: () => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) } },
+    { id: 'clear-notifications', category: 'Notifications', label: 'Clear Notifications', description: 'Dismiss all notifications', action: () => { dismissAllNotifications() } },
+  ], [createRawSession, handleNewShell, setFocusMode, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, getSessionHistory, setSessionHistory])
+
 
   function handleSelectWorkspace(id: string) {
     switchWorkspace(id)
@@ -243,12 +393,8 @@ function App() {
     permanentDeleteWorkspace(id).then(() => refreshDeleted())
   }
 
-  function handleCloseShellSession(sessionId: string) {
-    closeTab([sessionId])
-  }
-
   function handleSelectAgent(agentId: string) {
-    if (agentId === 'claude' || agentId === 'opencode') {
+    if (agentTypes.has(agentId)) {
       const defaultConfig = { agentId, mode: 'fresh', flags: [] }
       createAgentSession(agentId, defaultConfig, wsPath)
     } else {
@@ -308,7 +454,7 @@ function App() {
         case 'new-agent': handleNewTerminal('claude'); break
         case 'new-shell': handleNewShell(); break
         case 'new-workspace': handleCreateWorkspace(); break
-        case 'save-workspace': alert('Workspace saved'); break
+        case 'save-workspace': emit('save-workspace'); break
         case 'save-workspace-as': {
           window.electronAPI?.exportWorkspace().then(path => {
             if (path) alert(`Workspace exported to ${path}`)
@@ -336,7 +482,6 @@ function App() {
         case 'toggle-shell-sidebar': handleToggleChatSidebar(); break
         case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
         case 'toggle-focus': setFocusMode(o => !o); break
-        case 'set-layout': setLayoutPreset(data); break
         case 'show-shortcuts': alert(
           '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
           '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
@@ -353,6 +498,12 @@ function App() {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
       if (!isMeta) return
+
+      if (e.key === 'k') {
+        e.preventDefault()
+        setCommanderOpen(o => !o)
+        return
+      }
 
       if (e.key === 'F' && e.shiftKey) {
         e.preventDefault()
@@ -397,7 +548,7 @@ function App() {
         const totalW = bodyRect.width
         const chatMin = Math.round(totalW * 0.10)
         const leftMax = Math.round(totalW * 0.12)
-        const chatMax = Math.round(totalW * 0.15)
+        const chatMax = Math.round(totalW * 0.20)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
@@ -435,83 +586,114 @@ function App() {
     setActiveView(activeView === view ? null : view)
   }
 
+  const isMac = navigator.platform?.startsWith('Mac')
+
   return (
     <div className="app">
+      {isMac && (
+        <TitleBar
+          unreadCount={notifications.filter(n => !n.read).length}
+          notificationPanelOpen={notificationPanelOpen}
+          onNotificationClick={() => setNotificationPanelOpen(o => !o)}
+        />
+      )}
       <div className="app-body" ref={appBodyRef}>
-        <div className="activity-bar">
-          <div className="activity-bar-top">
-            <div className="activity-logo" title="AgntSpce">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="#22C55E">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15l-5-5 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/>
-              </svg>
+          <div className="activity-bar">
+            <div className="activity-bar-top">
+              <div className="activity-logo" title="AgntSpce">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#22C55E">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15l-5-5 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/>
+                </svg>
+              </div>
+              <button
+                className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
+                onClick={handleToggleWorkspaceSidebar}
+                title="Explorer (Workspaces)"
+              >
+                <i className="codicon codicon-files" style={{ fontSize: 24 }}></i>
+              </button>
             </div>
-            <button
-              className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
-              onClick={handleToggleWorkspaceSidebar}
-              title="Explorer (Workspaces)"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M4 4h7l2 2h7v12H4V4zm2 2v10h14V8h-7.5L12.5 6H6z"/>
-              </svg>
-            </button>
+            <div className="activity-bar-bottom">
+              <button
+                className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
+                onClick={handleToggleBottomShell}
+                title="Terminal"
+              >
+                <i className="codicon codicon-terminal" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
+                onClick={() => setView('dashboard')}
+                title="Dashboard"
+              >
+                <i className="codicon codicon-dashboard" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className="activity-bar-btn"
+                onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
+                title="Session History"
+              >
+                <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'debug' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'debug' ? null : 'debug')}
+                title="Prompt Optimizer Debug"
+              >
+                <i className="codicon codicon-debug" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
+                onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
+                title="Git Review"
+              >
+                <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${notificationPanelOpen ? 'active' : ''}`}
+                onClick={() => setNotificationPanelOpen(o => !o)}
+                title="Notifications"
+              >
+                <i className="codicon codicon-bell" style={{ fontSize: 24 }}></i>
+                {notifications.filter(n => !n.read).length > 0 && (
+                  <span className="activity-bar-badge">{notifications.filter(n => !n.read).length}</span>
+                )}
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
+                onClick={() => setView('profile')}
+                title="Profile"
+              >
+                <i className="codicon codicon-account" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
+                onClick={() => setView('settings')}
+                title="Settings"
+              >
+                <i className="codicon codicon-settings-gear" style={{ fontSize: 24 }}></i>
+              </button>
+            </div>
           </div>
-          <div className="activity-bar-bottom">
-            <button
-              className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
-              onClick={handleToggleBottomShell}
-              title="Terminal"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm3.5 3.5L12 11l-3.5 2.5L9 15l5-4-5-4-.5.5z"/>
-              </svg>
-            </button>
-            <button
-              className={`activity-bar-btn ${activeView === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setView('dashboard')}
-              title="Dashboard"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
-              </svg>
-            </button>
-            <button
-              className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
-              onClick={() => setView('profile')}
-              title="Profile"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-              </svg>
-            </button>
-            <button
-              className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
-              onClick={() => setView('settings')}
-              title="Settings"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
-              </svg>
-            </button>
-          </div>
-        </div>
         {workspaceSidebarOpen && (
           <>
             <div className="panel-left" style={{ width: leftWidth, minWidth: leftWidth }}>
-              <WorkspaceSidebar
-                workspaces={workspaces}
-                sessions={sessions}
-                activeWorkspace={activeWorkspace}
-                deletedWorkspaces={deletedWorkspaces}
-                onSelect={handleSelectWorkspace}
-                onAdd={addWorkspace}
-                onEdit={editWorkspace}
-                onRemove={removeWorkspace}
-                onDelete={handleDeleteWorkspace}
-                onRestore={handleRestoreWorkspace}
-                onPermanentDelete={handlePermanentDelete}
-                showModal={showModal}
-                closeModal={closeModal}
-              />
+                <WorkspaceSidebar
+                  workspaces={workspaces}
+                  sessions={sessions}
+                  activeWorkspace={activeWorkspace}
+                  deletedWorkspaces={deletedWorkspaces}
+                  onSelect={handleSelectWorkspace}
+                  onAdd={addWorkspace}
+                  onEdit={editWorkspace}
+                  onRemove={removeWorkspace}
+                  onDelete={handleDeleteWorkspace}
+                  onRestore={handleRestoreWorkspace}
+                  onPermanentDelete={handlePermanentDelete}
+                  showModal={showModal}
+                  closeModal={closeModal}
+                  onOpenCreateModal={handleCreateWorkspace}
+                />
             </div>
             <div className="resizer" onMouseDown={onResizerMouseDown('left')} />
           </>
@@ -528,11 +710,31 @@ function App() {
               onRestore={handleRestoreWorkspace}
               onPermanentDelete={handlePermanentDelete}
               onNewWorkspace={handleCreateWorkspace}
+              onClose={() => setActiveView(null)}
+            />
+          ) : activeView === 'debug' ? (
+            <PromptDebug
+              compressionStats={compressionStats}
+              compressionHistory={compressionHistory}
+              onCompressionEvent={onCompressionEvent}
+              requestCompressionStats={requestCompressionStats}
+            />
+          ) : activeView === 'git-review' ? (
+            <PRPanel
+              worktreePath={activeWorkspace?.repository?.path || ''}
+              onClose={() => setActiveView(null)}
+              onSelectDiff={() => {}}
+              fetchLog={getGitLog}
+              fetchDiff={getGitDiff}
+              fetchWorkingTreeDiff={getGitWorkingTreeDiff}
+              fetchCommitFiles={getGitCommitFiles}
+              fetchWorkingTreeFiles={getGitWorkingTreeFiles}
+              fetchFileDiff={getGitFileDiff}
             />
           ) : activeView === 'profile' ? (
             <Profile onClose={() => setActiveView(null)} />
           ) : activeView === 'settings' ? (
-            <Settings theme={theme} onThemeChange={setTheme} onClose={() => setActiveView(null)} />
+            <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
           ) : (
             <TerminalArea
               sessions={agentSessions}
@@ -542,21 +744,21 @@ function App() {
               onRestart={restartSession}
               onStartAgent={handleStartAgent}
               onShowAgentModal={handleShowAgentModal}
-              onNewAgent={() => handleNewTerminal('claude')}
+              onNewAgent={() => {}}
               onSelectAgent={handleSelectAgent}
               onNewShell={handleNewShell}
               onCloseTab={handleCloseAgentTab}
               onActiveSessionChange={setActiveSessionId}
               activeSessionId={activeSessionId}
-              writeBuffers={writeBuffers}
+              writeBuffersRef={writeBuffersRef}
               agentConfigs={agentConfigs}
-              layoutPreset={layoutPreset}
               focusMode={focusMode}
               agentsList={AGENTS_LIST}
               bottomShellOpen={bottomShellOpen}
               onToggleShell={handleToggleBottomShell}
               chatSidebarOpen={chatSidebarOpen}
               onToggleChatSidebar={handleToggleChatSidebar}
+              onTerminalOutput={onTerminalOutput}
             />
           )}
         </main>
@@ -571,6 +773,12 @@ function App() {
           </>
         )}
       </div>
+      <CreateWorkspaceModal
+        open={createWorkspaceModalOpen}
+        onClose={() => setCreateWorkspaceModalOpen(false)}
+        onCreateLocal={handleCreateWorkspaceLocal}
+        onCreateFromGit={handleCreateWorkspaceFromGit}
+      />
       <InputModal
         open={modal?.open || false}
         title={modal?.title || ''}
@@ -585,11 +793,28 @@ function App() {
         onStart={handleStartAgent}
         onClose={() => setAgentModalSession(null)}
       />
+      {commanderOpen && (
+        <CommanderPanel commands={commanderCommands} onClose={() => setCommanderOpen(false)} />
+      )}
+      {notificationPanelOpen && (
+        <NotificationPanel
+          notifications={notifications}
+          onDismiss={dismissNotification}
+          onDismissAll={dismissAllNotifications}
+          onClose={() => setNotificationPanelOpen(false)}
+        />
+      )}
+      {historyPanelOpen && (
+        <HistoryPanel
+          history={sessionHistory}
+          onRestore={handleRestoreHistory}
+          onClose={() => setHistoryPanelOpen(false)}
+        />
+      )}
       <StatusBar
         sessions={sessions}
         workspaces={workspaces}
         activeWorkspace={activeWorkspace}
-        theme={theme}
       />
     </div>
   )

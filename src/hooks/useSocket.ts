@@ -4,6 +4,13 @@ import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchC
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
+export interface OrchestratorStats {
+  concurrency: { active: number, queued: number, max: number }
+  sessionCount: number
+  totalMemoryMB: number
+  resourceUsage: { sessionId: string, pid: number, cpuPercent: number, memoryMB: number, collectedAt: number }[]
+}
+
 interface UseSocketReturn {
   connected: boolean
   sessions: Record<string, SessionState>
@@ -35,6 +42,25 @@ interface UseSocketReturn {
   compressionStats: CompressionStats
   compressionHistory: CompressionDebugRecord[]
   requestCompressionStats: () => void
+  createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
+  updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
+  addWorktree: (workspaceId: string) => Promise<any>
+  removeWorktree: (workspaceId: string, worktreeId: string) => Promise<any>
+  listWorktrees: (workspaceId: string) => Promise<any[]>
+  startParallelTask: (config: any) => Promise<any>
+  getOrchestratorStats: () => Promise<OrchestratorStats>
+  getSessionUsage: (sessionId: string) => Promise<any>
+  getSessionHistory: () => Promise<any[]>
+  getTokenUsage: (sessionId?: string) => Promise<any>
+  getGitLog: (worktreePath: string, maxCount?: number) => Promise<any>
+  getGitDiff: (worktreePath: string, base?: string, head?: string) => Promise<any>
+  getGitBranches: (worktreePath: string) => Promise<any>
+  getGitWorkingTreeDiff: (worktreePath: string) => Promise<any>
+  getGitCommitFiles: (worktreePath: string, commitHash: string) => Promise<any>
+  getGitWorkingTreeFiles: (worktreePath: string) => Promise<any>
+  getGitFileDiff: (worktreePath: string, filePath: string, base?: string, head?: string) => Promise<any>
+  onSessionUnhealthy: (cb: (data: { sessionId: string, reason: string, usage?: any }) => void) => () => void
+  setUserSettings: (settings: { autoRestartSessions?: boolean }) => void
 }
 
 export function useSocket(): UseSocketReturn {
@@ -57,6 +83,7 @@ export function useSocket(): UseSocketReturn {
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
   const tokenReductionStateCbs = useRef<((data: { sessionId: string, enabled: boolean }) => void)[]>([])
   const compressionEventCbs = useRef<((data: CompressionEvent) => void)[]>([])
+  const sessionUnhealthyCbs = useRef<((data: { sessionId: string, reason: string, usage?: any }) => void)[]>([])
 
   useEffect(() => {
     const socket = io(SERVER_URL)
@@ -151,6 +178,10 @@ export function useSocket(): UseSocketReturn {
     socket.on('compression-stats', (data: { sessionId: string, stats: CompressionStats, history: CompressionDebugRecord[] }) => {
       setCompressionStats(data.stats)
       setCompressionHistory(data.history || [])
+    })
+
+    socket.on('session-unhealthy', (data: { sessionId: string, reason: string, usage?: any }) => {
+      sessionUnhealthyCbs.current.forEach(cb => cb(data))
     })
 
     return () => {
@@ -260,6 +291,42 @@ export function useSocket(): UseSocketReturn {
     }
   }, [])
 
+  const addWorktree = useCallback((workspaceId: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('add-worktree', { workspaceId }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const removeWorktree = useCallback((workspaceId: string, worktreeId: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('remove-worktree', { workspaceId, worktreeId }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const listWorktrees = useCallback((workspaceId: string): Promise<any[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('list-worktrees', { workspaceId }, (res: any) => resolve(res || []))
+    })
+  }, [])
+
+  const startParallelTask = useCallback((config: any): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('start-parallel-task', config, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const updateWorkspaceConfig = useCallback((workspaceId: string, updates: any): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('update-workspace-config', { workspaceId, updates }, (res: any) => resolve(res))
+    })
+  }, [])
+
   const emit = useCallback((event: string, ...args: any[]) => {
     socketRef.current?.emit(event, ...args)
   }, [])
@@ -286,6 +353,113 @@ export function useSocket(): UseSocketReturn {
     socketRef.current?.emit('get-compression-stats', { sessionId: null })
   }, [])
 
+  const getOrchestratorStats = useCallback((): Promise<OrchestratorStats> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-orchestrator-stats', {}, (res: any) => {
+        if (res?.ok) resolve(res)
+        else resolve({ concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [] })
+      })
+    })
+  }, [])
+
+  const getSessionUsage = useCallback((sessionId: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-session-usage', { sessionId }, (res: any) => resolve(res))
+    })
+  }, [])
+
+  const getSessionHistory = useCallback((): Promise<any[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-session-history', {}, (res: any) => {
+        if (res?.ok) resolve(res.history || [])
+        else resolve([])
+      })
+    })
+  }, [])
+
+  const getTokenUsage = useCallback((sessionId?: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-token-usage', { sessionId }, (res: any) => {
+        if (res?.ok) resolve(res)
+        else resolve({ usage: null, totalTokens: 0, totalCost: 0 })
+      })
+    })
+  }, [])
+
+  const getGitLog = useCallback((worktreePath: string, maxCount?: number): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-log', { worktreePath, maxCount }, (res: any) => {
+        if (res?.ok) resolve(res.log)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const getGitDiff = useCallback((worktreePath: string, base?: string, head?: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-diff', { worktreePath, base, head }, (res: any) => {
+        if (res?.ok) resolve(res.diff)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const getGitBranches = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-branches', { worktreePath }, (res: any) => {
+        if (res?.ok) resolve(res.branches)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const getGitWorkingTreeDiff = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-working-tree-diff', { worktreePath }, (res: any) => {
+        if (res?.ok) resolve(res.diff)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const getGitCommitFiles = useCallback((worktreePath: string, commitHash: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-commit-files', { worktreePath, commitHash }, (res: any) => {
+        if (res?.ok) resolve(res.files)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const getGitWorkingTreeFiles = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-working-tree-files', { worktreePath }, (res: any) => {
+        if (res?.ok) resolve(res.files)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const getGitFileDiff = useCallback((worktreePath: string, filePath: string, base?: string, head?: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-file-diff', { worktreePath, filePath, base, head }, (res: any) => {
+        if (res?.ok) resolve(res.diff)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const onSessionUnhealthy = useCallback((cb: (data: { sessionId: string, reason: string, usage?: any }) => void) => {
+    sessionUnhealthyCbs.current.push(cb)
+    return () => {
+      sessionUnhealthyCbs.current = sessionUnhealthyCbs.current.filter(c => c !== cb)
+    }
+  }, [])
+
+  const setUserSettings = useCallback((settings: { autoRestartSessions?: boolean }) => {
+    socketRef.current?.emit('set-user-settings', settings)
+  }, [])
+
   return {
     connected,
     sessions,
@@ -310,6 +484,12 @@ export function useSocket(): UseSocketReturn {
     fetchAgentConfigs,
     createRawSession,
     createAgentSession,
+    createWorkspaceFromGit,
+    updateWorkspaceConfig,
+    addWorktree,
+    removeWorktree,
+    listWorktrees,
+    startParallelTask,
     emit,
     toggleTokenReduction,
     onTokenReductionState,
@@ -317,5 +497,18 @@ export function useSocket(): UseSocketReturn {
     compressionStats,
     compressionHistory,
     requestCompressionStats,
+    getOrchestratorStats,
+    getSessionUsage,
+    getSessionHistory,
+    getTokenUsage,
+    getGitLog,
+    getGitDiff,
+    getGitBranches,
+    getGitWorkingTreeDiff,
+    getGitCommitFiles,
+    getGitWorkingTreeFiles,
+    getGitFileDiff,
+    onSessionUnhealthy,
+    setUserSettings,
   }
 }

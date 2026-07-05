@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
 import { useSocket } from '../hooks/useSocket'
+import ActivityFeed from './ActivityFeed'
 
 interface DeletedWs {
   id: string
@@ -18,6 +19,7 @@ interface Props {
   onRestore: (id: string) => void
   onPermanentDelete: (id: string) => void
   onNewWorkspace: () => void
+  onClose: () => void
 }
 
 function getSessionCount(ws: WorkspaceInfo): number {
@@ -32,7 +34,7 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
 
 const TOKEN_COST_PER_1K = 0.015
 
-export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace }: Props) {
+export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace, onClose }: Props) {
   const totalSessions = Object.keys(sessions).length
   const activeCount = getActiveCount(sessions)
   const { compressionStats, compressionHistory, requestCompressionStats } = useSocket()
@@ -72,7 +74,12 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
             {activeCount > 0 && <span className="dashboard-header-stat active">{activeCount} active</span>}
           </div>
         </div>
-        <button className="new-terminal-btn" onClick={onNewWorkspace}>+ New Workspace</button>
+        <div className="dashboard-header-actions">
+          <button className="new-terminal-btn" onClick={onNewWorkspace}>+ New Workspace</button>
+          <button className="dashboard-close-btn" onClick={onClose} title="Close">
+            <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
+          </button>
+        </div>
       </div>
 
       <div className="dashboard-body">
@@ -107,6 +114,9 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
             <span className="dashboard-overview-change neutral">{totalSessions - activeCount} idle</span>
           </div>
         </div>
+
+        {/* Activity Feed */}
+        <ActivityFeed sessions={sessions} maxEvents={30} />
 
         {/* Token Reduction Section */}
         {compressionStats.linesCompressed > 0 && (
@@ -265,10 +275,6 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
                   <div className="card-stat">
                     <span className="card-stat-value">{count}</span>
                     <span className="card-stat-label">sessions</span>
-                  </div>
-                  <div className="card-stat">
-                    <span className="card-stat-value">{ws.worktrees?.enabled ? ws.worktrees.count || 1 : 0}</span>
-                    <span className="card-stat-label">worktrees</span>
                   </div>
                 </div>
                 <div className="dashboard-card-footer">
