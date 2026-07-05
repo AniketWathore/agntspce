@@ -155,6 +155,7 @@ function App() {
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
   const dragging = useRef<'left' | 'right' | null>(null)
   const closingLeft = useRef(false)
+  const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { leftWidthRef.current = leftWidth }, [leftWidth])
 
@@ -562,19 +563,26 @@ function App() {
             newW = Math.min(newW, leftMax)
           }
 
-          if (newW < Math.round(totalW * 0.04)) {
-            document.removeEventListener('mousemove', onMove)
-            document.removeEventListener('mouseup', onUp)
-            document.body.style.cursor = ''
-            document.body.style.userSelect = ''
-            dragging.current = null
-            closingLeft.current = true
-            setLeftWidth(0)
-            setTimeout(() => {
-              closingLeft.current = false
-              setWorkspaceSidebarOpen(false)
-            }, 80)
-            return
+          const collapseThreshold = Math.round(totalW * 0.05)
+
+          if (newW < collapseThreshold) {
+            newW = Math.max(newW, collapseThreshold)
+            if (!collapseTimerRef.current) {
+              collapseTimerRef.current = setTimeout(() => {
+                collapseTimerRef.current = null
+                closingLeft.current = true
+                setLeftWidth(0)
+                setTimeout(() => {
+                  closingLeft.current = false
+                  setWorkspaceSidebarOpen(false)
+                }, 80)
+              }, 250)
+            }
+          } else {
+            if (collapseTimerRef.current) {
+              clearTimeout(collapseTimerRef.current)
+              collapseTimerRef.current = null
+            }
           }
 
           setLeftWidth(newW)
@@ -589,19 +597,14 @@ function App() {
 
       function onUp() {
         dragging.current = null
+        if (collapseTimerRef.current) {
+          clearTimeout(collapseTimerRef.current)
+          collapseTimerRef.current = null
+        }
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
-
-        if (appBodyRef.current && leftWidthRef.current < Math.round(appBodyRef.current.getBoundingClientRect().width * 0.08)) {
-          closingLeft.current = true
-          setLeftWidth(0)
-          setTimeout(() => {
-            closingLeft.current = false
-            setWorkspaceSidebarOpen(false)
-          }, 80)
-        }
       }
 
       document.addEventListener('mousemove', onMove)
@@ -643,7 +646,7 @@ function App() {
             <div className="activity-bar-bottom">
               <button
                 className={`activity-bar-btn ${bottomShellOpen ? 'active' : ''}`}
-                onClick={() => { if (!bottomShellOpen && shellSessions.length === 0) handleNewTerminal('shell'); setBottomShellOpen(true); setActiveView(null) }}
+                onClick={() => { if (bottomShellOpen) { setBottomShellOpen(false) } else { if (shellSessions.length === 0) handleNewTerminal('shell'); setBottomShellOpen(true); setActiveView(null) } }}
                 title="Terminal"
               >
                 <i className="codicon codicon-terminal" style={{ fontSize: 24 }}></i>
@@ -714,68 +717,75 @@ function App() {
         </div>
         {workspaceSidebarOpen && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
         <main className="main-content">
-          {activeView === 'dashboard' ? (
-            <Dashboard
-              workspaces={workspaces}
-              sessions={sessions}
-              activeWorkspace={activeWorkspace}
-              deletedWorkspaces={deletedWorkspaces}
-              onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
-              onDelete={handleDeleteWorkspace}
-              onRestore={handleRestoreWorkspace}
-              onPermanentDelete={handlePermanentDelete}
-              onNewWorkspace={handleCreateWorkspace}
-              onClose={() => setActiveView(null)}
-            />
-          ) : activeView === 'output-filter' ? (
-            <OutputFilterDebug
-              filterStats={filterStats}
-              filterHistory={filterHistory}
-              onFilterEvent={onFilterEvent}
-              onClose={() => setActiveView(null)}
-            />
-          ) : activeView === 'git-review' ? (
-            <PRPanel
-              worktreePath={activeWorkspace?.repository?.path || ''}
-              onClose={() => setActiveView(null)}
-              onSelectDiff={() => {}}
-              fetchLog={getGitLog}
-              fetchDiff={getGitDiff}
-              fetchWorkingTreeDiff={getGitWorkingTreeDiff}
-              fetchCommitFiles={getGitCommitFiles}
-              fetchWorkingTreeFiles={getGitWorkingTreeFiles}
-              fetchFileDiff={getGitFileDiff}
-            />
-          ) : activeView === 'profile' ? (
-            <Profile onClose={() => setActiveView(null)} />
-          ) : activeView === 'settings' ? (
-            <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
-          ) : (
-            <TerminalArea
-              sessions={agentSessions}
-              shellSessions={shellSessions}
-              onInput={sendTerminalInput}
-              onResize={sendTerminalResize}
-              onRestart={restartSession}
-              onStartAgent={handleStartAgent}
-              onShowAgentModal={handleShowAgentModal}
-              onNewAgent={() => {}}
-              onSelectAgent={handleSelectAgent}
-              onNewShell={handleNewShell}
-              onCloseTab={handleCloseAgentTab}
-              onActiveSessionChange={setActiveSessionId}
-              activeSessionId={activeSessionId}
-              writeBuffersRef={writeBuffersRef}
-              agentConfigs={agentConfigs}
-              focusMode={focusMode}
-              agentsList={AGENTS_LIST}
-              bottomShellOpen={bottomShellOpen}
-              onToggleShell={handleToggleBottomShell}
-              chatSidebarOpen={chatSidebarOpen}
-              onToggleChatSidebar={handleToggleChatSidebar}
-              onTerminalOutput={onTerminalOutput}
-            />
-          )}
+          <TerminalArea
+            sessions={agentSessions}
+            shellSessions={shellSessions}
+            onInput={sendTerminalInput}
+            onResize={sendTerminalResize}
+            onRestart={restartSession}
+            onStartAgent={handleStartAgent}
+            onShowAgentModal={handleShowAgentModal}
+            onNewAgent={() => {}}
+            onSelectAgent={handleSelectAgent}
+            onNewShell={handleNewShell}
+            onCloseTab={handleCloseAgentTab}
+            onActiveSessionChange={setActiveSessionId}
+            activeSessionId={activeSessionId}
+            writeBuffersRef={writeBuffersRef}
+            agentConfigs={agentConfigs}
+            focusMode={focusMode}
+            agentsList={AGENTS_LIST}
+            bottomShellOpen={bottomShellOpen}
+            onToggleShell={handleToggleBottomShell}
+            chatSidebarOpen={chatSidebarOpen}
+            onToggleChatSidebar={handleToggleChatSidebar}
+            onTerminalOutput={onTerminalOutput}
+            pageViews={[
+              { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
+                <Dashboard
+                  workspaces={workspaces}
+                  sessions={sessions}
+                  activeWorkspace={activeWorkspace}
+                  deletedWorkspaces={deletedWorkspaces}
+                  onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+                  onDelete={handleDeleteWorkspace}
+                  onRestore={handleRestoreWorkspace}
+                  onPermanentDelete={handlePermanentDelete}
+                  onNewWorkspace={handleCreateWorkspace}
+                  onClose={() => setActiveView(null)}
+                />
+              )},
+              { id: 'git-review', label: 'Git Review', icon: '⑂', render: () => (
+                <PRPanel
+                  worktreePath={activeWorkspace?.repository?.path || ''}
+                  onClose={() => setActiveView(null)}
+                  onSelectDiff={() => {}}
+                  fetchLog={getGitLog}
+                  fetchDiff={getGitDiff}
+                  fetchWorkingTreeDiff={getGitWorkingTreeDiff}
+                  fetchCommitFiles={getGitCommitFiles}
+                  fetchWorkingTreeFiles={getGitWorkingTreeFiles}
+                  fetchFileDiff={getGitFileDiff}
+                />
+              )},
+              { id: 'output-filter', label: 'Filter', icon: '◈', render: () => (
+                <OutputFilterDebug
+                  filterStats={filterStats}
+                  filterHistory={filterHistory}
+                  onFilterEvent={onFilterEvent}
+                  onClose={() => setActiveView(null)}
+                />
+              )},
+              { id: 'profile', label: 'Profile', icon: '◎', render: () => (
+                <Profile onClose={() => setActiveView(null)} />
+              )},
+              { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
+                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
+              )},
+            ]}
+            activeView={activeView}
+            onViewChange={setActiveView}
+          />
         </main>
         {chatSidebarOpen && (
           <>

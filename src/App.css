@@ -3434,6 +3434,14 @@
   overflow: hidden;
 }
 
+.terminal-area-page-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
 .bottom-shell {
   flex-shrink: 0;
   background: var(--terminal-bg);
