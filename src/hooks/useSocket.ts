@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, CompressionEvent, CompressionStats, CompressionDebugRecord } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -36,12 +36,10 @@ interface UseSocketReturn {
   createRawSession: (type?: string, workspacePath?: string) => void
   createAgentSession: (type: string, config: any, workspacePath?: string) => void
   emit: (event: string, ...args: any[]) => void
-  toggleTokenReduction: (sessionId: string, enabled?: boolean) => void
-  onTokenReductionState: (cb: (data: { sessionId: string, enabled: boolean }) => void) => () => void
-  onCompressionEvent: (cb: (data: CompressionEvent) => void) => () => void
-  compressionStats: CompressionStats
-  compressionHistory: CompressionDebugRecord[]
-  requestCompressionStats: () => void
+  onFilterEvent: (cb: (data: FilterEvent) => void) => () => void
+  filterStats: FilterStats
+  filterHistory: FilterEvent[]
+  requestFilterStats: () => void
   createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
   addWorktree: (workspaceId: string) => Promise<any>
@@ -69,27 +67,29 @@ export function useSocket(): UseSocketReturn {
   const [sessions, setSessions] = useState<Record<string, SessionState>>({})
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([])
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(null)
-  const [compressionStats, setCompressionStats] = useState<CompressionStats>({
-    totalOriginalChars: 0,
-    totalCompressedChars: 0,
-    totalOriginalTokens: 0,
-    totalCompressedTokens: 0,
-    linesCompressed: 0,
+  const [filterStats, setFilterStats] = useState<FilterStats>({
+    totalOriginalBytes: 0, totalFilteredBytes: 0,
+    totalOriginalTokens: 0, totalFilteredTokens: 0,
+    eventsProcessed: 0,
   })
-  const [compressionHistory, setCompressionHistory] = useState<CompressionDebugRecord[]>([])
+  const [filterHistory, setFilterHistory] = useState<FilterEvent[]>([])
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
   const statusChangeCbs = useRef<((data: StatusChange) => void)[]>([])
   const branchChangeCbs = useRef<((data: BranchChange) => void)[]>([])
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
-  const tokenReductionStateCbs = useRef<((data: { sessionId: string, enabled: boolean }) => void)[]>([])
-  const compressionEventCbs = useRef<((data: CompressionEvent) => void)[]>([])
+  const filterEventCbs = useRef<((data: FilterEvent) => void)[]>([])
   const sessionUnhealthyCbs = useRef<((data: { sessionId: string, reason: string, usage?: any }) => void)[]>([])
 
   useEffect(() => {
     const socket = io(SERVER_URL)
     socketRef.current = socket
 
-    socket.on('connect', () => setConnected(true))
+    socket.on('connect', () => {
+      setConnected(true)
+      socket.emit('reset-filter-stats')
+      setFilterStats({ totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 })
+      setFilterHistory([])
+    })
     socket.on('disconnect', () => setConnected(false))
 
     socket.on('workspace-info', (data: { active: WorkspaceInfo | null; available: WorkspaceInfo[] }) => {
@@ -162,29 +162,28 @@ export function useSocket(): UseSocketReturn {
       })
     })
 
-    socket.on('token-reduction-state', (data: { sessionId: string, enabled: boolean }) => {
-      tokenReductionStateCbs.current.forEach(cb => cb(data))
-    })
-
-    socket.on('compression-event', (event: CompressionEvent) => {
-      setCompressionStats(event.cumulative)
-      setCompressionHistory(prev => {
-        const next = [event.debug, ...prev]
-        return next.slice(0, 100)
-      })
-      compressionEventCbs.current.forEach(cb => cb(event))
-    })
-
-    socket.on('compression-stats', (data: { sessionId: string, stats: CompressionStats, history: CompressionDebugRecord[] }) => {
-      setCompressionStats(data.stats)
-      setCompressionHistory(data.history || [])
-    })
-
     socket.on('session-unhealthy', (data: { sessionId: string, reason: string, usage?: any }) => {
-      sessionUnhealthyCbs.current.forEach(cb => cb(data))
-    })
+    sessionUnhealthyCbs.current.forEach(cb => cb(data))
+  })
 
-    return () => {
+  socket.on('filter-event', (event: FilterEvent) => {
+    setFilterStats(prev => ({
+      totalOriginalBytes: prev.totalOriginalBytes + event.originalBytes,
+      totalFilteredBytes: prev.totalFilteredBytes + event.filteredBytes,
+      totalOriginalTokens: prev.totalOriginalTokens + event.originalTokens,
+      totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
+      eventsProcessed: prev.eventsProcessed + 1,
+    }))
+    setFilterHistory(prev => [event, ...prev].slice(0, 500))
+    filterEventCbs.current.forEach(cb => cb(event))
+  })
+
+  socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[] }) => {
+    setFilterStats(data.stats)
+    if (data.history) setFilterHistory(data.history)
+  })
+
+  return () => {
       socket.disconnect()
     }
   }, [])
@@ -331,26 +330,15 @@ export function useSocket(): UseSocketReturn {
     socketRef.current?.emit(event, ...args)
   }, [])
 
-  const toggleTokenReduction = useCallback((sessionId: string, enabled?: boolean) => {
-    socketRef.current?.emit('toggle-token-reduction', { sessionId, enabled })
-  }, [])
-
-  const onTokenReductionState = useCallback((cb: (data: { sessionId: string, enabled: boolean }) => void) => {
-    tokenReductionStateCbs.current.push(cb)
+  const onFilterEvent = useCallback((cb: (data: FilterEvent) => void) => {
+    filterEventCbs.current.push(cb)
     return () => {
-      tokenReductionStateCbs.current = tokenReductionStateCbs.current.filter(c => c !== cb)
+      filterEventCbs.current = filterEventCbs.current.filter(c => c !== cb)
     }
   }, [])
 
-  const onCompressionEvent = useCallback((cb: (data: CompressionEvent) => void) => {
-    compressionEventCbs.current.push(cb)
-    return () => {
-      compressionEventCbs.current = compressionEventCbs.current.filter(c => c !== cb)
-    }
-  }, [])
-
-  const requestCompressionStats = useCallback(() => {
-    socketRef.current?.emit('get-compression-stats', { sessionId: null })
+  const requestFilterStats = useCallback(() => {
+    socketRef.current?.emit('get-filter-stats', {})
   }, [])
 
   const getOrchestratorStats = useCallback((): Promise<OrchestratorStats> => {
@@ -491,12 +479,10 @@ export function useSocket(): UseSocketReturn {
     listWorktrees,
     startParallelTask,
     emit,
-    toggleTokenReduction,
-    onTokenReductionState,
-    onCompressionEvent,
-    compressionStats,
-    compressionHistory,
-    requestCompressionStats,
+    onFilterEvent,
+    filterStats,
+    filterHistory,
+    requestFilterStats,
     getOrchestratorStats,
     getSessionUsage,
     getSessionHistory,

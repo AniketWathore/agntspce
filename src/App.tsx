@@ -11,7 +11,7 @@ import Profile from './components/Profile'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
-import PromptDebug from './components/PromptDebug'
+import OutputFilterDebug from './components/OutputFilterDebug'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import HistoryPanel from './components/HistoryPanel'
@@ -117,8 +117,7 @@ function App() {
     createWorkspaceFromGit,
     getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
-    compressionStats, compressionHistory,
-    onCompressionEvent, requestCompressionStats,
+    filterStats, filterHistory, onFilterEvent,
     emit,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
@@ -131,7 +130,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -636,11 +635,11 @@ function App() {
                 <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className={`activity-bar-btn ${activeView === 'debug' ? 'active' : ''}`}
-                onClick={() => setActiveView(prev => prev === 'debug' ? null : 'debug')}
-                title="Prompt Optimizer Debug"
+                className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'output-filter' ? null : 'output-filter')}
+                title="Output Filter Debug"
               >
-                <i className="codicon codicon-debug" style={{ fontSize: 24 }}></i>
+                <i className="codicon codicon-output" style={{ fontSize: 24 }}></i>
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
@@ -712,12 +711,12 @@ function App() {
               onNewWorkspace={handleCreateWorkspace}
               onClose={() => setActiveView(null)}
             />
-          ) : activeView === 'debug' ? (
-            <PromptDebug
-              compressionStats={compressionStats}
-              compressionHistory={compressionHistory}
-              onCompressionEvent={onCompressionEvent}
-              requestCompressionStats={requestCompressionStats}
+          ) : activeView === 'output-filter' ? (
+            <OutputFilterDebug
+              filterStats={filterStats}
+              filterHistory={filterHistory}
+              onFilterEvent={onFilterEvent}
+              onClose={() => setActiveView(null)}
             />
           ) : activeView === 'git-review' ? (
             <PRPanel

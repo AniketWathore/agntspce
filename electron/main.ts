@@ -298,33 +298,25 @@ io.on('connection', (socket) => {
     sessionManager.resizeSession(sessionId, cols, rows)
   })
 
-  socket.on('toggle-token-reduction', ({ sessionId, enabled }) => {
-    if (enabled !== undefined) {
-      sessionManager.tokenReduction.setEnabled(sessionId, enabled)
-    } else {
-      const state = sessionManager.tokenReduction.toggle(sessionId)
-      socket.emit('token-reduction-state', { sessionId, enabled: state })
-    }
-  })
-
-  socket.on('get-token-reduction-state', ({ sessionId }) => {
-    const config = sessionManager.tokenReduction.getConfig(sessionId)
-    socket.emit('token-reduction-state', { sessionId, enabled: config.enabled })
-  })
-
-  socket.on('get-compression-stats', ({ sessionId }) => {
-    if (sessionId) {
-      const stats = sessionManager.tokenReduction.getSessionStats(sessionId)
-      const history = sessionManager.tokenReduction.getSessionHistory(sessionId)
-      socket.emit('compression-stats', { sessionId, stats, history })
-    } else {
-      const allStats = sessionManager.tokenReduction.getAllStats()
-      socket.emit('compression-stats-all', allStats)
-    }
-  })
-
   socket.on('restart-session', ({ sessionId }) => {
     sessionManager.restartSession(sessionId)
+  })
+
+  socket.on('get-filter-stats', () => {
+    const allSessions = sessionManager.outputFilter.getAllStats()
+    const aggregated = {
+      totalOriginalBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalBytes, 0),
+      totalFilteredBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredBytes, 0),
+      totalOriginalTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalTokens, 0),
+      totalFilteredTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredTokens, 0),
+      eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
+    }
+    const allHistory = sessionManager.outputFilter.getAllHistory()
+    socket.emit('filter-stats', { stats: aggregated, history: allHistory })
+  })
+
+  socket.on('reset-filter-stats', () => {
+    sessionManager.outputFilter.reset()
   })
 
   socket.on('switch-workspace', async ({ workspaceId }) => {

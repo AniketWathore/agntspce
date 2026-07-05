@@ -424,7 +424,6 @@ export default function TerminalArea({
               onTerminalOutput={onTerminalOutput}
             />
           ))}
-          <button className="chat-assist-btn" onClick={onToggleChatSidebar} title="Chat Assistance"><i className="codicon codicon-comment-discussion" style={{ fontSize: 16 }}></i> Assist</button>
         </div>
       )}
 

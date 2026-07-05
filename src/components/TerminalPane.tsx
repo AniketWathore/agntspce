@@ -30,20 +30,6 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
   const paneRef = useRef<HTMLDivElement>(null)
   const [showStartup, setShowStartup] = useState(false)
 
-  const [compressEnabled, setCompressEnabled] = useState(false)
-  const { toggleTokenReduction, onTokenReductionState } = useSocket()
-
-  useEffect(() => {
-    const unsub = onTokenReductionState(({ sessionId, enabled }) => {
-      if (sessionId === session.id) setCompressEnabled(enabled)
-    })
-    return unsub
-  }, [session.id])
-
-  const handleToggleCompress = () => {
-    toggleTokenReduction(session.id)
-  }
-
   const isAgentType = session.type === 'claude' || session.type === 'codex' || session.type === 'opencode' || session.type === 'gemini'
   const shouldShowStartup = isAgentType && session.status === 'waiting' && showStartup
   const groupColor = session.sessionGroupId
@@ -170,13 +156,6 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
           <span className="terminal-branch">{session.branch}</span>
         )}
         <span className="terminal-session-id">{session.id}</span>
-        <button
-          className={`terminal-compress-btn${compressEnabled ? ' active' : ''}`}
-          onClick={handleToggleCompress}
-          title={compressEnabled ? 'Token reduction enabled' : 'Token reduction disabled'}
-        >
-          {compressEnabled ? '⚡' : '🗜'}
-        </button>
         <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>
         {onClose && (
           <button className="terminal-close-btn" onClick={() => onClose(session.id)} title="Close">✕</button>
