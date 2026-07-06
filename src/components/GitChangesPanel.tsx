@@ -348,7 +348,11 @@ export default function GitChangesPanel({
               </div>
               <div className="scm-file-list">
                 {!status ? (
-                  <div className="scm-loading">Loading...</div>
+                  !worktreePath ? (
+                    <div className="scm-empty">Open a workspace to view changes</div>
+                  ) : (
+                    <div className="scm-loading">Loading...</div>
+                  )
                 ) : visibleFiles.length === 0 ? (
                   <div className="scm-empty">
                     {status.clean ? 'No changes' : 'No matching files'}
