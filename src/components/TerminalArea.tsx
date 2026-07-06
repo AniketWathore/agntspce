@@ -172,14 +172,16 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
   )
 }
 
-function ShellTabList({ shells, activeShellId, onSelect, onClose }: {
+function ShellTabList({ shells, activeShellId, onSelect, onClose, header }: {
   shells: SessionState[]
   activeShellId: string | null
   onSelect: (id: string) => void
   onClose: (id: string) => void
+  header?: ReactNode
 }) {
   return (
     <div className="shell-tab-list">
+      {header}
       {shells.map(s => (
         <div
           key={s.id}
@@ -291,8 +293,10 @@ export default function TerminalArea({
     : 0
   const tilingStyle = getTilingStyle(filteredSessions.length)
 
+  if (shellOnly && !bottomShellOpen) return null
+
   return (
-    <div className="terminal-area-wrapper">
+    <div className={`terminal-area-wrapper${terminalFullscreen ? ' fullscreen' : ''}`}>
       {!shellOnly && (
         <div className="tab-bar">
           <div className="tab-bar-tabs">
@@ -341,15 +345,6 @@ export default function TerminalArea({
         <>
           {bottomShellOpen && (
             <div className="bottom-shell" style={{ flex: 1 }}>
-              <div className="bottom-shell-header">
-                <div className="bottom-shell-header-actions">
-                  <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
-                  <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-                    {terminalFullscreen ? '⊠' : '⊡'}
-                  </button>
-                  <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
-                </div>
-              </div>
               <div className="bottom-shell-body">
                 <div className="bottom-shell-terminal-area">
                   {shellSessions.length === 0 ? (
@@ -375,6 +370,17 @@ export default function TerminalArea({
                   activeShellId={activeShellId}
                   onSelect={setActiveShellId}
                   onClose={handleShellClose}
+                  header={
+                    <div className="shell-tab-list-header">
+                      <div className="shell-tab-list-header-actions">
+                        <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
+                        <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                          {terminalFullscreen ? '⊠' : '⊡'}
+                        </button>
+                        <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
+                      </div>
+                    </div>
+                  }
                 />
               </div>
             </div>
@@ -433,15 +439,6 @@ export default function TerminalArea({
 
           {bottomShellOpen && (
             <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : '0 0 50%' }}>
-              <div className="bottom-shell-header">
-                <div className="bottom-shell-header-actions">
-                  <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
-                  <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-                    {terminalFullscreen ? '⊠' : '⊡'}
-                  </button>
-                  <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
-                </div>
-              </div>
               <div className="bottom-shell-body">
                 <div className="bottom-shell-terminal-area">
                   {shellSessions.length === 0 ? (
@@ -467,6 +464,17 @@ export default function TerminalArea({
                   activeShellId={activeShellId}
                   onSelect={setActiveShellId}
                   onClose={handleShellClose}
+                  header={
+                    <div className="shell-tab-list-header">
+                      <div className="shell-tab-list-header-actions">
+                        <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
+                        <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                          {terminalFullscreen ? '⊠' : '⊡'}
+                        </button>
+                        <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
+                      </div>
+                    </div>
+                  }
                 />
               </div>
             </div>

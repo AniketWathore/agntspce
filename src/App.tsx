@@ -569,7 +569,7 @@ function App() {
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
         const chatMin = Math.round(totalW * 0.10)
-        const leftMax = Math.round(totalW * 0.12)
+        const leftMax = Math.round(totalW * 0.25)
         const chatMax = Math.round(totalW * 0.20)
 
         if (dragging.current === 'left') {

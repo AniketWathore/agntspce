@@ -643,8 +643,12 @@ io.on('connection', (socket) => {
   // ── Filesystem Operations ──────────────────────────────
   async function getRepoRoot(wsPath: string): Promise<string> {
     try {
-      const { execSync } = await import('child_process')
-      return execSync(`git rev-parse --show-toplevel`, { cwd: wsPath, encoding: 'utf8' }).trim()
+      const { spawnSync } = await import('child_process')
+      const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: wsPath, encoding: 'utf8', timeout: 5000 })
+      if (result.status === 0 && result.stdout) {
+        return result.stdout.trim()
+      }
+      return wsPath
     } catch {
       return wsPath
     }
@@ -676,7 +680,7 @@ io.on('connection', (socket) => {
       const tree = await readDir(root, root)
       if (callback) callback({ ok: true, tree, root })
     } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+      if (callback) callback({ ok: false, error: error?.message || String(error) })
     }
   })
 
