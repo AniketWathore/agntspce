@@ -14,10 +14,15 @@
     "electron:preview": "vite build && electron dist-electron/main.js"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.8",
+    "@ai-sdk/deepseek": "^3.0.5",
+    "@ai-sdk/google": "^4.0.8",
+    "@ai-sdk/openai": "^4.0.8",
     "@monaco-editor/react": "^4.7.0",
     "@vscode/codicons": "^0.0.45",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "ai": "^7.0.16",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

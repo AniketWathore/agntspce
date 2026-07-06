@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, ChatModelInfo, StreamChunk } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -66,6 +66,18 @@ interface UseSocketReturn {
   createFolder: (absolutePath: string) => Promise<any>
   renameFile: (oldPath: string, newPath: string) => Promise<any>
   deleteFile: (absolutePath: string) => Promise<any>
+  chatGetModels: () => Promise<any[]>
+  chatSend: (threadId: string, providerId: string, content: string) => Promise<any>
+  chatSendStream: (threadId: string, providerId: string, content: string) => void
+  chatStopStream: (threadId: string) => void
+  chatGetHistory: (threadId: string) => Promise<any>
+  chatUpdateApiKey: (providerId: string, apiKey: string) => void
+  chatDeleteThread: (threadId: string) => void
+  onChatStreamChunk: (cb: (data: any) => void) => () => void
+  onChatResponse: (cb: (data: any) => void) => () => void
+  onChatError: (cb: (data: any) => void) => () => void
+  onChatModels: (cb: (data: any[]) => void) => () => void
+  onChatHistory: (cb: (data: any) => void) => () => void
 }
 
 export function useSocket(): UseSocketReturn {
@@ -497,6 +509,69 @@ export function useSocket(): UseSocketReturn {
     })
   }, [])
 
+  // Chat functions
+  const chatGetModels = useCallback((): Promise<any[]> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('chat-get-models')
+      socketRef.current?.once('chat-models', (models: any[]) => resolve(models))
+    })
+  }, [])
+
+  const chatSend = useCallback((threadId: string, providerId: string, content: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('chat-send', { threadId, providerId, content })
+      socketRef.current?.once('chat-response', (data: any) => resolve(data))
+    })
+  }, [])
+
+  const chatSendStream = useCallback((threadId: string, providerId: string, content: string) => {
+    socketRef.current?.emit('chat-send-stream', { threadId, providerId, content })
+  }, [])
+
+  const chatStopStream = useCallback((threadId: string) => {
+    socketRef.current?.emit('chat-stop-stream', { threadId })
+  }, [])
+
+  const chatGetHistory = useCallback((threadId: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('chat-get-history', { threadId })
+      socketRef.current?.once('chat-history', (data: any) => resolve(data))
+    })
+  }, [])
+
+  const chatUpdateApiKey = useCallback((providerId: string, apiKey: string) => {
+    socketRef.current?.emit('chat-update-api-key', { providerId, apiKey })
+  }, [])
+
+  const chatDeleteThread = useCallback((threadId: string) => {
+    socketRef.current?.emit('chat-delete-thread', { threadId })
+  }, [])
+
+  const onChatStreamChunk = useCallback((cb: (data: any) => void) => {
+    socketRef.current?.on('chat-stream-chunk', cb)
+    return () => { socketRef.current?.off('chat-stream-chunk', cb) }
+  }, [])
+
+  const onChatResponse = useCallback((cb: (data: any) => void) => {
+    socketRef.current?.on('chat-response', cb)
+    return () => { socketRef.current?.off('chat-response', cb) }
+  }, [])
+
+  const onChatError = useCallback((cb: (data: any) => void) => {
+    socketRef.current?.on('chat-error', cb)
+    return () => { socketRef.current?.off('chat-error', cb) }
+  }, [])
+
+  const onChatModels = useCallback((cb: (data: any[]) => void) => {
+    socketRef.current?.on('chat-models', cb)
+    return () => { socketRef.current?.off('chat-models', cb) }
+  }, [])
+
+  const onChatHistory = useCallback((cb: (data: any) => void) => {
+    socketRef.current?.on('chat-history', cb)
+    return () => { socketRef.current?.off('chat-history', cb) }
+  }, [])
+
   return {
     connected,
     sessions,
@@ -552,5 +627,17 @@ export function useSocket(): UseSocketReturn {
     createFolder,
     renameFile,
     deleteFile,
+    chatGetModels,
+    chatSend,
+    chatSendStream,
+    chatStopStream,
+    chatGetHistory,
+    chatUpdateApiKey,
+    chatDeleteThread,
+    onChatStreamChunk,
+    onChatResponse,
+    onChatError,
+    onChatModels,
+    onChatHistory,
   }
 }

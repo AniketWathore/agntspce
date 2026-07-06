@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import type { ChatModelInfo, ProviderId } from '../types'
 
 interface UserPrefs {
   fontSize: number
@@ -50,10 +51,19 @@ interface Props {
   onFontFamilyChange: (family: string) => void
   onPrefsChange: (prefs: Partial<UserPrefs>) => void
   onClose: () => void
+  chatGetModels: () => Promise<ChatModelInfo[]>
+  chatUpdateApiKey: (providerId: string, apiKey: string) => void
 }
 
-export default function Settings({ theme, onThemeChange, onFontSizeChange, onFontFamilyChange, onPrefsChange, onClose }: Props) {
+export default function Settings({ theme, onThemeChange, onFontSizeChange, onFontFamilyChange, onPrefsChange, onClose, chatGetModels, chatUpdateApiKey }: Props) {
   const [prefs, setPrefs] = useState<UserPrefs>(loadPrefs)
+  const [models, setModels] = useState<ChatModelInfo[]>([])
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
+  const [saved, setSaved] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    chatGetModels().then(setModels)
+  }, [])
 
   useEffect(() => {
     savePrefs(prefs)
@@ -204,6 +214,43 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
               onChange={e => updatePrefs({ maxTokensPerSession: parseInt(e.target.value) || 100000 })}
             />
           </div>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-section-header">
+            <h2>API Keys</h2>
+          </div>
+          {models.map(m => (
+            <div key={m.id} className="settings-row">
+              <div>
+                <span className="settings-label">{m.name}</span>
+                <span className="settings-label-desc">{m.model}{m.configured ? ' — configured' : ''}</span>
+              </div>
+              <div className="settings-api-key-field">
+                <input
+                  className="settings-input settings-api-key-input"
+                  type="password"
+                  placeholder={m.configured ? '••••••••' : `Enter ${m.name} API key...`}
+                  value={apiKeys[m.id] || ''}
+                  onChange={e => {
+                    setApiKeys(prev => ({ ...prev, [m.id]: e.target.value }))
+                    setSaved(prev => ({ ...prev, [m.id]: false }))
+                  }}
+                />
+                <button
+                  className="settings-api-key-save"
+                  disabled={!apiKeys[m.id]?.trim()}
+                  onClick={() => {
+                    chatUpdateApiKey(m.id, apiKeys[m.id].trim())
+                    setSaved(prev => ({ ...prev, [m.id]: true }))
+                    setTimeout(() => chatGetModels().then(setModels), 300)
+                  }}
+                >
+                  {saved[m.id] ? 'Saved' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

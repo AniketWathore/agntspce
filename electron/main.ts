@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import os from 'node:os'
+import 'dotenv/config'
 import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
@@ -12,6 +13,7 @@ import { GitHelper } from './services/gitHelper'
 import { WorktreeHelper } from './services/worktreeHelper'
 import { AgentManager } from './services/agentManager'
 import { AgentOrchestrator } from './services/agentOrchestrator'
+import { ChatManager } from './services/chatManager'
 
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
@@ -74,6 +76,8 @@ const agentOrchestrator = new AgentOrchestrator(io)
 sessionManager.setStatusDetector(statusDetector)
 sessionManager.setGitHelper(gitHelper)
 sessionManager.orchestrator = agentOrchestrator
+
+const chatManager = new ChatManager()
 
 async function autoSaveSessions() {
   const ws = sessionManager.getWorkspace()
@@ -272,6 +276,10 @@ app_.get('/api/sessions', (_req, res) => {
 app_.get('/api/agents', (_req, res) => {
   const agents = agentManager.getAllAgents().map(a => agentManager.getUIConfig(a.id))
   res.json(agents)
+})
+
+app_.get('/api/chat/models', (_req, res) => {
+  res.json(chatManager.getModels())
 })
 
 // Socket.IO
@@ -754,6 +762,69 @@ io.on('connection', (socket) => {
     const sessions = sessionManager.getSessionSaveData()
     await workspaceManager.saveSessionState(ws.id, sessions)
     await sessionManager.saveAllSessionBuffers()
+  })
+
+  // Chat events
+  socket.on('chat-get-models', () => {
+    socket.emit('chat-models', chatManager.getModels())
+  })
+
+  socket.on('chat-send', async ({ threadId, providerId, content }) => {
+    try {
+      const provider = chatManager.getProvider(providerId)
+      if (!provider.isConfigured()) {
+        socket.emit('chat-error', { threadId, error: `${provider.name} API key is not configured.` })
+        return
+      }
+    } catch (err: any) {
+      socket.emit('chat-error', { threadId, error: err.message })
+      return
+    }
+
+    const msg = await chatManager.sendMessage(threadId, providerId, content)
+    if (msg.error) {
+      socket.emit('chat-error', { threadId, error: msg.content })
+    } else {
+      socket.emit('chat-response', { threadId, message: msg })
+    }
+  })
+
+  socket.on('chat-send-stream', async ({ threadId, providerId, content }) => {
+    try {
+      const provider = chatManager.getProvider(providerId)
+      if (!provider.isConfigured()) {
+        socket.emit('chat-error', { threadId, error: `${provider.name} API key is not configured.` })
+        return
+      }
+    } catch (err: any) {
+      socket.emit('chat-error', { threadId, error: err.message })
+      return
+    }
+
+    await chatManager.sendMessageStream(threadId, providerId, content, (chunk) => {
+      if (chunk.error) {
+        socket.emit('chat-error', { threadId, error: chunk.error })
+      } else {
+        socket.emit('chat-stream-chunk', chunk)
+      }
+    })
+  })
+
+  socket.on('chat-stop-stream', ({ threadId }) => {
+    chatManager.stopStreaming(threadId)
+  })
+
+  socket.on('chat-get-history', ({ threadId }) => {
+    const messages = chatManager.getThreadMessages(threadId)
+    socket.emit('chat-history', { threadId, messages })
+  })
+
+  socket.on('chat-update-api-key', ({ providerId, apiKey }) => {
+    chatManager.updateApiKey(providerId, apiKey)
+  })
+
+  socket.on('chat-delete-thread', ({ threadId }) => {
+    chatManager.deleteThread(threadId)
   })
 })
 

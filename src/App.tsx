@@ -121,7 +121,8 @@ function App() {
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
     filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
-    emit,
+    emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
+    onChatStreamChunk, onChatResponse, onChatError, onChatModels, onChatHistory,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -1053,7 +1054,7 @@ function App() {
                 <Profile onClose={() => setActiveView(null)} />
               )},
               { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
-                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
+                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} chatGetModels={chatGetModels} chatUpdateApiKey={chatUpdateApiKey} />
               )},
             ]}
             activeView={activeView}
@@ -1066,6 +1067,18 @@ function App() {
             <div className="panel-right" style={{ width: chatWidth, minWidth: chatWidth }}>
               <ChatSidebar
                 onClose={() => setChatSidebarOpen(false)}
+                onNavigateToSettings={() => setActiveView('settings')}
+                socket={{
+                  chatGetModels,
+                  chatSendStream,
+                  chatStopStream,
+                  chatGetHistory,
+                  chatUpdateApiKey,
+                  chatDeleteThread,
+                  onChatStreamChunk,
+                  onChatResponse,
+                  onChatError,
+                }}
               />
             </div>
           </>

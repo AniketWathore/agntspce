@@ -140,6 +140,33 @@ export interface OpenFile {
   isDirty: boolean
 }
 
+export type ProviderId = 'openai' | 'anthropic' | 'google' | 'deepseek'
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  provider?: ProviderId
+  model?: string
+  timestamp: number
+  streaming?: boolean
+  error?: boolean
+}
+
+export interface ChatModelInfo {
+  id: ProviderId
+  name: string
+  model: string
+  configured: boolean
+}
+
+export interface StreamChunk {
+  threadId: string
+  content: string
+  done: boolean
+  error?: string
+}
+
 declare global {
   interface Window {
     electronAPI?: {
