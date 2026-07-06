@@ -12,4 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('menu-action', handler)
     return () => ipcRenderer.removeListener('menu-action', handler)
   },
+  windowMinimize: () => ipcRenderer.invoke('window-minimize'),
+  windowMaximize: () => ipcRenderer.invoke('window-maximize'),
+  windowClose: () => ipcRenderer.invoke('window-close'),
+  windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  popupMenu: (menuName, x, y) => ipcRenderer.invoke('popup-menu', menuName, x, y),
 })

@@ -99,145 +99,280 @@ function rebuildMenu() {
       ]
     : []
 
-  const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac ? [{
-      label: app.name,
-      submenu: [
-        { role: 'about' as const },
-        { type: 'separator' as const },
-        { role: 'hide' as const },
-        { role: 'hideOthers' as const },
-        { role: 'unhide' as const },
-        { type: 'separator' as const },
-        { role: 'quit' as const },
-      ],
-    }] : []),
-    {
-      label: 'File',
-      submenu: [
-        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow() },
-        { label: 'New Workspace', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenuAction('new-workspace') },
-        { label: 'New Agent', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendMenuAction('new-agent') },
-        { label: 'New Shell', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('new-shell') },
-        { type: 'separator' as const },
-        { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
-        { label: 'Load Workspace', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('load-workspace') },
-        ...recentItems,
-        { type: 'separator' as const },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save-workspace') },
-        { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-workspace-as') },
-        { type: 'separator' as const },
-        { label: 'Close Window', accelerator: 'CmdOrCtrl+W', role: 'close' as const },
-      ],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' as const },
-        { role: 'redo' as const },
-        { type: 'separator' as const },
-        { role: 'cut' as const },
-        { role: 'copy' as const },
-        { role: 'paste' as const },
-        { role: 'selectAll' as const },
-        { type: 'separator' as const },
-        { role: 'find' as const },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'zoomIn' as const },
-        { role: 'zoomOut' as const },
-        { role: 'resetZoom' as const },
-        { type: 'separator' as const },
+  const template: Electron.MenuItemConstructorOptions[] = isMac
+    ? [
+        // ── App Menu (macOS only) ──────────────────────────────────────
         {
-          label: 'Toggle Shell Sidebar',
-          accelerator: 'CmdOrCtrl+B',
-          click: () => sendMenuAction('toggle-shell-sidebar'),
-        },
-        {
-          label: 'Toggle Workspace Sidebar',
-          accelerator: 'CmdOrCtrl+Shift+B',
-          click: () => sendMenuAction('toggle-workspace-sidebar'),
-        },
-        { type: 'separator' as const },
-        {
-          label: 'Focus Active Terminal',
-          accelerator: 'CmdOrCtrl+Shift+F',
-          click: () => sendMenuAction('toggle-focus'),
-        },
-        { type: 'separator' as const },
-        {
-          label: 'Layout',
+          label: app.name,
           submenu: [
-            { label: 'Auto', click: () => sendMenuAction('set-layout', 'auto') },
-            { label: '1×1', click: () => sendMenuAction('set-layout', '1x1') },
-            { label: '2×2', click: () => sendMenuAction('set-layout', '2x2') },
-            { label: '1+2', click: () => sendMenuAction('set-layout', '1+2') },
-            { label: '3×3', click: () => sendMenuAction('set-layout', '3x3') },
+            { role: 'about' as const },
+            { type: 'separator' as const },
+            { label: 'Hide AgntSpce', role: 'hide' as const },
+            { label: 'Hide Others', role: 'hideOthers' as const },
+            { label: 'Show All', role: 'unhide' as const },
+            { type: 'separator' as const },
+            { label: 'Quit AgntSpce', role: 'quit' as const },
           ],
         },
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' as const },
-        { role: 'zoom' as const },
+        // ── File Menu (macOS) ──────────────────────────────────────────
         {
-          label: 'Fill',
-          click: () => {
-            if (!mainWindow) return
-            const { width, height } = screen.getPrimaryDisplay().workAreaSize
-            mainWindow.setBounds({ x: 0, y: 0, width, height })
-          },
+          label: 'File',
+          submenu: [
+            { label: 'New Window', accelerator: 'Cmd+N', click: () => createNewWindow() },
+            { label: 'New Workspace', accelerator: 'Cmd+Shift+N', click: () => sendMenuAction('new-workspace') },
+            { label: 'New Agent', accelerator: 'Cmd+Shift+A', click: () => sendMenuAction('new-agent') },
+            { label: 'New Shell', accelerator: 'Cmd+Shift+S', click: () => sendMenuAction('new-shell') },
+            { type: 'separator' as const },
+            { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
+            { label: 'Load Workspace', accelerator: 'Cmd+O', click: () => sendMenuAction('load-workspace') },
+            ...recentItems,
+            { type: 'separator' as const },
+            { label: 'Save', accelerator: 'Cmd+S', click: () => sendMenuAction('save-workspace') },
+            { label: 'Save As...', accelerator: 'Cmd+Shift+S', click: () => sendMenuAction('save-workspace-as') },
+            { type: 'separator' as const },
+            { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' as const },
+          ],
+        },
+        // ── Edit Menu (macOS native) ───────────────────────────────────
+        {
+          label: 'Edit',
+          submenu: [
+            { label: 'Undo', accelerator: 'Cmd+Z', role: 'undo' as const },
+            { label: 'Redo', accelerator: 'Cmd+Shift+Z', role: 'redo' as const },
+            { type: 'separator' as const },
+            { label: 'Cut', accelerator: 'Cmd+X', role: 'cut' as const },
+            { label: 'Copy', accelerator: 'Cmd+C', role: 'copy' as const },
+            { label: 'Paste', accelerator: 'Cmd+V', role: 'paste' as const },
+            { label: 'Select All', accelerator: 'Cmd+A', role: 'selectAll' as const },
+            { type: 'separator' as const },
+            { role: 'services' as const },
+            { type: 'separator' as const },
+            { label: 'Auto Fill', click: () => {} },
+            { role: 'startDictation' as const },
+            { role: 'emojiAndSymbols' as const },
+          ],
+        },
+        // ── View Menu (macOS) ──────────────────────────────────────────
+        {
+          label: 'View',
+          submenu: [
+            { label: 'Zoom In', accelerator: 'Cmd+=', role: 'zoomIn' as const },
+            { label: 'Zoom Out', accelerator: 'Cmd+-', role: 'zoomOut' as const },
+            { label: 'Actual Size', accelerator: 'Cmd+0', role: 'resetZoom' as const },
+            { type: 'separator' as const },
+            {
+              label: 'Toggle Shell Sidebar',
+              accelerator: 'Cmd+B',
+              click: () => sendMenuAction('toggle-shell-sidebar'),
+            },
+            {
+              label: 'Toggle Workspace Sidebar',
+              accelerator: 'Cmd+Shift+B',
+              click: () => sendMenuAction('toggle-workspace-sidebar'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Focus Active Terminal',
+              accelerator: 'Cmd+Shift+F',
+              click: () => sendMenuAction('toggle-focus'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Layout',
+              submenu: [
+                { label: 'Auto', click: () => sendMenuAction('set-layout', 'auto') },
+                { label: '1×1', click: () => sendMenuAction('set-layout', '1x1') },
+                { label: '2×2', click: () => sendMenuAction('set-layout', '2x2') },
+                { label: '1+2', click: () => sendMenuAction('set-layout', '1+2') },
+                { label: '3×3', click: () => sendMenuAction('set-layout', '3x3') },
+              ],
+            },
+          ],
+        },
+        // ── Window Menu (macOS) ────────────────────────────────────────
+        {
+          label: 'Window',
+          submenu: [
+            { label: 'Minimize', accelerator: 'Cmd+M', role: 'minimize' as const },
+            { label: 'Zoom', role: 'zoom' as const },
+            {
+              label: 'Fill',
+              click: () => {
+                if (!mainWindow) return
+                const { width, height } = screen.getPrimaryDisplay().workAreaSize
+                mainWindow.setBounds({ x: 0, y: 0, width, height })
+              },
+            },
+            {
+              label: 'Center',
+              click: () => mainWindow?.center(),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Tile to Left',
+              click: () => {
+                if (!mainWindow) return
+                const { width, height } = screen.getPrimaryDisplay().workAreaSize
+                mainWindow.setBounds({ x: 0, y: 0, width: Math.floor(width / 2), height })
+              },
+            },
+            {
+              label: 'Tile to Right',
+              click: () => {
+                if (!mainWindow) return
+                const { width, height } = screen.getPrimaryDisplay().workAreaSize
+                mainWindow.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height })
+              },
+            },
+            { type: 'separator' as const },
+            { label: 'Toggle Full Screen', accelerator: 'Cmd+Ctrl+F', role: 'togglefullscreen' as const },
+            { type: 'separator' as const },
+            { label: 'Bring All to Front', role: 'front' as const },
+          ],
+        },
+        // ── Help Menu (macOS) ──────────────────────────────────────────
+        {
+          label: 'Help',
+          submenu: [
+            { label: 'Search', click: () => {} },
+            { type: 'separator' as const },
+            {
+              label: 'Keyboard Shortcuts',
+              accelerator: 'Cmd+/',
+              click: () => sendMenuAction('show-shortcuts'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'About AgntSpce',
+              click: () => sendMenuAction('show-about'),
+            },
+          ],
+        },
+      ]
+    // ── Windows Menu (unchanged) ──────────────────────────────────────
+    : [
+        {
+          label: 'File',
+          submenu: [
+            { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow() },
+            { label: 'New Workspace', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenuAction('new-workspace') },
+            { label: 'New Agent', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendMenuAction('new-agent') },
+            { label: 'New Shell', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('new-shell') },
+            { type: 'separator' as const },
+            { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
+            { label: 'Load Workspace', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('load-workspace') },
+            ...recentItems,
+            { type: 'separator' as const },
+            { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save-workspace') },
+            { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-workspace-as') },
+            { type: 'separator' as const },
+            { label: 'Close Window', accelerator: 'CmdOrCtrl+W', role: 'close' as const },
+          ],
         },
         {
-          label: 'Center',
-          click: () => mainWindow?.center(),
+          label: 'Edit',
+          submenu: [
+            { role: 'undo' as const },
+            { role: 'redo' as const },
+            { type: 'separator' as const },
+            { role: 'cut' as const },
+            { role: 'copy' as const },
+            { role: 'paste' as const },
+            { role: 'selectAll' as const },
+            { type: 'separator' as const },
+            { role: 'find' as const },
+          ],
         },
-        { type: 'separator' as const },
         {
-          label: 'Tile to Left',
-          click: () => {
-            if (!mainWindow) return
-            const { width, height } = screen.getPrimaryDisplay().workAreaSize
-            mainWindow.setBounds({ x: 0, y: 0, width: Math.floor(width / 2), height })
-          },
+          label: 'View',
+          submenu: [
+            { role: 'zoomIn' as const },
+            { role: 'zoomOut' as const },
+            { role: 'resetZoom' as const },
+            { type: 'separator' as const },
+            {
+              label: 'Toggle Shell Sidebar',
+              accelerator: 'CmdOrCtrl+B',
+              click: () => sendMenuAction('toggle-shell-sidebar'),
+            },
+            {
+              label: 'Toggle Workspace Sidebar',
+              accelerator: 'CmdOrCtrl+Shift+B',
+              click: () => sendMenuAction('toggle-workspace-sidebar'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Focus Active Terminal',
+              accelerator: 'CmdOrCtrl+Shift+F',
+              click: () => sendMenuAction('toggle-focus'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Layout',
+              submenu: [
+                { label: 'Auto', click: () => sendMenuAction('set-layout', 'auto') },
+                { label: '1×1', click: () => sendMenuAction('set-layout', '1x1') },
+                { label: '2×2', click: () => sendMenuAction('set-layout', '2x2') },
+                { label: '1+2', click: () => sendMenuAction('set-layout', '1+2') },
+                { label: '3×3', click: () => sendMenuAction('set-layout', '3x3') },
+              ],
+            },
+          ],
         },
         {
-          label: 'Tile to Right',
-          click: () => {
-            if (!mainWindow) return
-            const { width, height } = screen.getPrimaryDisplay().workAreaSize
-            mainWindow.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height })
-          },
+          label: 'Window',
+          submenu: [
+            { role: 'minimize' as const },
+            { role: 'zoom' as const },
+            {
+              label: 'Fill',
+              click: () => {
+                if (!mainWindow) return
+                const { width, height } = screen.getPrimaryDisplay().workAreaSize
+                mainWindow.setBounds({ x: 0, y: 0, width, height })
+              },
+            },
+            {
+              label: 'Center',
+              click: () => mainWindow?.center(),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Tile to Left',
+              click: () => {
+                if (!mainWindow) return
+                const { width, height } = screen.getPrimaryDisplay().workAreaSize
+                mainWindow.setBounds({ x: 0, y: 0, width: Math.floor(width / 2), height })
+              },
+            },
+            {
+              label: 'Tile to Right',
+              click: () => {
+                if (!mainWindow) return
+                const { width, height } = screen.getPrimaryDisplay().workAreaSize
+                mainWindow.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height })
+              },
+            },
+            { type: 'separator' as const },
+            { role: 'togglefullscreen' as const },
+          ],
         },
-        { type: 'separator' as const },
-        { role: 'togglefullscreen' as const },
-        ...(isMac ? [
-          { type: 'separator' as const },
-          { role: 'front' as const },
-        ] : []),
-      ],
-    },
-    {
-      label: 'Help',
-      submenu: [
         {
-          label: 'Keyboard Shortcuts',
-          accelerator: 'CmdOrCtrl+/',
-          click: () => sendMenuAction('show-shortcuts'),
+          label: 'Help',
+          submenu: [
+            {
+              label: 'Keyboard Shortcuts',
+              accelerator: 'CmdOrCtrl+/',
+              click: () => sendMenuAction('show-shortcuts'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'About AgntSpce',
+              click: () => sendMenuAction('show-about'),
+            },
+          ],
         },
-        { type: 'separator' as const },
-        {
-          label: 'About AgntSpce',
-          click: () => sendMenuAction('show-about'),
-        },
-      ],
-    },
-  ]
+      ]
 
   const menu = Menu.buildFromTemplate(template)
   Menu.setApplicationMenu(menu)
@@ -885,6 +1020,32 @@ ipcMain.handle('window-maximize', () => {
 })
 ipcMain.handle('window-close', () => mainWindow?.close())
 ipcMain.handle('window-is-maximized', () => mainWindow?.isMaximized())
+
+ipcMain.handle('popup-menu', (event, menuName: string, x: number, y: number) => {
+  const menu = Menu.getApplicationMenu()
+  const item = menu?.items.find(i => i.label === menuName)
+  if (item?.submenu) {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const items = item.submenu.items.map(i => {
+      const opts: Electron.MenuItemConstructorOptions = {
+        label: i.label,
+        type: i.type,
+        accelerator: i.accelerator,
+        enabled: i.enabled,
+        visible: i.visible,
+        checked: i.checked,
+        role: i.role,
+        submenu: i.submenu,
+      }
+      if (i.click) {
+        opts.click = (mi, bw, ev) => i.click!(mi, bw, ev)
+      }
+      return opts
+    })
+    const popupMenu = Menu.buildFromTemplate(items)
+    popupMenu.popup({ window: win || undefined, x: Math.round(x), y: Math.round(y) })
+  }
+})
 
 ipcMain.handle('select-directory', async () => {
   const result = await dialog.showOpenDialog({

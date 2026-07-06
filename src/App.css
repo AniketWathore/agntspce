@@ -216,27 +216,44 @@
 
 /* ── Title Bar ──────────────────────────── */
 .title-bar {
-  height: 22px;
+  height: 30px;
   display: flex;
   align-items: center;
   flex-shrink: 0;
   -webkit-app-region: drag;
   background: var(--bg-primary);
+  border-bottom: 1px solid var(--border);
 }
 
-.title-bar-menu-area {
+.title-bar-menus {
   display: flex;
   align-items: center;
   height: 100%;
-  padding-left: 8px;
   -webkit-app-region: no-drag;
 }
 
-.title-bar-app-name {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 500;
-  padding: 0 8px;
+.title-bar-menu-btn {
+  height: 100%;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.title-bar-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.title-bar-menu-btn:active {
+  background: var(--accent-subtle);
+  color: var(--accent);
 }
 
 .title-bar-drag {
