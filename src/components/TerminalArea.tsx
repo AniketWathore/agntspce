@@ -42,6 +42,8 @@ interface Props {
   activeView: string | null
   onViewChange: (view: string | null) => void
   shellOnly?: boolean
+  onTerminalResizerMouseDown?: (e: React.MouseEvent) => void
+  terminalHeight?: number
 }
 
 const AGENT_TYPES = [
@@ -204,6 +206,7 @@ export default function TerminalArea({
   focusMode, agentsList, bottomShellOpen, onToggleShell,
   chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
   pageViews, activeView, onViewChange, shellOnly,
+  onTerminalResizerMouseDown, terminalHeight = 40,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -438,7 +441,10 @@ export default function TerminalArea({
           )}
 
           {bottomShellOpen && (
-            <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : '0 0 50%' }}>
+            <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : `0 0 ${terminalHeight}%` }}>
+              {onTerminalResizerMouseDown && (
+                <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
+              )}
               <div className="bottom-shell-body">
                 <div className="bottom-shell-terminal-area">
                   {shellSessions.length === 0 ? (

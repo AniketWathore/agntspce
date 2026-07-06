@@ -161,16 +161,46 @@ function App() {
   })
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true)
   const appBodyRef = useRef<HTMLDivElement>(null)
-  const [leftWidth, setLeftWidth] = useState(() => Math.round(window.innerWidth * 0.12))
+  const [leftWidth, setLeftWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('agent-workspace-left-width')
+      if (saved) return parseInt(saved, 10)
+    } catch {}
+    return Math.round(window.innerWidth * 0.12)
+  })
   const leftWidthRef = useRef(leftWidth)
-  const [chatWidth, setChatWidth] = useState(() => Math.round(window.innerWidth * 0.20))
+  const [chatWidth, setChatWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('agent-workspace-chat-width')
+      if (saved) return parseInt(saved, 10)
+    } catch {}
+    return Math.round(window.innerWidth * 0.20)
+  })
   const [bottomShellOpen, setBottomShellOpen] = useState(false)
-  const [terminalHeight, setTerminalHeight] = useState(40)
+  const [terminalHeight, setTerminalHeight] = useState(() => {
+    try {
+      const saved = localStorage.getItem('agent-workspace-terminal-height')
+      if (saved) return parseInt(saved, 10)
+    } catch {}
+    return 40
+  })
   const dragging = useRef<'left' | 'right' | 'terminal' | null>(null)
   const closingLeft = useRef(false)
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { leftWidthRef.current = leftWidth }, [leftWidth])
+
+  useEffect(() => {
+    try { localStorage.setItem('agent-workspace-left-width', String(leftWidth)) } catch {}
+  }, [leftWidth])
+
+  useEffect(() => {
+    try { localStorage.setItem('agent-workspace-chat-width', String(chatWidth)) } catch {}
+  }, [chatWidth])
+
+  useEffect(() => {
+    try { localStorage.setItem('agent-workspace-terminal-height', String(terminalHeight)) } catch {}
+  }, [terminalHeight])
 
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
@@ -559,29 +589,32 @@ function App() {
   function onResizerMouseDown(side: 'left' | 'right') {
     return (e: React.MouseEvent) => {
       e.preventDefault()
+      e.stopPropagation()
       dragging.current = side
       const startX = e.clientX
       const startLeft = leftWidth
       const startChat = chatWidth
+
+      const leftMin = 140
+      const leftMax = Math.round((appBodyRef.current?.getBoundingClientRect().width || window.innerWidth) * 0.30)
 
       function onMove(ev: MouseEvent) {
         if (!appBodyRef.current) return
         const bodyRect = appBodyRef.current.getBoundingClientRect()
         const totalW = bodyRect.width
         const chatMin = Math.round(totalW * 0.10)
-        const leftMax = Math.round(totalW * 0.25)
-        const chatMax = Math.round(totalW * 0.20)
+        const chatMax = Math.round(totalW * 0.25)
 
         if (dragging.current === 'left') {
           const dx = ev.clientX - startX
-          let newW = Math.max(20, startLeft + dx)
+          let newW = Math.max(leftMin, startLeft + dx)
           if (chatSidebarOpen) {
             newW = Math.min(newW, leftMax, totalW - chatWidth - 200)
           } else {
             newW = Math.min(newW, leftMax)
           }
 
-          const collapseThreshold = Math.round(totalW * 0.05)
+          const collapseThreshold = Math.round(totalW * 0.04)
 
           if (newW < collapseThreshold) {
             newW = Math.max(newW, collapseThreshold)
@@ -634,17 +667,20 @@ function App() {
 
   const onTerminalResizerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     dragging.current = 'terminal'
     const startY = e.clientY
     const startHeight = terminalHeight
     const mainContent = e.currentTarget.closest('.main-content')
     const mainHeight = mainContent ? mainContent.getBoundingClientRect().height : window.innerHeight
+    const minHeightPct = Math.max(8, Math.round((120 / mainHeight) * 100))
+    const maxHeightPct = Math.min(85, Math.round((mainHeight * 0.75 / mainHeight) * 100))
 
     function onMove(ev: MouseEvent) {
       if (dragging.current !== 'terminal') return
       const dy = startY - ev.clientY
-      const newHeight = Math.max(10, Math.min(80, startHeight + (dy / mainHeight) * 100))
-      setTerminalHeight(newHeight)
+      const newHeight = Math.max(minHeightPct, Math.min(maxHeightPct, startHeight + (dy / mainHeight) * 100))
+      setTerminalHeight(Math.round(newHeight))
     }
 
     function onUp() {
@@ -918,6 +954,7 @@ function App() {
                   setSelectedFilePath(id)
                 }}
                 onCloseFile={closeFile}
+                onNewAssistant={() => { handleToggleChatSidebar() }}
               />
               {activeFile && (
                 <CodeEditor
@@ -962,6 +999,8 @@ function App() {
             shellOnly={viewMode === 'files'}
             onToggleChatSidebar={handleToggleChatSidebar}
             onTerminalOutput={onTerminalOutput}
+            onTerminalResizerMouseDown={onTerminalResizerMouseDown}
+            terminalHeight={terminalHeight}
             pageViews={[
               { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
                 <Dashboard

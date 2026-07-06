@@ -1080,6 +1080,34 @@
   overflow-x: auto;
 }
 
+.editor-tabs-actions {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  flex-shrink: 0;
+  border-left: 1px solid #3C3C3C;
+}
+
+.editor-tab-assistant-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid #3C3C3C;
+  border-radius: 4px;
+  color: #858585;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.editor-tab-assistant-btn:hover {
+  background: #3C3C3C;
+  color: #D4D4D4;
+  border-color: #4A4A4A;
+}
+
 .editor-tab {
   display: flex;
   align-items: center;
@@ -3687,9 +3715,24 @@
   margin: 0 -1px;
 }
 
-.resizer:hover,
+.resizer::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 0;
+  bottom: 0;
+  background: transparent;
+  transition: background 0.1s;
+}
+
+.resizer:hover::after,
+.resizer:active::after {
+  background: var(--accent);
+}
+
 .resizer:active {
-  background: #22C55E;
+  background: transparent;
 }
 
 /* ── Chat Sidebar ───────────────────────── */
@@ -3931,6 +3974,30 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 80px;
+}
+
+.bottom-shell .terminal-resizer {
+  height: 4px;
+  background: transparent;
+  cursor: ns-resize;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.bottom-shell .terminal-resizer::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 1px;
+  height: 2px;
+  background: var(--border);
+  transition: background 0.1s;
+}
+
+.bottom-shell .terminal-resizer:hover::after {
+  background: var(--accent);
 }
 
 .bottom-shell-header {
