@@ -127,6 +127,76 @@
   --terminal-bright-white: #E8E8E8;
 }
 
+/* ── Animation System ───────────────────── */
+:root {
+  --anim-duration: 150ms;
+  --anim-duration-fast: 100ms;
+  --anim-duration-normal: 200ms;
+  --anim-duration-slow: 250ms;
+  --anim-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --anim-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --anim-scale-press: 0.97;
+  --anim-scale-hover: 1.02;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --anim-duration: 0ms;
+    --anim-duration-fast: 0ms;
+    --anim-duration-normal: 0ms;
+    --anim-duration-slow: 0ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ── Global Button Animation ────────────── */
+.btn-animate {
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    border-color var(--anim-duration) var(--anim-ease),
+    box-shadow var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
+}
+
+.btn-animate:hover {
+  transform: scale(var(--anim-scale-hover));
+}
+
+.btn-animate:active {
+  transform: scale(var(--anim-scale-press));
+  transition-duration: 50ms;
+}
+
 /* ── App Layout ─────────────────────────── */
 .app {
   width: 100vw;
@@ -191,7 +261,9 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease);
 }
 
 .title-bar-win-btn:hover {
@@ -217,12 +289,21 @@
   cursor: pointer;
   position: relative;
   -webkit-app-region: no-drag;
-  transition: all 0.15s;
+  transition:
+    color var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .title-bar-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+  transform: scale(1.1);
+}
+
+.title-bar-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .title-bar-btn.active {
@@ -257,6 +338,7 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  animation: fadeIn var(--anim-duration-normal) var(--anim-ease);
 }
 
 .modal {
@@ -266,6 +348,7 @@
   padding: 20px;
   min-width: 360px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: scaleIn var(--anim-duration-normal) var(--anim-ease);
 }
 
 .modal-title {
@@ -306,7 +389,20 @@
   font-size: 12px;
   cursor: pointer;
   font-weight: 500;
-  transition: all 0.12s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease),
+    box-shadow var(--anim-duration) var(--anim-ease);
+}
+
+.modal-btn:hover {
+  transform: scale(var(--anim-scale-hover));
+}
+
+.modal-btn:active {
+  transform: scale(var(--anim-scale-press));
+  transition-duration: 50ms;
 }
 
 .modal-btn-cancel {
@@ -328,6 +424,7 @@
 
 .modal-btn-ok:hover {
   background: var(--accent-hover);
+  box-shadow: 0 0 12px var(--accent-bg);
 }
 
 /* ── Activity Bar ───────────────────────── */
@@ -392,10 +489,23 @@
   border: none;
   color: #858585;
   cursor: pointer;
-  transition: color 0.15s;
+  transition:
+    color var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    border-color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
   position: relative;
   padding: 0;
   border-left: 3px solid transparent;
+}
+
+.activity-bar-btn:hover {
+  transform: scale(1.05);
+}
+
+.activity-bar-btn:active {
+  transform: scale(0.95);
+  transition-duration: 50ms;
 }
 
 .activity-bar-icon {
@@ -487,13 +597,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.12s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
   line-height: 1;
 }
 
 .add-btn:hover {
   background: #2A2D2E;
   color: #FFFFFF;
+  transform: scale(1.1);
+}
+
+.add-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .sidebar-stats {
@@ -517,7 +636,8 @@
 .workspace-item {
   padding: 7px 12px 7px 16px;
   cursor: pointer;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease);
   position: relative;
   display: flex;
   align-items: center;
@@ -529,6 +649,11 @@
 
 .workspace-item:hover {
   background: #2A2D2E;
+}
+
+.workspace-item:active {
+  background: #323537;
+  transition-duration: 50ms;
 }
 
 .workspace-item.active {
@@ -593,13 +718,22 @@
   height: 20px;
   display: flex;
   align-items: center;
-  transition: all 0.1s;
+  transition:
+    opacity var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .dots-btn:hover {
   opacity: 1;
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.dots-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .workspace-menu {
@@ -616,6 +750,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  animation: slideDown var(--anim-duration-fast) var(--anim-ease);
 }
 
 .workspace-menu-item {
@@ -629,13 +764,21 @@
   font-size: 12px;
   cursor: pointer;
   border-radius: 4px;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
   white-space: nowrap;
   font-family: inherit;
 }
 
 .workspace-menu-item:hover {
   background: #37373D;
+}
+
+.workspace-menu-item:active {
+  transform: scale(0.98);
+  transition-duration: 50ms;
 }
 
 .workspace-menu-item.danger:hover {
@@ -658,13 +801,22 @@
   border-radius: 4px;
   opacity: 0.6;
   color: var(--text-muted);
-  transition: all 0.1s;
+  transition:
+    opacity var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .action-btn:hover {
   opacity: 1;
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.action-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .action-btn.danger:hover {
@@ -687,12 +839,19 @@
   cursor: pointer;
   user-select: none;
   border-radius: 4px;
-  transition: color 0.1s;
+  transition:
+    color var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease);
 }
 
 .sidebar-section-header:hover {
   color: var(--text-secondary);
   background: var(--bg-elevated);
+}
+
+.sidebar-section-header:active {
+  background: var(--bg-hover);
+  transition-duration: 50ms;
 }
 
 .trash-icon {
@@ -733,7 +892,9 @@
   padding: 0 4px 0 0;
   cursor: pointer;
   user-select: none;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    height var(--anim-duration-normal) var(--anim-ease);
 }
 
 .workspace-tree-item.active .workspace-tree-row {
@@ -742,6 +903,11 @@
 
 .workspace-tree-row:hover {
   background: rgba(255,255,255,0.05);
+}
+
+.workspace-tree-row:active {
+  background: rgba(255,255,255,0.08);
+  transition-duration: 50ms;
 }
 
 .workspace-tree-arrow {
@@ -753,6 +919,9 @@
   flex-shrink: 0;
   cursor: pointer;
   color: #CCCCCC;
+  transition:
+    transform var(--anim-duration-normal) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease);
 }
 
 .workspace-tree-item.active .workspace-tree-arrow {
@@ -761,6 +930,10 @@
 
 .workspace-tree-arrow:hover {
   background: rgba(255,255,255,0.08);
+}
+
+.workspace-tree-arrow.expanded {
+  transform: rotate(90deg);
 }
 
 .workspace-tree-name {
@@ -802,11 +975,21 @@
   cursor: pointer;
   border-radius: 3px;
   font-size: 14px;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .workspace-tree-dots:hover {
   background: rgba(255,255,255,0.08);
   color: #FFFFFF;
+  transform: scale(1.1);
+}
+
+.workspace-tree-dots:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .workspace-tree-menu {
@@ -820,6 +1003,7 @@
   padding: 4px 0;
   min-width: 120px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  animation: slideDown var(--anim-duration-fast) var(--anim-ease);
 }
 
 .workspace-tree-menu-item {
@@ -878,12 +1062,19 @@
   user-select: none;
   font-size: 11px;
   color: #858585;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease);
 }
 
 .workspace-trash-header:hover {
   background: rgba(255,255,255,0.05);
   color: #CCCCCC;
+}
+
+.workspace-trash-header:active {
+  background: rgba(255,255,255,0.08);
+  transition-duration: 50ms;
 }
 
 .workspace-trash-item {
@@ -943,7 +1134,9 @@
   padding: 3px 8px;
   cursor: pointer;
   user-select: none;
-  transition: background 0.08s;
+  transition:
+    background var(--anim-duration-fast) var(--anim-ease),
+    color var(--anim-duration-fast) var(--anim-ease);
   font-size: 13px;
   color: #CCCCCC;
   min-height: 24px;
@@ -951,6 +1144,11 @@
 
 .file-tree-item:hover {
   background: rgba(255,255,255,0.05);
+}
+
+.file-tree-item:active {
+  background: rgba(255,255,255,0.08);
+  transition-duration: 50ms;
 }
 
 .file-tree-item.selected {
@@ -974,6 +1172,7 @@
   border-radius: 6px;
   padding: 4px 0;
   box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  animation: scaleIn var(--anim-duration-fast) var(--anim-ease);
 }
 
 .file-context-menu-item {
@@ -987,13 +1186,20 @@
   font-size: 12px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease);
   font-family: inherit;
 }
 
 .file-context-menu-item:hover {
   background: rgba(255,255,255,0.08);
   color: #FFFFFF;
+}
+
+.file-context-menu-item:active {
+  background: rgba(255,255,255,0.12);
+  transition-duration: 50ms;
 }
 
 .file-context-menu-separator {
@@ -1121,13 +1327,23 @@
   border-radius: 4px;
   color: #858585;
   cursor: pointer;
-  transition: all 0.12s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    border-color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .editor-tab-assistant-btn:hover {
   background: #3C3C3C;
   color: #D4D4D4;
   border-color: #4A4A4A;
+  transform: scale(1.05);
+}
+
+.editor-tab-assistant-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .editor-tab {
@@ -1142,7 +1358,9 @@
   font-size: 12px;
   color: #858585;
   border-right: 1px solid #252526;
-  transition: background 0.1s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease);
   min-width: 0;
   position: relative;
 }
@@ -1191,7 +1409,11 @@
   cursor: pointer;
   border-radius: 3px;
   opacity: 0;
-  transition: all 0.1s;
+  transition:
+    opacity var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
   flex-shrink: 0;
 }
 
@@ -1202,6 +1424,12 @@
 .editor-tab-close:hover {
   background: rgba(255,255,255,0.15);
   color: #FFFFFF;
+  transform: scale(1.1);
+}
+
+.editor-tab-close:active {
+  transform: scale(0.85);
+  transition-duration: 50ms;
 }
 
 /* ── Code Editor ────────────────────────── */
@@ -1360,12 +1588,19 @@
   border-right: 1px solid #3C3C3C;
   background: #2D2D2D;
   min-width: 0;
-  transition: none;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease);
 }
 
 .tab-item:hover {
   background: #333333;
   color: #969696;
+}
+
+.tab-item:active {
+  background: #3A3A3A;
+  transition-duration: 50ms;
 }
 
 .tab-item.active {
@@ -1382,6 +1617,7 @@
   right: 0;
   height: 1px;
   background: #22C55E;
+  animation: fadeIn var(--anim-duration-normal) var(--anim-ease);
 }
 
 .tab-icon {
@@ -1485,12 +1721,21 @@
   font-size: 13px;
   padding: 2px 6px;
   border-radius: 4px;
-  transition: all 0.1s;
+  transition:
+    color var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .terminal-restart-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+  transform: scale(1.1);
+}
+
+.terminal-restart-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .terminal-close-btn {
@@ -1502,12 +1747,21 @@
   padding: 2px 6px;
   border-radius: 4px;
   margin-left: 2px;
-  transition: all 0.1s;
+  transition:
+    color var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .terminal-close-btn:hover {
   color: var(--danger);
   background: var(--danger-bg);
+  transform: scale(1.1);
+}
+
+.terminal-close-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .terminal-body {
@@ -1570,12 +1824,23 @@
   cursor: pointer;
   white-space: nowrap;
   font-weight: 500;
-  transition: all 0.15s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    border-color var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease),
+    box-shadow var(--anim-duration) var(--anim-ease);
 }
 
 .new-terminal-btn:hover {
   background: var(--bg-hover);
   border-color: var(--border-light);
+  transform: scale(var(--anim-scale-hover));
+}
+
+.new-terminal-btn:active {
+  transform: scale(var(--anim-scale-press));
+  transition-duration: 50ms;
 }
 
 .new-terminal-btn.secondary {
@@ -1601,24 +1866,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s;
-}
-
-.shell-btn-icon {
-  width: 16px;
-  height: 16px;
-  object-fit: contain;
-  pointer-events: none;
-}
-
-[data-theme="dark"] .shell-btn-icon,
-[data-theme="dark"] img[src*="/img/dashboard.png"] {
-  filter: brightness(0) invert(1);
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    border-color var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .shell-btn:hover, .shell-btn.active {
   color: var(--text-primary);
   border-color: var(--border-light);
+}
+
+.shell-btn:hover {
+  transform: scale(var(--anim-scale-hover));
+}
+
+.shell-btn:active {
+  transform: scale(var(--anim-scale-press));
+  transition-duration: 50ms;
 }
 
 .shell-btn.active {
@@ -1641,6 +1907,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 160px;
+  animation: slideDown var(--anim-duration-fast) var(--anim-ease);
 }
 
 .agent-dropdown-item {
@@ -1650,11 +1917,19 @@
   padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .agent-dropdown-item:hover {
   background: var(--bg-elevated);
+  transform: translateX(2px);
+}
+
+.agent-dropdown-item:active {
+  transform: scale(0.98);
+  transition-duration: 50ms;
 }
 
 .agent-dropdown-color {
@@ -2038,7 +2313,9 @@
   background: var(--bg-elevated);
   border-radius: 11px;
   border: 1px solid var(--border);
-  transition: all 0.2s;
+  transition:
+    background var(--anim-duration-normal) var(--anim-ease),
+    border-color var(--anim-duration-normal) var(--anim-ease);
 }
 
 .settings-toggle-slider::before {
@@ -2050,7 +2327,9 @@
   height: 16px;
   background: var(--text-muted);
   border-radius: 50%;
-  transition: all 0.2s;
+  transition:
+    transform var(--anim-duration-normal) var(--anim-ease-bounce),
+    background var(--anim-duration-normal) var(--anim-ease);
 }
 
 .settings-toggle input:checked + .settings-toggle-slider {
@@ -4053,12 +4332,21 @@
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
-  transition: all 0.12s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
 }
 
 .shell-header-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+  transform: scale(1.1);
+}
+
+.shell-header-btn:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .shell-header-btn.active {
@@ -4119,13 +4407,20 @@
   font-size: 11px;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
-  transition: background 0.12s;
+  transition:
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease);
   user-select: none;
 }
 
 .shell-tab-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.shell-tab-item:active {
+  background: var(--bg-elevated);
+  transition-duration: 50ms;
 }
 
 .shell-tab-item.active {
@@ -4163,7 +4458,11 @@
   font-size: 10px;
   line-height: 1;
   opacity: 0;
-  transition: opacity 0.12s, background 0.12s;
+  transition:
+    opacity var(--anim-duration) var(--anim-ease),
+    background var(--anim-duration) var(--anim-ease),
+    color var(--anim-duration) var(--anim-ease),
+    transform var(--anim-duration-fast) var(--anim-ease);
   flex-shrink: 0;
 }
 
@@ -4175,6 +4474,12 @@
   opacity: 1 !important;
   background: var(--bg-hover);
   color: var(--danger);
+  transform: scale(1.1);
+}
+
+.shell-tab-item-close:active {
+  transform: scale(0.9);
+  transition-duration: 50ms;
 }
 
 .shell-tab-item.active .shell-tab-item-close {
