@@ -68,9 +68,12 @@ export class GitHelper {
 
   private isValidPath(p: string): boolean {
     const normalized = path.resolve(p)
-    const prefixes = [this.basePath, '/tmp']
-    const resolvedPrefixes = prefixes.filter(Boolean).map(p => path.resolve(p))
-    return resolvedPrefixes.some(prefix => normalized === prefix || normalized.startsWith(prefix + path.sep))
+    if (!normalized) return false
+    try {
+      if (!fs.existsSync(normalized)) return false
+      if (!fs.statSync(normalized).isDirectory()) return false
+    } catch { return false }
+    return true
   }
 
   private getCachedBranch(p: string): string | null {
