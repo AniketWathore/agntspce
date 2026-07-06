@@ -57,6 +57,17 @@ interface UseSocketReturn {
   getGitCommitFiles: (worktreePath: string, commitHash: string) => Promise<any>
   getGitWorkingTreeFiles: (worktreePath: string) => Promise<any>
   getGitFileDiff: (worktreePath: string, filePath: string, base?: string, head?: string) => Promise<any>
+  getGitFullStatus: (worktreePath: string) => Promise<any>
+  gitRevertFile: (worktreePath: string, filePath: string) => Promise<any>
+  gitStageFile: (worktreePath: string, filePath: string) => Promise<any>
+  gitUnstageFile: (worktreePath: string, filePath: string) => Promise<any>
+  gitStageAll: (worktreePath: string) => Promise<any>
+  gitUnstageAll: (worktreePath: string) => Promise<any>
+  gitCommit: (worktreePath: string, message: string) => Promise<any>
+  gitPull: (worktreePath: string) => Promise<any>
+  gitPush: (worktreePath: string) => Promise<any>
+  gitFetch: (worktreePath: string) => Promise<any>
+  gitDiscardAll: (worktreePath: string) => Promise<any>
   onSessionUnhealthy: (cb: (data: { sessionId: string, reason: string, usage?: any }) => void) => () => void
   setUserSettings: (settings: { autoRestartSessions?: boolean }) => void
   getWorkspaceTree: (worktreePath: string) => Promise<any>
@@ -456,6 +467,94 @@ export function useSocket(): UseSocketReturn {
     })
   }, [])
 
+  const getGitFullStatus = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('get-git-full-status', { worktreePath }, (res: any) => {
+        resolve(res?.status ?? null)
+      })
+    })
+  }, [])
+
+  const gitRevertFile = useCallback((worktreePath: string, filePath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-revert-file', { worktreePath, filePath }, (res: any) => {
+        resolve(res?.ok === true)
+      })
+    })
+  }, [])
+
+  const gitStageFile = useCallback((worktreePath: string, filePath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-stage-file', { worktreePath, filePath }, (res: any) => {
+        resolve(res?.ok === true)
+      })
+    })
+  }, [])
+
+  const gitUnstageFile = useCallback((worktreePath: string, filePath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-unstage-file', { worktreePath, filePath }, (res: any) => {
+        resolve(res?.ok === true)
+      })
+    })
+  }, [])
+
+  const gitStageAll = useCallback((worktreePath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-stage-all', { worktreePath }, (res: any) => {
+        resolve(res?.ok === true)
+      })
+    })
+  }, [])
+
+  const gitUnstageAll = useCallback((worktreePath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-unstage-all', { worktreePath }, (res: any) => {
+        resolve(res?.ok === true)
+      })
+    })
+  }, [])
+
+  const gitCommit = useCallback((worktreePath: string, message: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-commit', { worktreePath, message }, (res: any) => {
+        resolve(res ?? { ok: false, error: 'no response' })
+      })
+    })
+  }, [])
+
+  const gitPull = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-pull', { worktreePath }, (res: any) => {
+        resolve(res ?? { ok: false, error: 'no response' })
+      })
+    })
+  }, [])
+
+  const gitPush = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-push', { worktreePath }, (res: any) => {
+        resolve(res ?? { ok: false, error: 'no response' })
+      })
+    })
+  }, [])
+
+  const gitFetch = useCallback((worktreePath: string): Promise<any> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-fetch', { worktreePath }, (res: any) => {
+        resolve(res ?? { ok: false, error: 'no response' })
+      })
+    })
+  }, [])
+
+  const gitDiscardAll = useCallback((worktreePath: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('git-discard-all', { worktreePath }, (res: any) => {
+        resolve(res?.ok === true)
+      })
+    })
+  }, [])
+
   const onSessionUnhealthy = useCallback((cb: (data: { sessionId: string, reason: string, usage?: any }) => void) => {
     sessionUnhealthyCbs.current.push(cb)
     return () => {
@@ -618,6 +717,17 @@ export function useSocket(): UseSocketReturn {
     getGitCommitFiles,
     getGitWorkingTreeFiles,
     getGitFileDiff,
+    getGitFullStatus,
+    gitRevertFile,
+    gitStageFile,
+    gitUnstageFile,
+    gitStageAll,
+    gitUnstageAll,
+    gitCommit,
+    gitPull,
+    gitPush,
+    gitFetch,
+    gitDiscardAll,
     onSessionUnhealthy,
     setUserSettings,
     getWorkspaceTree,

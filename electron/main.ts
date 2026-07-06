@@ -724,6 +724,105 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on('get-git-full-status', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const status = await gitHelper.getFullStatus(worktreePath)
+      callback({ ok: true, status })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-revert-file', async ({ worktreePath, filePath }: { worktreePath: string, filePath: string }, callback?: Function) => {
+    try {
+      const ok = await gitHelper.revertFile(worktreePath, filePath)
+      callback({ ok })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-stage-file', async ({ worktreePath, filePath }: { worktreePath: string, filePath: string }, callback?: Function) => {
+    try {
+      const ok = await gitHelper.stageFile(worktreePath, filePath)
+      callback({ ok })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-unstage-file', async ({ worktreePath, filePath }: { worktreePath: string, filePath: string }, callback?: Function) => {
+    try {
+      const ok = await gitHelper.unstageFile(worktreePath, filePath)
+      callback({ ok })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-stage-all', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const ok = await gitHelper.stageAll(worktreePath)
+      callback({ ok })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-unstage-all', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const ok = await gitHelper.unstageAll(worktreePath)
+      callback({ ok })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-commit', async ({ worktreePath, message }: { worktreePath: string, message: string }, callback?: Function) => {
+    try {
+      const result = await gitHelper.commit(worktreePath, message)
+      callback(result)
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-pull', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const result = await gitHelper.pull(worktreePath)
+      callback(result)
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-push', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const result = await gitHelper.push(worktreePath)
+      callback(result)
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-fetch', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const result = await gitHelper.fetch(worktreePath)
+      callback(result)
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
+  socket.on('git-discard-all', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
+    try {
+      const ok = await gitHelper.discardAll(worktreePath)
+      callback({ ok })
+    } catch (error: any) {
+      if (callback) callback({ ok: false, error: error.message })
+    }
+  })
+
   socket.on('add-worktree', async ({ workspaceId }, callback?: Function) => {
     try {
       const ws = workspaceManager.getWorkspace(workspaceId)

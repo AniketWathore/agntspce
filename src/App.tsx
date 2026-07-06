@@ -19,7 +19,7 @@ import { CodeEditor } from './components/CodeEditor'
 import type { Notification } from './components/NotificationPanel'
 
 import { useSocket } from './hooks/useSocket'
-import PRPanel from './components/PRPanel'
+import GitChangesPanel from './components/GitChangesPanel'
 import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenFile } from './types'
 import '@vscode/codicons/dist/codicon.css'
 import './App.css'
@@ -115,12 +115,13 @@ function App() {
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
     createWorkspaceFromGit,
-    getSessionHistory, getGitLog, getGitDiff, getGitWorkingTreeDiff, getGitCommitFiles, getGitWorkingTreeFiles, getGitFileDiff,
+    getSessionHistory, getGitFileDiff,
+    getGitFullStatus, gitRevertFile, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit, gitPull, gitPush, gitFetch, gitDiscardAll,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
     filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
-    onChatStreamChunk, onChatResponse, onChatError, onChatModels, onChatHistory,
+    onChatStreamChunk, onChatResponse, onChatError,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -133,6 +134,7 @@ function App() {
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
   const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | null>(null)
+  const [gitChangeCount, setGitChangeCount] = useState(0)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -355,6 +357,18 @@ function App() {
   }
 
   const wsPath = activeWorkspace?.repository?.path
+
+  useEffect(() => {
+    if (!wsPath) { setGitChangeCount(0); return }
+    let active = true
+    const poll = async () => {
+      const s = await getGitFullStatus(wsPath)
+      if (active) setGitChangeCount(s?.total ?? 0)
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => { active = false; clearInterval(id) }
+  }, [wsPath, getGitFullStatus])
 
   const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi'])
   const agentSessions = useMemo(
@@ -876,9 +890,12 @@ function App() {
               <button
                 className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
                 onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
-                title="Git Review"
+                title="Source Control"
               >
                 <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
+                {gitChangeCount > 0 && (
+                  <span className="activity-bar-badge">{gitChangeCount > 99 ? '99+' : gitChangeCount}</span>
+                )}
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
@@ -1012,16 +1029,21 @@ function App() {
                 />
               )},
               { id: 'git-review', label: 'Git Review', icon: '⑂', render: () => (
-                <PRPanel
+                <GitChangesPanel
                   worktreePath={activeWorkspace?.repository?.path || ''}
                   onClose={() => setActiveView(null)}
-                  onSelectDiff={() => {}}
-                  fetchLog={getGitLog}
-                  fetchDiff={getGitDiff}
-                  fetchWorkingTreeDiff={getGitWorkingTreeDiff}
-                  fetchCommitFiles={getGitCommitFiles}
-                  fetchWorkingTreeFiles={getGitWorkingTreeFiles}
-                  fetchFileDiff={getGitFileDiff}
+                  getGitFullStatus={getGitFullStatus}
+                  getGitFileDiff={getGitFileDiff}
+                  gitRevertFile={gitRevertFile}
+                  gitStageFile={gitStageFile}
+                  gitUnstageFile={gitUnstageFile}
+                  gitStageAll={gitStageAll}
+                  gitUnstageAll={gitUnstageAll}
+                  gitCommit={gitCommit}
+                  gitPull={gitPull}
+                  gitPush={gitPush}
+                  gitFetch={gitFetch}
+                  gitDiscardAll={gitDiscardAll}
                 />
               )},
               { id: 'output-filter', label: 'Filter', icon: '◈', render: () => (
