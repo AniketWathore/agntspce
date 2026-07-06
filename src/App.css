@@ -1021,6 +1021,28 @@
   min-height: 0;
 }
 
+.editor-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1E1E1E;
+}
+
+.editor-empty-state-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #808080;
+  font-size: 14px;
+}
+
+.editor-empty-hint {
+  font-size: 12px;
+  color: #6E6E6E;
+}
+
 .main-content.file-viewer .terminal-area-wrapper {
   height: var(--terminal-height, 40%);
   min-height: 80px;

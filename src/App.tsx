@@ -943,36 +943,48 @@ function App() {
           )}
         </div>
         {workspaceSidebarOpen && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
-        <main className={`main-content${viewMode === 'files' && openFiles.length > 0 ? ' file-viewer' : ''}`}>
-          {viewMode === 'files' && openFiles.length > 0 && (
+        <main className={`main-content${viewMode === 'files' ? ' file-viewer' : ''}`}>
+          {viewMode === 'files' && (
             <div className="editor-area">
-              <EditorTabs
-                openFiles={openFiles}
-                activeFileId={activeFileId}
-                onSelectFile={(id) => {
-                  setActiveFileId(id)
-                  setSelectedFilePath(id)
-                }}
-                onCloseFile={closeFile}
-                onNewAssistant={() => { handleToggleChatSidebar() }}
-              />
-              {activeFile && (
-                <CodeEditor
-                  key={activeFile.id + (activeFileContent ? '' : '-empty')}
-                  filePath={activeFile.filePath}
-                  content={activeFileContent}
-                  language={activeFile.language}
-                  isDirty={isActiveFileDirty}
-                  theme={theme}
-                  scrollPosition={editorScrollPositions[activeFile.id] || null}
-                  onContentChange={handleFileContentChange}
-                  onSave={handleSaveFile}
-                  onScrollChange={handleEditorScrollChange}
-                />
+              {openFiles.length > 0 ? (
+                <>
+                  <EditorTabs
+                    openFiles={openFiles}
+                    activeFileId={activeFileId}
+                    onSelectFile={(id) => {
+                      setActiveFileId(id)
+                      setSelectedFilePath(id)
+                    }}
+                    onCloseFile={closeFile}
+                    onNewAssistant={() => { handleToggleChatSidebar() }}
+                  />
+                  {activeFile && (
+                    <CodeEditor
+                      key={activeFile.id + (activeFileContent ? '' : '-empty')}
+                      filePath={activeFile.filePath}
+                      content={activeFileContent}
+                      language={activeFile.language}
+                      isDirty={isActiveFileDirty}
+                      theme={theme}
+                      scrollPosition={editorScrollPositions[activeFile.id] || null}
+                      onContentChange={handleFileContentChange}
+                      onSave={handleSaveFile}
+                      onScrollChange={handleEditorScrollChange}
+                    />
+                  )}
+                </>
+              ) : (
+                <div className="editor-empty-state">
+                  <div className="editor-empty-state-content">
+                    <i className="codicon codicon-file" style={{ fontSize: 48, opacity: 0.3 }}></i>
+                    <p>No file open</p>
+                    <p className="editor-empty-hint">Select a file from the explorer to start editing</p>
+                  </div>
+                </div>
               )}
             </div>
           )}
-          {viewMode === 'files' && openFiles.length > 0 && bottomShellOpen && (
+          {viewMode === 'files' && bottomShellOpen && (
             <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
           )}
           <TerminalArea
