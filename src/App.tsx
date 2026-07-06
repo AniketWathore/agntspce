@@ -14,11 +14,9 @@ import TitleBar from './components/TitleBar'
 import OutputFilterDebug from './components/OutputFilterDebug'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
-import HistoryPanel from './components/HistoryPanel'
 import { EditorTabs } from './components/EditorTabs'
 import { CodeEditor } from './components/CodeEditor'
 import type { Notification } from './components/NotificationPanel'
-import type { HistoryEntry } from './components/HistoryPanel'
 
 import { useSocket } from './hooks/useSocket'
 import PRPanel from './components/PRPanel'
@@ -141,7 +139,6 @@ function App() {
   const [createWorkspaceModalOpen, setCreateWorkspaceModalOpen] = useState(false)
   const [commanderOpen, setCommanderOpen] = useState(false)
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
-  const [historyPanelOpen, setHistoryPanelOpen] = useState(false)
 
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([])
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
@@ -153,7 +150,6 @@ function App() {
   const [viewMode, setViewMode] = useState<'agents' | 'files'>('agents')
 
   const [notifications, setNotifications] = useState<Notification[]>([])
-  const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
   const [fontSize, setFontSize] = useState(() => {
     try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
   })
@@ -400,11 +396,6 @@ function App() {
     setNotifications([])
   }
 
-  function handleRestoreHistory(entry: HistoryEntry) {
-    createRawSession(entry.type, entry.worktreeId !== 'default' ? undefined : undefined)
-    setHistoryPanelOpen(false)
-  }
-
   const commanderCommands = useMemo(() => [
     { id: 'new-agent', category: 'Terminals', label: 'New Agent Session', description: 'Create a new AI agent terminal', shortcut: '⌘⇧A', action: () => { createRawSession('claude') } },
     { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', shortcut: '⌘⇧S', action: () => { handleNewShell() } },
@@ -415,10 +406,8 @@ function App() {
     { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', action: () => { handleToggleBottomShell() } },
     { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', action: () => { setActiveView('dashboard') } },
     { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', action: () => { setActiveView('settings') } },
-    { id: 'show-history', category: 'View', label: 'Show Session History', description: 'View past sessions', action: () => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) } },
     { id: 'clear-notifications', category: 'Notifications', label: 'Clear Notifications', description: 'Dismiss all notifications', action: () => { dismissAllNotifications() } },
-  ], [createRawSession, handleNewShell, setFocusMode, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, getSessionHistory, setSessionHistory])
-
+  ], [createRawSession, handleNewShell, setFocusMode, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView])
 
   function handleSelectWorkspace(id: string) {
     switchWorkspace(id)
@@ -878,13 +867,6 @@ function App() {
                 <i className="codicon codicon-dashboard" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className="activity-bar-btn"
-                onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
-                title="Session History"
-              >
-                <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
-              </button>
-              <button
                 className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
                 onClick={() => setActiveView(prev => prev === 'output-filter' ? null : 'output-filter')}
                 title="Output Filter Debug"
@@ -1113,13 +1095,6 @@ function App() {
           onDismiss={dismissNotification}
           onDismissAll={dismissAllNotifications}
           onClose={() => setNotificationPanelOpen(false)}
-        />
-      )}
-      {historyPanelOpen && (
-        <HistoryPanel
-          history={sessionHistory}
-          onRestore={handleRestoreHistory}
-          onClose={() => setHistoryPanelOpen(false)}
         />
       )}
       <StatusBar

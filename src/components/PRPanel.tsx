@@ -29,7 +29,7 @@ interface Props {
   fetchFileDiff: (path: string, filePath: string, base?: string, head?: string) => Promise<string | null>
 }
 
-type TabId = 'working' | 'commits' | 'overall'
+type TabId = 'working' | 'commits'
 
 export default function PRPanel({
   worktreePath, onClose, fetchLog,
@@ -154,9 +154,6 @@ export default function PRPanel({
             <button className={`pr-tab ${tab === 'commits' ? 'active' : ''}`} onClick={() => handleTabChange('commits')}>
               Commits
             </button>
-            <button className={`pr-tab ${tab === 'overall' ? 'active' : ''}`} onClick={() => handleTabChange('overall')}>
-              Overall
-            </button>
           </div>
           <button className="pr-close-btn" onClick={onClose} title="Close">
             <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
@@ -248,14 +245,6 @@ export default function PRPanel({
                     ))
                   )}
                 </div>
-              </div>
-            )}
-            {tab === 'overall' && (
-              <div className="scm-section">
-                <div className="scm-section-header">
-                  <span>All Changes</span>
-                </div>
-                <div className="scm-empty">Select a commit from Commits tab to see overall file changes per commit.</div>
               </div>
             )}
           </div>

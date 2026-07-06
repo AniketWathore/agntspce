@@ -972,6 +972,7 @@
 .workspace-tree-actions {
   display: flex;
   align-items: center;
+  position: relative;
   opacity: 0;
   transition: opacity 0.1s;
 }
