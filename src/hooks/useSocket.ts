@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CavemanStats, CavemanAggregateStats, CavemanEvent } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -40,6 +40,13 @@ interface UseSocketReturn {
   filterStats: FilterStats
   filterHistory: FilterEvent[]
   requestFilterStats: () => void
+  toggleCaveman: (sessionId: string, enabled: boolean, level?: string) => void
+  onCavemanEvent: (cb: (data: { sessionId: string, event: CavemanEvent }) => void) => () => void
+  cavemanStates: Record<string, CavemanStats>
+  cavemanAggregateStats: CavemanAggregateStats
+  cavemanLiveEvents: { sessionId: string, event: CavemanEvent }[]
+  requestCavemanState: (sessionId: string) => Promise<CavemanStats | null>
+  requestAllCavemanStates: () => Promise<{ states: CavemanStats[], aggregate: CavemanAggregateStats }>
   createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
   addWorktree: (workspaceId: string) => Promise<any>
@@ -80,6 +87,12 @@ export function useSocket(): UseSocketReturn {
     eventsProcessed: 0,
   })
   const [filterHistory, setFilterHistory] = useState<FilterEvent[]>([])
+  const [cavemanStates, setCavemanStates] = useState<Record<string, CavemanStats>>({})
+  const [cavemanAggregateStats, setCavemanAggregateStats] = useState<CavemanAggregateStats>({
+    totalOutputTokens: 0, totalSavedTokens: 0, sessionsActive: 0, uptimeMs: 0,
+  })
+  const [cavemanLiveEvents, setCavemanLiveEvents] = useState<{ sessionId: string, event: CavemanEvent }[]>([])
+  const cavemanEventCbs = useRef<((data: { sessionId: string, event: CavemanEvent }) => void)[]>([])
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
   const statusChangeCbs = useRef<((data: StatusChange) => void)[]>([])
   const branchChangeCbs = useRef<((data: BranchChange) => void)[]>([])
@@ -188,6 +201,41 @@ export function useSocket(): UseSocketReturn {
   socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[] }) => {
     setFilterStats(data.stats)
     if (data.history) setFilterHistory(data.history)
+  })
+
+  socket.on('caveman-event', (data: { sessionId: string, event: CavemanEvent }) => {
+    setCavemanLiveEvents(prev => [data, ...prev].slice(0, 500))
+    setCavemanStates(prev => {
+      const existing = prev[data.sessionId]
+      if (!existing) return prev
+      return {
+        ...prev,
+        [data.sessionId]: {
+          ...existing,
+          outputTokens: existing.outputTokens + data.event.rawTokens,
+          estimatedSavedTokens: existing.estimatedSavedTokens + data.event.savedTokens,
+          events: [data.event, ...existing.events].slice(0, 200),
+        },
+      }
+    })
+    setCavemanAggregateStats(prev => ({
+      ...prev,
+      totalOutputTokens: prev.totalOutputTokens + data.event.rawTokens,
+      totalSavedTokens: prev.totalSavedTokens + data.event.savedTokens,
+    }))
+    cavemanEventCbs.current.forEach(cb => cb(data))
+  })
+
+  socket.on('caveman-state', (data: { sessionId: string, state: CavemanStats | null }) => {
+    if (data.state) {
+      setCavemanStates(prev => ({ ...prev, [data.sessionId]: data.state! }))
+    } else {
+      setCavemanStates(prev => {
+        const next = { ...prev }
+        delete next[data.sessionId]
+        return next
+      })
+    }
   })
 
   return () => {
@@ -335,6 +383,35 @@ export function useSocket(): UseSocketReturn {
 
   const emit = useCallback((event: string, ...args: any[]) => {
     socketRef.current?.emit(event, ...args)
+  }, [])
+
+  const toggleCaveman = useCallback((sessionId: string, enabled: boolean, level?: string) => {
+    socketRef.current?.emit('caveman-toggle', { sessionId, enabled, level })
+  }, [])
+
+  const onCavemanEvent = useCallback((cb: (data: { sessionId: string, event: CavemanEvent }) => void) => {
+    cavemanEventCbs.current.push(cb)
+    return () => {
+      cavemanEventCbs.current = cavemanEventCbs.current.filter(c => c !== cb)
+    }
+  }, [])
+
+  const requestCavemanState = useCallback((sessionId: string): Promise<CavemanStats | null> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('caveman-state', { sessionId }, (res: any) => {
+        if (res?.ok) resolve(res.state)
+        else resolve(null)
+      })
+    })
+  }, [])
+
+  const requestAllCavemanStates = useCallback((): Promise<{ states: CavemanStats[], aggregate: CavemanAggregateStats }> => {
+    return new Promise((resolve) => {
+      socketRef.current?.emit('caveman-all-states', {}, (res: any) => {
+        if (res?.ok) resolve({ states: res.states, aggregate: res.aggregate })
+        else resolve({ states: [], aggregate: { totalOutputTokens: 0, totalSavedTokens: 0, sessionsActive: 0, uptimeMs: 0 } })
+      })
+    })
   }, [])
 
   const onFilterEvent = useCallback((cb: (data: FilterEvent) => void) => {
@@ -532,6 +609,13 @@ export function useSocket(): UseSocketReturn {
     filterStats,
     filterHistory,
     requestFilterStats,
+    toggleCaveman,
+    onCavemanEvent,
+    cavemanStates,
+    cavemanAggregateStats,
+    cavemanLiveEvents,
+    requestCavemanState,
+    requestAllCavemanStates,
     getOrchestratorStats,
     getSessionUsage,
     getSessionHistory,

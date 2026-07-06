@@ -12,6 +12,7 @@ import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
 import OutputFilterDebug from './components/OutputFilterDebug'
+import CavemanPanel from './components/CavemanPanel'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import HistoryPanel from './components/HistoryPanel'
@@ -122,6 +123,7 @@ function App() {
     filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit,
+    toggleCaveman, onCavemanEvent, cavemanStates, cavemanAggregateStats, cavemanLiveEvents,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -133,7 +135,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | 'caveman' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -153,6 +155,13 @@ function App() {
 
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
+  const [cavemanEnabled, setCavemanEnabled] = useState<Record<string, boolean>>({})
+
+  function handleToggleCaveman(sessionId: string, enabled: boolean) {
+    setCavemanEnabled(prev => ({ ...prev, [sessionId]: enabled }))
+    toggleCaveman(sessionId, enabled)
+  }
+
   const [fontSize, setFontSize] = useState(() => {
     try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
   })
@@ -848,6 +857,13 @@ function App() {
                 <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
               </button>
               <button
+                className={`activity-bar-btn ${activeView === 'caveman' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'caveman' ? null : 'caveman')}
+                title="Caveman Mode Stats"
+              >
+                <span style={{ fontSize: 20, lineHeight: '24px' }}>🪨</span>
+              </button>
+              <button
                 className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
                 onClick={() => setActiveView(prev => prev === 'output-filter' ? null : 'output-filter')}
                 title="Output Filter Debug"
@@ -962,6 +978,8 @@ function App() {
             shellOnly={viewMode === 'files'}
             onToggleChatSidebar={handleToggleChatSidebar}
             onTerminalOutput={onTerminalOutput}
+            cavemanEnabled={cavemanEnabled}
+            onToggleCaveman={handleToggleCaveman}
             pageViews={[
               { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
                 <Dashboard
@@ -988,6 +1006,15 @@ function App() {
                   fetchCommitFiles={getGitCommitFiles}
                   fetchWorkingTreeFiles={getGitWorkingTreeFiles}
                   fetchFileDiff={getGitFileDiff}
+                />
+              )},
+              { id: 'caveman', label: 'Caveman', icon: '🪨', render: () => (
+                <CavemanPanel
+                  cavemanStates={cavemanStates}
+                  aggregateStats={cavemanAggregateStats}
+                  liveEvents={cavemanLiveEvents}
+                  onCavemanEvent={onCavemanEvent}
+                  onClose={() => setActiveView(null)}
                 />
               )},
               { id: 'output-filter', label: 'Filter', icon: '◈', render: () => (

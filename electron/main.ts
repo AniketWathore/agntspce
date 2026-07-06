@@ -634,6 +634,23 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on('caveman-toggle', ({ sessionId, enabled, level }: { sessionId: string, enabled: boolean, level?: string }) => {
+    sessionManager.toggleCaveman(sessionId, enabled, level)
+    const state = sessionManager.getCavemanState(sessionId)
+    socket.emit('caveman-state', { sessionId, state })
+  })
+
+  socket.on('caveman-state', ({ sessionId }: { sessionId: string }, callback?: Function) => {
+    const state = sessionManager.getCavemanState(sessionId)
+    if (callback) callback({ ok: true, state })
+  })
+
+  socket.on('caveman-all-states', (_data: any, callback?: Function) => {
+    const states = sessionManager.getAllCavemanStates()
+    const aggregate = sessionManager.getCavemanAggregateStats()
+    if (callback) callback({ ok: true, states, aggregate })
+  })
+
   socket.on('set-user-settings', (settings: { autoRestartSessions?: boolean }) => {
     if (typeof settings.autoRestartSessions === 'boolean') {
       sessionManager.autoRestartSessions = settings.autoRestartSessions

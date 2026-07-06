@@ -21,9 +21,11 @@ interface Props {
   style?: CSSProperties
   dimmed?: boolean
   onTerminalOutput?: (cb: (data: any) => void) => () => void
+  cavemanEnabled?: boolean
+  onToggleCaveman?: (sessionId: string, enabled: boolean) => void
 }
 
-export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, cavemanEnabled, onToggleCaveman }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -154,6 +156,16 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
         )}
         {session.branch && session.branch !== 'unknown' && (
           <span className="terminal-branch">{session.branch}</span>
+        )}
+        {isAgentType && onToggleCaveman && (
+          <button
+            className={`terminal-caveman-btn ${cavemanEnabled ? 'active' : ''}`}
+            onClick={() => onToggleCaveman(session.id, !cavemanEnabled)}
+            title={cavemanEnabled ? 'Caveman mode ON - click to disable' : 'Caveman mode OFF - click to enable'}
+          >
+            <span className="caveman-icon">🪨</span>
+            <span className="caveman-label">{cavemanEnabled ? 'CAVE' : 'CAVE'}</span>
+          </button>
         )}
         <span className="terminal-session-id">{session.id}</span>
         <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>

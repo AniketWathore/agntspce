@@ -125,6 +125,34 @@ export interface FilterStats {
   eventsProcessed: number
 }
 
+export interface CavemanEvent {
+  timestamp: number
+  originalText: string
+  compressedText: string
+  originalTokens: number
+  compressedTokens: number
+  estimatedSavings: number
+  level: string
+}
+
+export interface CavemanStats {
+  sessionId: string
+  enabled: boolean
+  level: string
+  outputTokens: number
+  estimatedSavedTokens: number
+  events: CavemanEvent[]
+  startTime: number
+  uptime: number
+}
+
+export interface CavemanAggregateStats {
+  totalOutputTokens: number
+  totalSavedTokens: number
+  sessionsActive: number
+  uptimeMs: number
+}
+
 export interface FileTreeNode {
   name: string
   path: string

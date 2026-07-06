@@ -10,6 +10,7 @@ import { OutputFilterService } from './outputFilter'
 import { WorkspaceManager } from './workspaceManager'
 import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
+import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
 
 let pty: any = null
@@ -76,6 +77,7 @@ export class SessionManager extends EventEmitter {
   sessionHistory: { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] = []
   tokenUsageTracker = new TokenUsageTracker()
   outputFilter = new OutputFilterService()
+  cavemanService = new CavemanService()
 
   constructor(io: any, agentManager?: any) {
     super()
@@ -317,6 +319,13 @@ export class SessionManager extends EventEmitter {
 
       this.outputFilter.processOutput(sessionId, data)
 
+      const cavemanEvent = this.cavemanService.processOutput(sessionId, data)
+      if (cavemanEvent) {
+        try {
+          this.io.emit('caveman-event', { sessionId, event: cavemanEvent })
+        } catch {}
+      }
+
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
       const isActive = this.sessions.get(sessionId) === session
@@ -407,6 +416,7 @@ export class SessionManager extends EventEmitter {
       }
     } catch { }
     this.outputFilter.cleanup(sessionId)
+    this.cavemanService.cleanup(sessionId)
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)
@@ -619,14 +629,41 @@ export class SessionManager extends EventEmitter {
     if (!session || !this.agentManager) return
     const validation = this.agentManager.validateConfig(config)
     if (!validation.valid) throw new Error(validation.error)
+
+    if (this.cavemanService.isEnabled(sessionId) && this.workspace?.repository?.path) {
+      this.cavemanService.writeCavemanInstructionFile(this.workspace.repository.path, config.agentId)
+    }
+
     const command = this.agentManager.buildCommand(config.agentId, config.mode, config)
     this.writeToSession(sessionId, command + '\n')
+
     session.autoStarted = true
     session.claudeLaunchState = 'launched'
     session.agentStartConfig = config
     try {
       this.io.emit('agent-started', { sessionId, config })
     } catch {}
+  }
+
+  toggleCaveman(sessionId: string, enabled: boolean, level?: string): void {
+    this.cavemanService.setEnabled(sessionId, enabled, level)
+    if (enabled && this.workspace?.repository?.path) {
+      this.cavemanService.writeSkillFile(this.workspace.repository.path)
+    } else if (this.workspace?.repository?.path) {
+      this.cavemanService.removeSkillFile(this.workspace.repository.path)
+    }
+  }
+
+  getCavemanState(sessionId: string) {
+    return this.cavemanService.getState(sessionId)
+  }
+
+  getAllCavemanStates() {
+    return this.cavemanService.getAllStates()
+  }
+
+  getCavemanAggregateStats() {
+    return this.cavemanService.getAggregateStats()
   }
 
   getWorktrees(): Worktree[] {
