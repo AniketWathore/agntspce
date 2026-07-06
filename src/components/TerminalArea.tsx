@@ -390,29 +390,76 @@ export default function TerminalArea({
           )}
           </>
         ) : sessions.length === 0 ? (
-        <div className="terminal-area-empty" style={!showAgents ? { display: 'none' } : {}}>
-          <div className="empty-state">
-            <p>No agent terminals</p>
-            <p className="empty-hint">Add an AI coding agent or open a terminal</p>
-            <div className="empty-actions" style={{ position: 'relative' }}>
-              <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={() => {
-                if (agentsList && agentsList.length > 0) {
-                  setShowAgentDropdown(o => !o)
-                }
-              }}>+ Agent</button>
-              <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
-                <i className="codicon codicon-terminal" style={{ fontSize: 16 }}></i>
-              </button>
-              {showAgentDropdown && agentsList && (
-                <AgentPicker
-                  agents={agentsList}
-                  onSelect={(agentId) => { setShowAgentDropdown(false); onSelectAgent(agentId) }}
-                  onClose={() => setShowAgentDropdown(false)}
-                />
-              )}
+        <>
+          <div className="terminal-area-empty" style={!showAgents ? { display: 'none' } : {}}>
+            <div className="empty-state">
+              <p>No agent terminals</p>
+              <p className="empty-hint">Add an AI coding agent or open a terminal</p>
+              <div className="empty-actions" style={{ position: 'relative' }}>
+                <button className="new-terminal-btn" onMouseDown={e => e.nativeEvent.stopPropagation()} onClick={() => {
+                  if (agentsList && agentsList.length > 0) {
+                    setShowAgentDropdown(o => !o)
+                  }
+                }}>+ Agent</button>
+                <button className="shell-btn" onClick={onNewShell} title="Open shell terminal">
+                  <i className="codicon codicon-terminal" style={{ fontSize: 16 }}></i>
+                </button>
+                {showAgentDropdown && agentsList && (
+                  <AgentPicker
+                    agents={agentsList}
+                    onSelect={(agentId) => { setShowAgentDropdown(false); onSelectAgent(agentId) }}
+                    onClose={() => setShowAgentDropdown(false)}
+                  />
+                )}
+              </div>
             </div>
           </div>
-        </div>
+          {bottomShellOpen && (
+            <div className="bottom-shell" style={{ flex: terminalFullscreen ? '1' : `0 0 ${terminalHeight}%` }}>
+              {onTerminalResizerMouseDown && (
+                <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
+              )}
+              <div className="bottom-shell-body">
+                <div className="bottom-shell-terminal-area">
+                  {shellSessions.length === 0 ? (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
+                      No shell terminals
+                    </div>
+                  ) : (
+                    shellSessions.map(s => (
+                      <ShellTerminal
+                        key={s.id}
+                        session={s}
+                        onInput={onInput}
+                        onResize={onResize}
+                        writeData={writeBuffersRef.current[s.id] || ''}
+                        hidden={s.id !== activeShellId}
+                        onTerminalOutput={onTerminalOutput}
+                      />
+                    ))
+                  )}
+                </div>
+                <ShellTabList
+                  shells={shellSessions}
+                  activeShellId={activeShellId}
+                  onSelect={setActiveShellId}
+                  onClose={handleShellClose}
+                  header={
+                    <div className="shell-tab-list-header">
+                      <div className="shell-tab-list-header-actions">
+                        <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
+                        <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                          {terminalFullscreen ? '⊠' : '⊡'}
+                        </button>
+                        <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
+                      </div>
+                    </div>
+                  }
+                />
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
           {showAgents && (
