@@ -125,23 +125,33 @@ export interface FilterStats {
   eventsProcessed: number
 }
 
-export interface CavemanEvent {
-  timestamp: number
-  originalText: string
+export interface CavemanChunk {
   compressedText: string
-  originalTokens: number
+  originalText: string
   compressedTokens: number
-  estimatedSavings: number
-  level: string
+  originalTokens: number
+  savedTokens: number
+  removed: string[]
+}
+
+export interface CavemanRun {
+  id: string
+  prompt: string
+  startedAt: number
+  endedAt: number
+  chunks: CavemanChunk[]
+  totalCompressedTokens: number
+  totalOriginalTokens: number
+  totalSavedTokens: number
+  removedWords: string[]
 }
 
 export interface CavemanStats {
   sessionId: string
   enabled: boolean
   level: string
-  outputTokens: number
-  estimatedSavedTokens: number
-  events: CavemanEvent[]
+  runs: CavemanRun[]
+  currentRun: CavemanRun | null
   startTime: number
   uptime: number
 }

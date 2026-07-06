@@ -65,7 +65,7 @@ const SERVER_PORT = 9460
 // Initialize services
 const workspaceManager = WorkspaceManager.getInstance()
 const agentManager = new AgentManager()
-const sessionManager = new SessionManager(io, agentManager)
+const sessionManager = new SessionManager(io, agentManager, app.getPath('userData'))
 const statusDetector = new StatusDetector()
 const gitHelper = new GitHelper()
 const worktreeHelper = new WorktreeHelper()

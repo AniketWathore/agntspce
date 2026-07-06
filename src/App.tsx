@@ -123,7 +123,7 @@ function App() {
     filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit,
-    toggleCaveman, onCavemanEvent, cavemanStates, cavemanAggregateStats, cavemanLiveEvents,
+    toggleCaveman, onCavemanRun, cavemanStates, cavemanAggregateStats,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -1012,8 +1012,7 @@ function App() {
                 <CavemanPanel
                   cavemanStates={cavemanStates}
                   aggregateStats={cavemanAggregateStats}
-                  liveEvents={cavemanLiveEvents}
-                  onCavemanEvent={onCavemanEvent}
+                  onCavemanRun={onCavemanRun}
                   onClose={() => setActiveView(null)}
                 />
               )},

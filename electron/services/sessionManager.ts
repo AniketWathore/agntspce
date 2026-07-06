@@ -79,13 +79,19 @@ export class SessionManager extends EventEmitter {
   outputFilter = new OutputFilterService()
   cavemanService = new CavemanService()
 
-  constructor(io: any, agentManager?: any) {
+  constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
     this.io = io
     if (agentManager) this.agentManager = agentManager
+    if (dataDir) this.cavemanService.setDataDir(dataDir)
     this.outputFilter.setOnEvent((event) => {
       try {
         this.io.emit('filter-event', event)
+      } catch {}
+    })
+    this.cavemanService.onRunComplete((sessionId, run) => {
+      try {
+        this.io.emit('caveman-run-complete', { sessionId, run })
       } catch {}
     })
   }
@@ -319,12 +325,7 @@ export class SessionManager extends EventEmitter {
 
       this.outputFilter.processOutput(sessionId, data)
 
-      const cavemanEvent = this.cavemanService.processOutput(sessionId, data)
-      if (cavemanEvent) {
-        try {
-          this.io.emit('caveman-event', { sessionId, event: cavemanEvent })
-        } catch {}
-      }
+      this.processSessionOutput(sessionId, data)
 
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
@@ -382,10 +383,17 @@ export class SessionManager extends EventEmitter {
     const session = this.sessions.get(sessionId)
     if (!session?.pty) return false
     try {
-      const processed = data
-      session.pty.write(processed)
+      const clean = data.replace(/\n$/, '').trim()
+      if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
+        this.cavemanService.setPendingPrompt(sessionId, clean)
+      }
+      session.pty.write(data)
       return true
     } catch { return false }
+  }
+
+  private processSessionOutput(sessionId: string, data: string): void {
+    this.cavemanService.processOutput(sessionId, data)
   }
 
   resizeSession(sessionId: string, cols: number, rows: number) {
@@ -631,7 +639,7 @@ export class SessionManager extends EventEmitter {
     if (!validation.valid) throw new Error(validation.error)
 
     if (this.cavemanService.isEnabled(sessionId) && this.workspace?.repository?.path) {
-      this.cavemanService.writeCavemanInstructionFile(this.workspace.repository.path, config.agentId)
+      this.cavemanService.writeSkillFiles(this.workspace.repository.path, config.agentId)
     }
 
     const command = this.agentManager.buildCommand(config.agentId, config.mode, config)
@@ -647,10 +655,14 @@ export class SessionManager extends EventEmitter {
 
   toggleCaveman(sessionId: string, enabled: boolean, level?: string): void {
     this.cavemanService.setEnabled(sessionId, enabled, level)
+
+    const session = this.sessions.get(sessionId)
+    const agentId = session?.agentStartConfig?.agentId || 'claude'
+
     if (enabled && this.workspace?.repository?.path) {
-      this.cavemanService.writeSkillFile(this.workspace.repository.path)
+      this.cavemanService.writeSkillFiles(this.workspace.repository.path, agentId)
     } else if (this.workspace?.repository?.path) {
-      this.cavemanService.removeSkillFile(this.workspace.repository.path)
+      this.cavemanService.removeSkillFiles(this.workspace.repository.path, agentId)
     }
   }
 
@@ -726,6 +738,8 @@ export class SessionManager extends EventEmitter {
     if (!this.statusDetector) return
     const session = this.sessions.get(sessionId)
     if (!session || session.status === 'exited') return
+
+    const oldStatus = session.status
     const status = this.statusDetector.detectStatus(sessionId, session.buffer.snapshot())
     if (status !== session.status) {
       session.status = status as any
@@ -733,6 +747,18 @@ export class SessionManager extends EventEmitter {
       try {
         this.io.emit('status-change', { sessionId, status })
       } catch { }
+    }
+
+    if (status !== oldStatus) {
+      if ((oldStatus === 'busy' || oldStatus === 'waiting') && (status === 'idle' || status === 'exited')) {
+        this.cavemanService.endRun(sessionId)
+      } else if ((oldStatus === 'idle' || oldStatus === 'waiting') && status === 'busy') {
+        this.cavemanService.startRun(sessionId)
+      }
+    }
+
+    if (status === 'idle') {
+      this.cavemanService.endRun(sessionId)
     }
   }
 

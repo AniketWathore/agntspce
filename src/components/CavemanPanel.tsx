@@ -1,51 +1,30 @@
-import { useEffect, useState } from 'react'
-import type { CavemanStats, CavemanAggregateStats, CavemanEvent } from '../types'
+import { useState } from 'react'
+import type { CavemanStats, CavemanRun, CavemanAggregateStats } from '../types'
 
 interface Props {
   cavemanStates: Record<string, CavemanStats>
   aggregateStats: CavemanAggregateStats
-  liveEvents: { sessionId: string, event: CavemanEvent }[]
-  onCavemanEvent: (cb: (data: { sessionId: string, event: CavemanEvent }) => void) => () => void
+  onCavemanRun: (cb: (data: { sessionId: string, run: CavemanRun }) => void) => () => void
   onClose: () => void
 }
 
-export default function CavemanPanel({ cavemanStates, aggregateStats, liveEvents, onCavemanEvent, onClose }: Props) {
-  const [selectedEvent, setSelectedEvent] = useState<{ sessionId: string, event: CavemanEvent } | null>(null)
-  const [filter, setFilter] = useState('')
-  const [activeTab, setActiveTab] = useState<'stats' | 'events'>('stats')
-  const [localEvents, setLocalEvents] = useState<{ sessionId: string, event: CavemanEvent }[]>([])
+export default function CavemanPanel({ cavemanStates, aggregateStats, onCavemanRun: _onCavemanRun, onClose }: Props) {
+  const [activeTab, setActiveTab] = useState<'stats' | 'sessions'>('stats')
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
-  useEffect(() => {
-    const unsub = onCavemanEvent((data) => {
-      setLocalEvents(prev => [data, ...prev].slice(0, 200))
-    })
-    return unsub
-  }, [onCavemanEvent])
+  const allSessions = Object.values(cavemanStates)
+  const activeSessions = allSessions.filter(s => s.enabled)
+  const selectedSession = allSessions.find(s => s.sessionId === selectedSessionId)
+  const selectedRun = selectedSession?.runs.find(r => r.id === selectedRunId)
+    || (selectedSession?.currentRun?.id === selectedRunId ? selectedSession.currentRun : null)
 
-  const allEvents = [...localEvents]
-  for (const evt of liveEvents) {
-    if (!allEvents.find(e => e.event.timestamp === evt.event.timestamp && e.sessionId === evt.sessionId)) {
-      allEvents.push(evt)
-    }
-  }
-  allEvents.sort((a, b) => b.event.timestamp - a.event.timestamp)
-
-  const filteredEvents = filter
-    ? allEvents.filter(e =>
-        e.sessionId.toLowerCase().includes(filter.toLowerCase()) ||
-        e.event.rawText.toLowerCase().includes(filter.toLowerCase()) ||
-        e.event.removed.some(r => r.toLowerCase().includes(filter.toLowerCase()))
-      )
-    : allEvents
-
-  const totalTokens = aggregateStats.totalOutputTokens
-  const totalSaved = aggregateStats.totalSavedTokens
-  const savingsPct = (totalTokens + totalSaved) > 0
-    ? Math.round((totalSaved / (totalTokens + totalSaved)) * 100)
+  const totalOriginalTokens = aggregateStats.totalOutputTokens
+  const totalSavedTokens = aggregateStats.totalSavedTokens
+  const savingsPct = (totalOriginalTokens + totalSavedTokens) > 0
+    ? Math.round((totalSavedTokens / (totalOriginalTokens + totalSavedTokens)) * 100)
     : 0
-  const estCostSaved = totalSaved > 0 ? ((totalSaved / 1_000_000) * 15).toFixed(4) : '0.0000'
-
-  const activeSessions = Object.values(cavemanStates).filter(s => s.enabled)
+  const estCostSaved = totalSavedTokens > 0 ? ((totalSavedTokens / 1_000_000) * 15).toFixed(4) : '0.0000'
 
   function formatTime(ms: number): string {
     const s = Math.floor(ms / 1000)
@@ -56,6 +35,15 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, liveEvents
     return `${s}s`
   }
 
+  function formatTokens(n: number): string {
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+    return n.toLocaleString()
+  }
+
+  function shortPrompt(prompt: string, max = 60): string {
+    return prompt.length > max ? prompt.slice(0, max) + '…' : prompt
+  }
+
   return (
     <div className="caveman-panel">
       <div className="caveman-header">
@@ -64,24 +52,17 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, liveEvents
             <span className="caveman-header-icon">🪨</span>
             Caveman
           </h1>
-          <span className="caveman-badge">tokf</span>
           {activeSessions.length > 0 && <span className="caveman-badge live">live</span>}
         </div>
         <button className="caveman-close" onClick={onClose} title="Close">✕</button>
       </div>
 
       <div className="caveman-tabs">
-        <button
-          className={`caveman-tab ${activeTab === 'stats' ? 'active' : ''}`}
-          onClick={() => setActiveTab('stats')}
-        >
+        <button className={`caveman-tab ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => setActiveTab('stats')}>
           Stats
         </button>
-        <button
-          className={`caveman-tab ${activeTab === 'events' ? 'active' : ''}`}
-          onClick={() => setActiveTab('events')}
-        >
-          Events ({allEvents.length})
+        <button className={`caveman-tab ${activeTab === 'sessions' ? 'active' : ''}`} onClick={() => { setActiveTab('sessions'); setSelectedSessionId(null); setSelectedRunId(null) }}>
+          Sessions
         </button>
       </div>
 
@@ -93,12 +74,12 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, liveEvents
               <div className="caveman-stat-label">Active Sessions</div>
             </div>
             <div className="caveman-stat-card">
-              <div className="caveman-stat-value">{totalTokens.toLocaleString()}</div>
-              <div className="caveman-stat-label">Output Tokens (compressed)</div>
+              <div className="caveman-stat-value">{formatTokens(totalOutputTokens)}</div>
+              <div className="caveman-stat-label">Output Tokens</div>
             </div>
             <div className="caveman-stat-card accent">
-              <div className="caveman-stat-value">{totalSaved.toLocaleString()}</div>
-              <div className="caveman-stat-label">Tokens Saved (est.)</div>
+              <div className="caveman-stat-value">{formatTokens(totalSavedTokens)}</div>
+              <div className="caveman-stat-label">Tokens Saved</div>
             </div>
             <div className="caveman-stat-card accent">
               <div className="caveman-stat-value">{savingsPct}%</div>
@@ -114,123 +95,155 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, liveEvents
             </div>
           </div>
 
-          {activeSessions.length > 0 && (
-            <div className="caveman-session-list">
-              <div className="caveman-session-list-header">Active Sessions</div>
-              {activeSessions.map(s => (
-                <div key={s.sessionId} className="caveman-session-item">
-                  <div className="caveman-session-item-header">
-                    <span className="caveman-session-id">{s.sessionId.slice(-12)}</span>
-                    <span className="caveman-session-level">{s.level.toUpperCase()}</span>
-                    <span className="caveman-session-uptime">{formatTime(s.uptime)}</span>
-                  </div>
-                  <div className="caveman-session-stats">
-                    <span>{s.outputTokens.toLocaleString()} tokens</span>
-                    <span className="caveman-session-saved">+{s.estimatedSavedTokens.toLocaleString()} saved</span>
-                    <span>{s.events.length} events</span>
-                  </div>
+          {allSessions.map(s => {
+            const totalRuns = s.runs.length
+            const totalRunTokens = s.runs.reduce((a, r) => a + r.totalOriginalTokens, 0)
+            const totalRunSaved = s.runs.reduce((a, r) => a + r.totalSavedTokens, 0)
+            return (
+              <div key={s.sessionId} className="caveman-session-summary">
+                <div className="caveman-session-summary-header">
+                  <span className="caveman-session-id">{s.sessionId.slice(-12)}</span>
+                  <span className="caveman-session-level">{s.level.toUpperCase()}</span>
+                  <span className="caveman-session-runs">{totalRuns} run{totalRuns !== 1 ? 's' : ''}</span>
+                  <span className="caveman-session-tokens">{formatTokens(totalRunTokens)} tok</span>
+                  <span className="caveman-session-saved">+{formatTokens(totalRunSaved)} saved</span>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {activeSessions.length === 0 && (
-            <div className="caveman-empty">
-              <div className="caveman-empty-icon">🪨</div>
-              <span>No active caveman sessions</span>
-              <span className="caveman-empty-hint">
-                Click the 🪨 button on any agent terminal header to enable caveman mode
-              </span>
-            </div>
-          )}
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {activeTab === 'events' && (
+      {activeTab === 'sessions' && (
         <div className="caveman-body">
           <div className="caveman-sidebar">
-            <div className="caveman-sidebar-header">
-              <div className="caveman-filter-wrap">
-                <input
-                  className="caveman-filter"
-                  type="text"
-                  placeholder="Filter events..."
-                  value={filter}
-                  onChange={e => setFilter(e.target.value)}
-                />
-                {filter && (
-                  <button className="caveman-filter-clear" onClick={() => setFilter('')}>✕</button>
-                )}
-              </div>
-            </div>
             <div className="caveman-list">
-              {filteredEvents.length === 0 && (
+              {allSessions.length === 0 && (
                 <div className="caveman-list-empty">
-                  <div className="caveman-list-empty-icon">◉</div>
-                  <span>No caveman events yet.</span>
-                  <span className="caveman-list-empty-hint">Enable caveman on an agent terminal to see compression stats.</span>
+                  <div className="caveman-list-empty-icon">🪨</div>
+                  <span>No sessions yet.</span>
+                  <span className="caveman-list-empty-hint">Enable caveman on an agent terminal to track runs.</span>
                 </div>
               )}
-              {filteredEvents.map((item, i) => (
-                <div
-                  key={item.event.timestamp + '-' + i}
-                  className={`caveman-event ${selectedEvent === item ? 'selected' : ''}`}
-                  onClick={() => setSelectedEvent(item)}
-                >
-                  <div className="caveman-event-header">
-                    <span className="caveman-event-savings">
-                      -{item.event.savedTokens.toLocaleString()}
-                    </span>
-                    <span className="caveman-event-tokens">
-                      {item.event.expandedTokens} → {item.event.rawTokens}
-                    </span>
-                    <span className="caveman-event-level">{item.event.level.toUpperCase()}</span>
-                  </div>
-                  <div className="caveman-event-preview">{item.event.rawText.slice(0, 120)}</div>
-                  {item.event.removed.length > 0 && (
-                    <div className="caveman-event-removed">
-                      cut: {item.event.removed.slice(0, 6).join(', ')}
+              {allSessions.map(s => {
+                const isSelected = s.sessionId === selectedSessionId
+                const runCount = s.runs.length
+                return (
+                  <div key={s.sessionId}>
+                    <div
+                      className={`caveman-session-item ${isSelected ? 'selected' : ''}`}
+                      onClick={() => {
+                        setSelectedSessionId(s.sessionId)
+                        setSelectedRunId(null)
+                      }}
+                    >
+                      <div className="caveman-session-item-header">
+                        <span className="caveman-session-id">{s.sessionId.slice(-12)}</span>
+                        <span className="caveman-session-uptime">{formatTime(s.uptime)}</span>
+                      </div>
+                      <div className="caveman-session-stats">
+                        <span>{runCount} run{runCount !== 1 ? 's' : ''}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="caveman-event-session">{item.sessionId.slice(-12)}</div>
-                </div>
-              ))}
+                    {isSelected && (
+                      <div className="caveman-run-list">
+                        {s.currentRun && (
+                          <div
+                            className={`caveman-run-item live ${selectedRunId === s.currentRun.id ? 'selected' : ''}`}
+                            onClick={() => setSelectedRunId(s.currentRun!.id)}
+                          >
+                            <div className="caveman-run-prompt">{shortPrompt(s.currentRun.prompt, 50)}</div>
+                            <div className="caveman-run-meta">
+                              <span className="caveman-run-pct">buffering…</span>
+                            </div>
+                          </div>
+                        )}
+                        {s.runs.length === 0 && !s.currentRun && (
+                          <div className="caveman-run-empty">No runs yet</div>
+                        )}
+                        {s.runs.map(r => {
+                          const runPct = r.totalSavedTokens > 0
+                            ? Math.round((r.totalSavedTokens / r.totalOriginalTokens) * 100)
+                            : 0
+                          return (
+                            <div
+                              key={r.id}
+                              className={`caveman-run-item ${selectedRunId === r.id ? 'selected' : ''}`}
+                              onClick={() => setSelectedRunId(r.id)}
+                            >
+                              <div className="caveman-run-prompt">{shortPrompt(r.prompt, 50)}</div>
+                              <div className="caveman-run-meta">
+                                <span className="caveman-run-saved">-{formatTokens(r.totalSavedTokens)} tok</span>
+                                <span className="caveman-run-pct">{runPct}%</span>
+                                <span className="caveman-run-duration">{formatTime(r.endedAt - r.startedAt)}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
+
           <div className="caveman-detail">
-            {selectedEvent ? (
-              <>
-                <div className="caveman-detail-header">
-                  <h2>Output Event</h2>
-                  <div className="caveman-detail-meta">
-                    <span>level: <strong>{selectedEvent.event.level.toUpperCase()}</strong></span>
-                    <span>tokens: <strong>{selectedEvent.event.expandedTokens} → {selectedEvent.event.rawTokens}</strong></span>
-                    <span>saved: <strong>-{selectedEvent.event.savedTokens.toLocaleString()}</strong></span>
-                    <span>session: <strong>{selectedEvent.sessionId.slice(-12)}</strong></span>
+            {selectedRun ? (
+              <div className="caveman-run-detail">
+                <div className="caveman-run-detail-header">
+                  <h2>Run</h2>
+                  <div className="caveman-run-detail-meta">
+                    <span>saved: <strong>{formatTokens(selectedRun.totalSavedTokens)} tokens</strong></span>
+                    <span>compression: <strong>{
+                      selectedRun.totalSavedTokens > 0
+                        ? Math.round((selectedRun.totalSavedTokens / selectedRun.totalOriginalTokens) * 100)
+                        : 0
+                    }%</strong></span>
+                    <span>duration: <strong>{formatTime(selectedRun.endedAt - selectedRun.startedAt)}</strong></span>
                   </div>
                 </div>
-                <div className="caveman-detail-removed">
-                  Words cut: <strong>{selectedEvent.event.removed.join(', ') || 'none'}</strong>
+
+                <div className="caveman-run-prompt-box">
+                  <div className="caveman-run-prompt-label">Prompt</div>
+                  <div className="caveman-run-prompt-text">{selectedRun.prompt}</div>
                 </div>
-                <div className="caveman-detail-panels">
-                  <div className="caveman-panel-box">
-                    <div className="caveman-panel-box-label">
-                      Expanded (estimated — {selectedEvent.event.expandedTokens} tokens)
+
+                {selectedRun.removedWords.length > 0 && (
+                  <div className="caveman-run-words">
+                    <span className="caveman-run-words-label">Words cut:</span>
+                    <span className="caveman-run-words-list">{selectedRun.removedWords.join(', ')}</span>
+                  </div>
+                )}
+
+                <div className="caveman-run-chunks">
+                  {selectedRun.chunks.length > 0 && selectedRun.chunks.map((chunk, i) => (
+                    <div key={i} className="caveman-chunk">
+                      <div className="caveman-chunk-panels">
+                        <div className="caveman-chunk-panel">
+                          <div className="caveman-chunk-panel-label">Original ({chunk.originalTokens} tok)</div>
+                          <div className="caveman-chunk-panel-content">{chunk.originalText}</div>
+                        </div>
+                        <div className="caveman-chunk-panel">
+                          <div className="caveman-chunk-panel-label accent">Compressed ({chunk.compressedTokens} tok)</div>
+                          <div className="caveman-chunk-panel-content">{chunk.compressedText}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="caveman-panel-box-content">{selectedEvent.event.expandedText}</div>
-                  </div>
-                  <div className="caveman-panel-box">
-                    <div className="caveman-panel-box-label accent">
-                      Caveman output ({selectedEvent.event.rawTokens} tokens) — saved {selectedEvent.event.savedTokens}
-                    </div>
-                    <div className="caveman-panel-box-content">{selectedEvent.event.rawText}</div>
-                  </div>
+                  ))}
+                  {selectedRun.chunks.length === 0 && (
+                    <div className="caveman-run-empty">No output recorded for this run</div>
+                  )}
                 </div>
-              </>
+              </div>
+            ) : selectedSessionId ? (
+              <div className="caveman-detail-empty">
+                <span>Select a run to view details</span>
+              </div>
             ) : (
               <div className="caveman-detail-empty">
-                <div className="caveman-detail-empty-icon">🪨</div>
-                <span>Select an event to view original vs compressed</span>
+                <div className="caveman-list-empty-icon">🪨</div>
+                <span>Select a session to see its runs</span>
               </div>
             )}
           </div>
@@ -239,3 +252,5 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, liveEvents
     </div>
   )
 }
+
+
