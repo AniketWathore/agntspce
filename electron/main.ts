@@ -313,11 +313,22 @@ io.on('connection', (socket) => {
       eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
     }
     const allHistory = sessionManager.outputFilter.getAllHistory()
-    socket.emit('filter-stats', { stats: aggregated, history: allHistory })
+    const allCommandHistory = sessionManager.outputFilter.getAllCommandHistory()
+    socket.emit('filter-stats', { stats: aggregated, history: allHistory, commandHistory: allCommandHistory })
   })
 
   socket.on('reset-filter-stats', () => {
     sessionManager.outputFilter.reset()
+  })
+
+  socket.on('get-command-filter-history', ({ sessionId }: { sessionId?: string }, callback?: Function) => {
+    if (sessionId) {
+      const history = sessionManager.outputFilter.getCommandHistory(sessionId)
+      if (callback) callback({ ok: true, history })
+    } else {
+      const allHistory = sessionManager.outputFilter.getAllCommandHistory()
+      if (callback) callback({ ok: true, history: allHistory })
+    }
   })
 
   socket.on('switch-workspace', async ({ workspaceId }) => {

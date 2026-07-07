@@ -1,0 +1,8 @@
+export const RAW_CAP = 10_485_760
+export const DEFAULT_HISTORY_DAYS = 90
+export const TRUNCATE_CAP_ERRORS = 20
+export const TRUNCATE_CAP_WARNINGS = 10
+export const TRUNCATE_CAP_LIST = 20
+export const RTK_DATA_DIR = 'rtk'
+export const HISTORY_DB = 'tracking.db'
+export const FILES_TOML = 'filters.toml'

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CavemanStats, CavemanRun, CavemanAggregateStats } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CommandEvent, RtkStats } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -39,13 +39,8 @@ interface UseSocketReturn {
   onFilterEvent: (cb: (data: FilterEvent) => void) => () => void
   filterStats: FilterStats
   filterHistory: FilterEvent[]
+  commandHistory: CommandEvent[]
   requestFilterStats: () => void
-  toggleCaveman: (sessionId: string, enabled: boolean, level?: string) => void
-  onCavemanRun: (cb: (data: { sessionId: string, run: CavemanRun }) => void) => () => void
-  cavemanStates: Record<string, CavemanStats>
-  cavemanAggregateStats: CavemanAggregateStats
-  requestCavemanState: (sessionId: string) => Promise<CavemanStats | null>
-  requestAllCavemanStates: () => Promise<{ states: CavemanStats[], aggregate: CavemanAggregateStats }>
   createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
   addWorktree: (workspaceId: string) => Promise<any>
@@ -86,11 +81,7 @@ export function useSocket(): UseSocketReturn {
     eventsProcessed: 0,
   })
   const [filterHistory, setFilterHistory] = useState<FilterEvent[]>([])
-  const [cavemanStates, setCavemanStates] = useState<Record<string, CavemanStats>>({})
-  const [cavemanAggregateStats, setCavemanAggregateStats] = useState<CavemanAggregateStats>({
-    sessionsActive: 0, uptimeMs: 0,
-  })
-  const cavemanRunCbs = useRef<((data: { sessionId: string, run: CavemanRun }) => void)[]>([])
+  const [commandHistory, setCommandHistory] = useState<CommandEvent[]>([])
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
   const statusChangeCbs = useRef<((data: StatusChange) => void)[]>([])
   const branchChangeCbs = useRef<((data: BranchChange) => void)[]>([])
@@ -107,16 +98,8 @@ export function useSocket(): UseSocketReturn {
       socket.emit('reset-filter-stats')
       setFilterStats({ totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 })
       setFilterHistory([])
-      socket.emit('caveman-all-states', {}, (res: any) => {
-        if (res?.ok && res.states) {
-          const statesMap: Record<string, CavemanStats> = {}
-          for (const state of res.states) {
-            statesMap[state.sessionId] = state
-          }
-          setCavemanStates(statesMap)
-          if (res.aggregate) setCavemanAggregateStats(res.aggregate)
-        }
-      })
+      setCommandHistory([])
+      socket.emit('get-filter-stats')
     })
     socket.on('disconnect', () => setConnected(false))
 
@@ -206,37 +189,14 @@ export function useSocket(): UseSocketReturn {
     filterEventCbs.current.forEach(cb => cb(event))
   })
 
-  socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[] }) => {
+  socket.on('command-filter-event', (event: CommandEvent) => {
+    setCommandHistory(prev => [event, ...prev].slice(0, 200))
+  })
+
+  socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[], commandHistory: CommandEvent[] }) => {
     setFilterStats(data.stats)
     if (data.history) setFilterHistory(data.history)
-  })
-
-  socket.on('caveman-run-complete', (data: { sessionId: string, run: CavemanRun }) => {
-    setCavemanStates(prev => {
-      const existing = prev[data.sessionId]
-      if (!existing) return prev
-      return {
-        ...prev,
-        [data.sessionId]: {
-          ...existing,
-          runs: [data.run, ...existing.runs],
-        },
-      }
-    })
-    setCavemanAggregateStats(prev => ({ ...prev }))
-    cavemanRunCbs.current.forEach(cb => cb(data))
-  })
-
-  socket.on('caveman-state', (data: { sessionId: string, state: CavemanStats | null }) => {
-    if (data.state) {
-      setCavemanStates(prev => ({ ...prev, [data.sessionId]: data.state! }))
-    } else {
-      setCavemanStates(prev => {
-        const next = { ...prev }
-        delete next[data.sessionId]
-        return next
-      })
-    }
+    if (data.commandHistory) setCommandHistory(data.commandHistory)
   })
 
   return () => {
@@ -384,35 +344,6 @@ export function useSocket(): UseSocketReturn {
 
   const emit = useCallback((event: string, ...args: any[]) => {
     socketRef.current?.emit(event, ...args)
-  }, [])
-
-  const toggleCaveman = useCallback((sessionId: string, enabled: boolean, level?: string) => {
-    socketRef.current?.emit('caveman-toggle', { sessionId, enabled, level })
-  }, [])
-
-  const onCavemanRun = useCallback((cb: (data: { sessionId: string, run: CavemanRun }) => void) => {
-    cavemanRunCbs.current.push(cb)
-    return () => {
-      cavemanRunCbs.current = cavemanRunCbs.current.filter(c => c !== cb)
-    }
-  }, [])
-
-  const requestCavemanState = useCallback((sessionId: string): Promise<CavemanStats | null> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('caveman-state', { sessionId }, (res: any) => {
-        if (res?.ok) resolve(res.state)
-        else resolve(null)
-      })
-    })
-  }, [])
-
-  const requestAllCavemanStates = useCallback((): Promise<{ states: CavemanStats[], aggregate: CavemanAggregateStats }> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('caveman-all-states', {}, (res: any) => {
-        if (res?.ok) resolve({ states: res.states, aggregate: res.aggregate })
-        else resolve({ states: [], aggregate: { sessionsActive: 0, uptimeMs: 0 } })
-      })
-    })
   }, [])
 
   const onFilterEvent = useCallback((cb: (data: FilterEvent) => void) => {
@@ -609,13 +540,8 @@ export function useSocket(): UseSocketReturn {
     onFilterEvent,
     filterStats,
     filterHistory,
+    commandHistory,
     requestFilterStats,
-    toggleCaveman,
-    onCavemanRun,
-    cavemanStates,
-    cavemanAggregateStats,
-    requestCavemanState,
-    requestAllCavemanStates,
     getOrchestratorStats,
     getSessionUsage,
     getSessionHistory,

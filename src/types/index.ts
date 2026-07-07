@@ -125,27 +125,27 @@ export interface FilterStats {
   eventsProcessed: number
 }
 
-export interface CavemanRun {
-  id: string
-  prompt: string
-  startedAt: number
-  endedAt: number
-  agentResponseTokens: number
-}
-
-export interface CavemanStats {
+export interface CommandEvent {
   sessionId: string
-  enabled: boolean
-  level: string
-  runs: CavemanRun[]
-  currentRun: CavemanRun | null
-  startTime: number
-  uptime: number
+  command: string
+  args: string[]
+  rawOutput: string
+  filteredOutput: string
+  filterName: string | null
+  originalTokens: number
+  filteredTokens: number
+  reduction: number
+  exitCode: number | null
+  duration: number
 }
 
-export interface CavemanAggregateStats {
-  sessionsActive: number
-  uptimeMs: number
+export interface RtkStats {
+  totalOriginalBytes: number
+  totalFilteredBytes: number
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  eventsProcessed: number
+  commandsProcessed: number
 }
 
 export interface FileTreeNode {

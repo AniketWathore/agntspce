@@ -89,6 +89,11 @@ export class SessionManager extends EventEmitter {
         this.io.emit('filter-event', event)
       } catch {}
     })
+    this.outputFilter.setOnCommandEvent((event) => {
+      try {
+        this.io.emit('command-filter-event', event)
+      } catch {}
+    })
     this.cavemanService.onRunComplete((sessionId, run) => {
       try {
         this.io.emit('caveman-run-complete', { sessionId, run })
@@ -314,9 +319,9 @@ export class SessionManager extends EventEmitter {
       claudeLaunchState: null,
     }
 
-    const agentTypes = ['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'server']
-    if (agentTypes.includes(config.type)) {
-      this.outputFilter.setSessionConfig(sessionId, { name: config.type })
+    if (config.type === 'opencode') {
+      this.outputFilter.setSessionConfig(sessionId, { name: 'opencode' })
+      this.outputFilter.enableRtk(sessionId)
     }
 
     ptyProcess.onData((data: string) => {
@@ -343,6 +348,7 @@ export class SessionManager extends EventEmitter {
     ptyProcess.onExit(({ exitCode, signal }: any) => {
       clearInterval(session.processMonitor!)
       session.status = 'exited'
+      this.outputFilter.finalizeCommand(sessionId, exitCode ?? 1)
       this.persistSessionBuffer(sessionId)
       const isActive = this.sessions.get(sessionId) === session
       if (isActive) {
@@ -387,6 +393,7 @@ export class SessionManager extends EventEmitter {
       if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
         this.cavemanService.setPendingPrompt(sessionId, clean)
       }
+      this.outputFilter.trackInput(sessionId, data)
       session.pty.write(data)
       return true
     } catch { return false }
@@ -419,6 +426,8 @@ export class SessionManager extends EventEmitter {
         try { session.pty.kill() } catch { }
       }
     } catch { }
+    this.outputFilter.finalizeCommand(sessionId)
+    this.outputFilter.disableRtk(sessionId)
     this.outputFilter.cleanup(sessionId)
     this.cavemanService.cleanup(sessionId)
     this.sessions.delete(sessionId)
@@ -748,6 +757,7 @@ export class SessionManager extends EventEmitter {
     if (status !== oldStatus) {
       if ((oldStatus === 'busy' || oldStatus === 'waiting') && (status === 'idle' || status === 'exited')) {
         this.cavemanService.endRun(sessionId)
+        this.outputFilter.finalizeCommand(sessionId)
       } else if ((oldStatus === 'idle' || oldStatus === 'waiting') && status === 'busy') {
         this.cavemanService.startRun(sessionId)
       }
@@ -755,6 +765,7 @@ export class SessionManager extends EventEmitter {
 
     if (status === 'idle') {
       this.cavemanService.endRun(sessionId)
+      this.outputFilter.finalizeCommand(sessionId)
     }
   }
 

@@ -1,18 +1,8 @@
-interface SkipRule {
-  pattern: RegExp
-}
+import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, TimedExecution, type FilterDefinition } from './rtk'
 
-interface ReplaceRule {
-  pattern: RegExp
-  replacement: string
-}
-
-interface MatchOutputRule {
-  contains?: string
-  pattern?: RegExp
-  output: string
-  unless?: string
-}
+interface SkipRule { pattern: RegExp }
+interface ReplaceRule { pattern: RegExp; replacement: string }
+interface MatchOutputRule { contains?: string; pattern?: RegExp; output: string; unless?: string }
 
 export interface FilterConfig {
   name: string
@@ -52,6 +42,20 @@ export interface FilterStats {
   totalOriginalTokens: number
   totalFilteredTokens: number
   eventsProcessed: number
+}
+
+export interface CommandEvent {
+  sessionId: string
+  command: string
+  args: string[]
+  rawOutput: string
+  filteredOutput: string
+  filterName: string | null
+  originalTokens: number
+  filteredTokens: number
+  reduction: number
+  exitCode: number | null
+  duration: number
 }
 
 const DEFAULT_CONFIGS: FilterConfig[] = [
@@ -113,23 +117,126 @@ export class OutputFilterService {
   private lastLines = new Map<string, string>()
   private dedupWindows = new Map<string, string[]>()
   private onEvent: ((event: FilterEvent) => void) | null = null
+  private onCommandEvent: ((event: CommandEvent) => void) | null = null
   private commandCounters = new Map<string, number>()
 
+  private commandBuffers = new Map<string, { command: string; args: string[]; output: string; startTime: number; exitCode: number | null }>()
+  private inputBuffer = new Map<string, string>()
+  private finalizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private rtkSessions = new Set<string>()
+
   static readonly MAX_HISTORY = 200
+  static readonly AUTO_FINALIZE_DELAY = 3000
 
   constructor(customConfigs?: FilterConfig[]) {
     this.configs = customConfigs ?? DEFAULT_CONFIGS
+  }
+
+  enableRtk(sessionId: string): void {
+    this.rtkSessions.add(sessionId)
+  }
+
+  disableRtk(sessionId: string): void {
+    this.rtkSessions.delete(sessionId)
+  }
+
+  isRtkActive(sessionId: string): boolean {
+    return this.rtkSessions.has(sessionId)
+  }
+
+  private scheduleFinalize(sessionId: string): void {
+    if (!this.rtkSessions.has(sessionId)) return
+    this.clearFinalizeTimer(sessionId)
+    const timer = setTimeout(() => {
+      this.finalizeCommand(sessionId, 0)
+    }, OutputFilterService.AUTO_FINALIZE_DELAY)
+    this.finalizeTimers.set(sessionId, timer)
+  }
+
+  private clearFinalizeTimer(sessionId: string): void {
+    const existing = this.finalizeTimers.get(sessionId)
+    if (existing) {
+      clearTimeout(existing)
+      this.finalizeTimers.delete(sessionId)
+    }
   }
 
   setOnEvent(cb: (event: FilterEvent) => void) {
     this.onEvent = cb
   }
 
+  setOnCommandEvent(cb: (event: CommandEvent) => void) {
+    this.onCommandEvent = cb
+  }
+
   setSessionConfig(sessionId: string, config: FilterConfig) {
     this.sessionConfigs.set(sessionId, config)
   }
 
+  trackInput(sessionId: string, input: string): void {
+    if (!this.rtkSessions.has(sessionId)) return
+    const prev = this.inputBuffer.get(sessionId) || ''
+    const full = prev + input
+    this.inputBuffer.set(sessionId, full)
+    const lines = full.split('\n')
+    if (lines.length > 1) {
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].trim()
+        this.processCommandLine(sessionId, line)
+      }
+      this.inputBuffer.set(sessionId, lines[lines.length - 1])
+    }
+
+    if (full.length > 10000) {
+      this.inputBuffer.set(sessionId, full.slice(-5000))
+    }
+  }
+
+  private detectShellPrompt(text: string): boolean {
+    const promptPatterns = [
+      /^\$\s*$/m, /^%\s*$/m, /^#\s*$/m,
+      /^[\w@~][\w.-]*[:/][\w.-]*(?:\$|%|#)\s*/m,
+      /^\([\w.-]+\)\s*\$\s*/m,
+      /^λ\s*/m,
+      /^❯\s*/m,
+      /^➜\s*/m,
+    ]
+    return promptPatterns.some(p => p.test(text))
+  }
+
+  private processCommandLine(sessionId: string, line: string): void {
+    if (!line || line.startsWith('#') || line.startsWith('//')) return
+    const promptMatch = line.match(/[$#%❯➜λ]\s*(.+)/)
+    const cmdStr = promptMatch ? promptMatch[1].trim() : line.trim()
+    if (!cmdStr) return
+    const detected = detectCommand(cmdStr)
+    if (!detected) return
+    const { command, args } = detected
+
+    const existing = this.commandBuffers.get(sessionId)
+    if (existing && existing.exitCode === null) {
+      existing.exitCode = null
+    }
+
+    this.commandBuffers.set(sessionId, {
+      command,
+      args,
+      output: '',
+      startTime: Date.now(),
+      exitCode: null,
+    })
+  }
+
   processOutput(sessionId: string, data: string): FilterEvent | null {
+    const cmdBuf = this.commandBuffers.get(sessionId)
+    if (cmdBuf && cmdBuf.exitCode === null) {
+      cmdBuf.output += data
+      if (cmdBuf.output.length > 500000) {
+        cmdBuf.output = cmdBuf.output.slice(-500000)
+      }
+      this.scheduleFinalize(sessionId)
+    }
+
     const config = this.sessionConfigs.get(sessionId)
     if (!config) {
       return null
@@ -163,13 +270,13 @@ export class OutputFilterService {
         const trimmed = l.trim()
         return !(/^[\d]+\/[\d]+/.test(trimmed) && trimmed.length < 60 && /[\d.]+%/.test(trimmed))
       })
-      if (lines.length !== before && lines.length !== before) rulesApplied.push('stripProgressBars')
+      if (lines.length !== before) rulesApplied.push('stripProgressBars')
     }
 
     if (config.trimLines) {
-      const before = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const before = lines.reduce((a, l) => a + l.length, 0)
       lines = lines.map(l => l.trimEnd())
-      const after = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const after = lines.reduce((a, l) => a + l.length, 0)
       if (before !== after) rulesApplied.push('trimLines')
     }
 
@@ -241,9 +348,9 @@ export class OutputFilterService {
     }
 
     if (config.truncateLinesAt !== undefined) {
-      const before = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const before = lines.reduce((a, l) => a + l.length, 0)
       lines = lines.map(l => l.length > config.truncateLinesAt! ? l.slice(0, config.truncateLinesAt!) + '…' : l)
-      const after = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const after = lines.reduce((a, l) => a + l.length, 0)
       if (before !== after) rulesApplied.push(`truncateLinesAt:${config.truncateLinesAt}`)
     }
 
@@ -255,10 +362,7 @@ export class OutputFilterService {
         if (rule.pattern && rule.pattern.test(combined)) matched = true
         if (matched && rule.unless && combined.includes(rule.unless)) matched = false
         if (matched) {
-          const replacement = rule.output
-            .replace('{lines}', String(lines.length))
-            .replace('{bytes}', String(combined.length))
-          lines = replacement.split('\n')
+          lines = rule.output.replace('{lines}', String(lines.length)).replace('{bytes}', String(combined.length)).split('\n')
           rulesApplied.push(`matchOutput:${rule.output.slice(0, 40)}`)
           break
         }
@@ -310,8 +414,58 @@ export class OutputFilterService {
     this.commandCounters.set(sessionId, counter)
 
     this.onEvent?.(event)
-
     return event
+  }
+
+  finalizeCommand(sessionId: string, exitCode: number | null = null): CommandEvent | null {
+    const cmdBuf = this.commandBuffers.get(sessionId)
+    if (!cmdBuf || !cmdBuf.output.trim()) return null
+
+    cmdBuf.exitCode = exitCode
+    const rawOutput = cmdBuf.output
+    const cmdStr = `${cmdBuf.command} ${cmdBuf.args.join(' ')}`.trim()
+
+    const rtkFiltered = filterCommandOutput(cmdStr, rawOutput)
+    const filtered = neverWorse(rawOutput, rtkFiltered.filtered)
+
+    const originalTokens = estimateTokens(rawOutput)
+    const filteredTokens = estimateTokens(filtered)
+    const reduction = originalTokens > 0
+      ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
+      : 0
+
+    const event: CommandEvent = {
+      sessionId,
+      command: cmdBuf.command,
+      args: cmdBuf.args,
+      rawOutput,
+      filteredOutput: filtered,
+      filterName: rtkFiltered.filterName,
+      originalTokens,
+      filteredTokens,
+      reduction,
+      exitCode: cmdBuf.exitCode,
+      duration: Date.now() - cmdBuf.startTime,
+    }
+
+    const tracker = getTracker()
+    tracker.record(
+      cmdStr,
+      rtkFiltered.filterName ? `${cmdBuf.command} (filtered)` : cmdStr,
+      originalTokens,
+      filteredTokens,
+      event.duration,
+    )
+
+    this.addToCommandHistory(event)
+    this.onCommandEvent?.(event)
+
+    this.commandBuffers.delete(sessionId)
+    return event
+  }
+
+  addCustomFilter(name: string, def: FilterDefinition): void {
+    getRegistry().addFilter(name, def)
   }
 
   getSessionStats(sessionId: string): FilterStats | null {
@@ -340,6 +494,27 @@ export class OutputFilterService {
     return all
   }
 
+  getCommandHistory(sessionId: string): CommandEvent[] {
+    return this._commandHistory.get(sessionId) || []
+  }
+
+  getAllCommandHistory(): CommandEvent[] {
+    const all: CommandEvent[] = []
+    for (const [, hist] of this._commandHistory) {
+      all.push(...hist)
+    }
+    return all
+  }
+
+  private _commandHistory = new Map<string, CommandEvent[]>()
+
+  private addToCommandHistory(event: CommandEvent): void {
+    const hist = this._commandHistory.get(event.sessionId) || []
+    hist.push(event)
+    if (hist.length > 200) hist.shift()
+    this._commandHistory.set(event.sessionId, hist)
+  }
+
   cleanup(sessionId: string) {
     this.sessionConfigs.delete(sessionId)
     this.sessionHistory.delete(sessionId)
@@ -347,6 +522,9 @@ export class OutputFilterService {
     this.lastLines.delete(sessionId)
     this.dedupWindows.delete(sessionId)
     this.commandCounters.delete(sessionId)
+    this.commandBuffers.delete(sessionId)
+    this.inputBuffer.delete(sessionId)
+    this._commandHistory.delete(sessionId)
   }
 
   reset() {
@@ -356,6 +534,9 @@ export class OutputFilterService {
     this.lastLines.clear()
     this.dedupWindows.clear()
     this.commandCounters.clear()
+    this.commandBuffers.clear()
+    this.inputBuffer.clear()
+    this._commandHistory.clear()
   }
 }
 
@@ -369,8 +550,4 @@ function collapseEmptyLines(lines: string[]): string[] {
     prevEmpty = isEmpty
   }
   return result
-}
-
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4))
 }

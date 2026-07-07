@@ -12,7 +12,7 @@ import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
 import OutputFilterDebug from './components/OutputFilterDebug'
-import CavemanPanel from './components/CavemanPanel'
+import RtkDashboard from './components/RtkDashboard'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import HistoryPanel from './components/HistoryPanel'
@@ -123,7 +123,7 @@ function App() {
     filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit,
-    toggleCaveman, onCavemanRun, cavemanStates, cavemanAggregateStats,
+    commandHistory,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -135,7 +135,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | 'caveman' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | 'rtk' | null>(null)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
   })
@@ -815,9 +815,7 @@ function App() {
           <div className="activity-bar">
             <div className="activity-bar-top">
               <div className="activity-logo" title="AgntSpce">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#22C55E">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15l-5-5 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/>
-                </svg>
+                <img src="/img/logo-icon.png" alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
               </div>
               <button
                 className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
@@ -850,11 +848,11 @@ function App() {
                 <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className={`activity-bar-btn ${activeView === 'caveman' ? 'active' : ''}`}
-                onClick={() => setActiveView(prev => prev === 'caveman' ? null : 'caveman')}
-                title="Caveman Mode Stats"
+                className={`activity-bar-btn ${activeView === 'rtk' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'rtk' ? null : 'rtk')}
+                title="AgntSpce Filter Debug"
               >
-                <span style={{ fontSize: 20, lineHeight: '24px' }}>🪨</span>
+                <i className="codicon codicon-rocket" style={{ fontSize: 24 }}></i>
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
@@ -999,11 +997,10 @@ function App() {
                   fetchFileDiff={getGitFileDiff}
                 />
               )},
-              { id: 'caveman', label: 'Caveman', icon: '🪨', render: () => (
-                <CavemanPanel
-                  cavemanStates={cavemanStates}
-                  aggregateStats={cavemanAggregateStats}
-                  onCavemanRun={onCavemanRun}
+              { id: 'rtk', label: 'Filter', icon: '🚀', render: () => (
+                <RtkDashboard
+                  filterStats={filterStats}
+                  commandHistory={commandHistory}
                   onClose={() => setActiveView(null)}
                 />
               )},
