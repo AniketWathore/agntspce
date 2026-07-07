@@ -228,6 +228,36 @@ export class OutputFilterService {
   }
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
+    if (this.rtkSessions.has(sessionId)) {
+      const lines = data.split('\n')
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed && /^[$#%❯➜λ]\s+\S/.test(trimmed)) {
+          const match = trimmed.match(/^[$#%❯➜λ]\s+(.+)/)
+          if (match) {
+            const cmdStr = match[1].trim()
+            const detected = detectCommand(cmdStr)
+            if (detected) {
+              const existing = this.commandBuffers.get(sessionId)
+              if (existing && existing.exitCode === null) {
+                this.clearFinalizeTimer(sessionId)
+                if (existing.output.trim()) {
+                  this.finalizeCommand(sessionId, 0)
+                }
+              }
+              this.commandBuffers.set(sessionId, {
+                command: detected.command,
+                args: detected.args,
+                output: '',
+                startTime: Date.now(),
+                exitCode: null,
+              })
+            }
+          }
+        }
+      }
+    }
+
     const cmdBuf = this.commandBuffers.get(sessionId)
     if (cmdBuf && cmdBuf.exitCode === null) {
       cmdBuf.output += data

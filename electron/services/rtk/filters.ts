@@ -526,6 +526,16 @@ export const BUILTIN_FILTERS: Record<string, FilterDefinition> = {
     tailLines: 5,
     onEmpty: 'ok',
   },
+
+  'strip-ansi': {
+    description: 'Strip ANSI/terminal control codes from any command output',
+    matchCommand: '.*',
+    stripAnsi: true,
+    stripEmpty: true,
+    collapseEmpty: true,
+    headLines: 500,
+    truncateLinesAt: 5000,
+  },
 }
 
 export const RUST_HANDLED_COMMANDS = new Set([
