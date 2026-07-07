@@ -225,6 +225,12 @@
   border-bottom: 1px solid var(--border);
 }
 
+.title-bar-mac {
+  padding-left: 80px;
+  min-height: 38px;
+  height: 38px;
+}
+
 .title-bar-menus {
   display: flex;
   align-items: center;

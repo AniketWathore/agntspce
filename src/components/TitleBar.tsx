@@ -8,10 +8,17 @@ const MENUS = ['File', 'Edit', 'View', 'Window', 'Help']
 
 export default function TitleBar({ unreadCount, notificationPanelOpen, onNotificationClick }: Props) {
   const isMac = navigator.platform?.startsWith('Mac')
-  if (isMac) return null
 
   function handleMenuClick(e: React.MouseEvent, label: string) {
     window.electronAPI?.popupMenu(label, Math.round(e.screenX), Math.round(e.screenY))
+  }
+
+  if (isMac) {
+    return (
+      <div className="title-bar title-bar-mac">
+        <div className="title-bar-drag" />
+      </div>
+    )
   }
 
   return (
