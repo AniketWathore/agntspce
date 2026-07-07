@@ -325,7 +325,7 @@ export class SessionManager extends EventEmitter {
 
       this.outputFilter.processOutput(sessionId, data)
 
-      this.processSessionOutput(sessionId, data)
+
 
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
@@ -390,10 +390,6 @@ export class SessionManager extends EventEmitter {
       session.pty.write(data)
       return true
     } catch { return false }
-  }
-
-  private processSessionOutput(sessionId: string, data: string): void {
-    this.cavemanService.processOutput(sessionId, data)
   }
 
   resizeSession(sessionId: string, cols: number, rows: number) {

@@ -1,33 +1,12 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
-export interface CavemanChunk {
-  compressedText: string
-  originalText: string
-  compressedTokens: number
-  originalTokens: number
-  savedTokens: number
-  removed: string[]
-}
-
 export interface CavemanRun {
   id: string
   prompt: string
   startedAt: number
   endedAt: number
-  chunks: CavemanChunk[]
-  totalCompressedTokens: number
-  totalOriginalTokens: number
-  totalSavedTokens: number
-  removedWords: string[]
-}
-
-export interface CavemanSession {
-  sessionId: string
-  enabled: boolean
-  level: string
-  runs: CavemanRun[]
-  startTime: number
+  agentResponseTokens: number
 }
 
 export interface CavemanStats {
@@ -41,8 +20,6 @@ export interface CavemanStats {
 }
 
 export interface CavemanAggregateStats {
-  totalOutputTokens: number
-  totalSavedTokens: number
   sessionsActive: number
   uptimeMs: number
 }
@@ -52,23 +29,40 @@ interface InternalSession {
   level: string
   runs: CavemanRun[]
   currentRun: CavemanRun | null
-  rawBuffer: string
   pendingPrompt: string
   startTime: number
 }
 
-const SKILL_MD = `---
+function skillMdForLevel(level: string): string {
+  const lite = `---
 name: caveman
-description: Ultra-compressed communication mode.
+description: Lite compression — drop filler, keep sentences.
+---
+
+You are in caveman mode (lite). Respond professionally but without fluff.
+
+## Rules
+Drop: filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging (perhaps/maybe/I think).
+Keep: articles (a/an/the), full sentences, grammar.
+Technical terms exact. Code blocks unchanged. Errors quoted exact.
+
+## Persistence
+ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift.
+
+## Boundaries
+Code/commits/PRs: write normal. "stop caveman" / "normal mode": revert.
+`
+
+  const full = `---
+name: caveman
+description: Full compression — fragments, no articles, ~65% fewer tokens.
 ---
 
 Respond terse like smart caveman. All technical substance stay. Only fluff die.
 
 ## Rules
-Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms. No tool-call narration, no decorative tables/emoji. Technical terms exact. Code blocks unchanged. Errors quoted exact.
-
+Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). No tool-call narration, no decorative tables/emoji. Technical terms exact. Code blocks unchanged. Errors quoted exact.
 Preserve user's dominant language. No self-reference.
-
 Pattern: [thing] [action] [reason]. [next step].
 
 ## Persistence
@@ -81,7 +75,48 @@ Drop caveman for: security warnings, irreversible actions, user confused. Resume
 Code/commits/PRs: write normal. "stop caveman" / "normal mode": revert.
 `
 
-const CLAUDE_MD_RULES = `# Caveman Mode — Active
+  const ultra = `---
+name: caveman
+description: Ultra compression — telegraphic, ~75% fewer tokens.
+---
+
+Speak maximum terse. Only essential technical content. No grammar.
+
+## Rules
+Abbreviate (DB/auth/config/req/res/fn/impl). Strip conjunctions (and/or/but). Arrows for causality (X → Y). One word when one word enough. Drop all articles, filler, pleasantries, hedging. No sentences — fragments only. No tool-call narration, no decorative tables/emoji. Technical terms exact. Code blocks unchanged. Errors quoted exact.
+Preserve user's dominant language. No self-reference.
+
+## Persistence
+ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift.
+
+## Auto-Clarity
+Drop caveman for: security warnings, irreversible actions, user confused. Resume after.
+
+## Boundaries
+Code/commits/PRs: write normal. "stop caveman" / "normal mode": revert.
+`
+
+  switch (level) {
+    case 'lite': return lite
+    case 'ultra': return ultra
+    default: return full
+  }
+}
+
+function claudeMdRulesForLevel(level: string): string {
+  const lite = `# Caveman Mode — Lite
+
+Respond professionally without fluff.
+
+**Rules:**
+- Drop: filler (just/really/basically), pleasantries, hedging
+- Keep: articles, full sentences, grammar
+- Technical terms exact. Code unchanged.
+
+**Stop caveman:** user says "stop caveman" or "normal mode".
+`
+
+  const full = `# Caveman Mode — Active
 
 Respond terse like smart caveman. All technical substance stay. Only fluff die.
 
@@ -95,21 +130,25 @@ Respond terse like smart caveman. All technical substance stay. Only fluff die.
 **Stop caveman:** user says "stop caveman" or "normal mode".
 `
 
-const TOOL_CALL_RE = /^\[(Read|Write|Edit|Bash|Grep|Glob|WebSearch|WebFetch|Task|Question|Skill|Tool|Search|Replace)\b/i
-const THOUGHT_RE = /^\s*thought:\s*\d+ms/i
-const TIMING_RE = /^\[(\d+\.?\d*)(ms|s)\]/i
-const TOOK_RE = /^took \d+\.?\d* (ms|seconds)/i
-const SYSTEM_REMINDER_RE = /^<\/?system-reminder>/i
-const LSP_RE = /^LSPs?\s+(are\s+)?disabled/i
-const BUILD_RE = /^Build · /i
-const TOKEN_STATS_RE = /^\d+\s+tokens?(?:\s|$)/i
-const TOKEN_LABEL_RE = /^(Total|Input|Output)\s+Tokens?:/i
-const SHELL_PROMPT_RE = /^\$?\s*(cd|ls|cat|git|npm|node|echo|exit|clear)\b/i
-const SHELL_ARROW_RE = /^\s*[❯▶$#]\s/
-const TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T/
-const VERSION_RE = /^(Using\s+)?(python|node|typescript|javascript|go|rust|ruby|java|kotlin|swift)\b.*version/i
-const HASH_RE = /^(sha256|sha384|sha512)[a-f0-9]+\s+/
-const DEC_SEQ_RE = /^\[?\?[\d;]+[a-z$]/i
+  const ultra = `# Caveman Mode — Ultra
+
+Speak maximum terse. Only essential technical content.
+
+**Rules:**
+- Abbreviate (DB/auth/config/req/res/fn/impl)
+- Strip conjunctions, articles, filler
+- Fragments only. Arrows for causality (X → Y)
+- Technical terms exact. Code unchanged.
+
+**Stop caveman:** user says "stop caveman" or "normal mode".
+`
+
+  switch (level) {
+    case 'lite': return lite
+    case 'ultra': return ultra
+    default: return full
+  }
+}
 
 export class CavemanService {
   private sessions = new Map<string, InternalSession>()
@@ -146,35 +185,8 @@ export class CavemanService {
         if (data?.sessions) {
           for (const [sid, s] of data.sessions) {
             s.currentRun = null
-            s.rawBuffer = ''
             s.pendingPrompt = ''
-            if (s.runs) {
-              for (const run of s.runs) {
-                if ('totalRawTokens' in run) {
-                  run.totalCompressedTokens = run.totalRawTokens
-                  run.totalOriginalTokens = run.totalExpandedTokens || 0
-                  run.totalSavedTokens = Math.max(0, run.totalOriginalTokens - run.totalCompressedTokens)
-                  delete run.totalRawTokens
-                  delete run.totalExpandedTokens
-                }
-                if (run.chunks) {
-                  for (const chunk of run.chunks) {
-                    if ('rawText' in chunk) {
-                      chunk.compressedText = chunk.rawText
-                      chunk.originalText = chunk.expandedText || ''
-                      chunk.compressedTokens = chunk.rawTokens || 0
-                      chunk.originalTokens = chunk.expandedTokens || 0
-                      chunk.savedTokens = Math.max(0, chunk.originalTokens - chunk.compressedTokens)
-                      delete chunk.rawText
-                      delete chunk.expandedText
-                      delete chunk.rawTokens
-                      delete chunk.expandedTokens
-                    }
-                  }
-                }
-              }
-            }
-            this.sessions.set(sid, s)
+            this.sessions.set(sid, s as InternalSession)
             if (s.runs.length > this.runCounter) {
               this.runCounter = s.runs.length
             }
@@ -195,7 +207,6 @@ export class CavemanService {
           level: s.level,
           runs: s.runs,
           currentRun: null,
-          rawBuffer: '',
           pendingPrompt: '',
           startTime: s.startTime,
         }])
@@ -235,7 +246,6 @@ export class CavemanService {
           level: (level as any) || 'full',
           runs: [],
           currentRun: null,
-          rawBuffer: '',
           pendingPrompt: '',
           startTime: Date.now(),
         })
@@ -280,21 +290,24 @@ export class CavemanService {
     const state = this.sessions.get(sessionId)
     if (!state || !state.enabled) return
 
-    this.endRun(sessionId)
-    state.rawBuffer = ''
+    if (state.currentRun) {
+      const actualPrompt = prompt || this.consumePrompt(sessionId) || state.currentRun.prompt
+      if (state.currentRun.prompt === '(pending)') {
+        state.currentRun.prompt = actualPrompt.slice(0, 500)
+      }
+      return
+    }
 
-    const actualPrompt = prompt || this.consumePrompt(sessionId) || '(unknown)'
+    this.endRun(sessionId)
+
+    const actualPrompt = prompt || this.consumePrompt(sessionId) || '(pending)'
     this.runCounter++
     state.currentRun = {
       id: `run_${this.runCounter}_${Date.now()}`,
       prompt: actualPrompt.slice(0, 500),
       startedAt: Date.now(),
       endedAt: 0,
-      chunks: [],
-      totalCompressedTokens: 0,
-      totalOriginalTokens: 0,
-      totalSavedTokens: 0,
-      removedWords: [],
+      agentResponseTokens: 0,
     }
   }
 
@@ -304,30 +317,11 @@ export class CavemanService {
     const run = state.currentRun
     run.endedAt = Date.now()
 
-    const originalText = state.rawBuffer.trim()
-    state.rawBuffer = ''
-
-    if (originalText.length > 10) {
-      const compressedText = compressAgentOutput(originalText)
-      const originalTokens = estimateTokens(originalText)
-      const compressedTokens = estimateTokens(compressedText)
-      const savedTokens = Math.max(0, originalTokens - compressedTokens)
-      const removed = findRemovedWords(compressedText, originalText)
-
-      const chunk: CavemanChunk = {
-        compressedText,
-        originalText,
-        compressedTokens,
-        originalTokens,
-        savedTokens,
-        removed: removed.slice(0, 20),
+    if (run.prompt === '(pending)') {
+      const stored = this.consumePrompt(sessionId)
+      if (stored) {
+        run.prompt = stored.slice(0, 500)
       }
-
-      run.chunks = [chunk]
-      run.totalCompressedTokens = compressedTokens
-      run.totalOriginalTokens = originalTokens
-      run.totalSavedTokens = savedTokens
-      run.removedWords = removed.slice(0, 30)
     }
 
     state.runs.push(run)
@@ -337,43 +331,6 @@ export class CavemanService {
     this.saveToDisk()
   }
 
-  processOutput(sessionId: string, text: string): void {
-    const state = this.sessions.get(sessionId)
-    if (!state || !state.enabled) return
-
-    let clean = cleanTerminalOutput(text)
-    if (!clean || clean.length < 20) return
-    if (HASH_RE.test(clean)) return
-    if (TIMESTAMP_RE.test(clean)) return
-    if (SHELL_PROMPT_RE.test(clean) && clean.length < 60) return
-    if (SHELL_ARROW_RE.test(clean)) return
-    if (DEC_SEQ_RE.test(clean)) return
-    if (TOOL_CALL_RE.test(clean) && clean.length < 80) return
-    if (estimateTokens(clean) < 5) return
-
-    let run = state.currentRun
-    if (!run) {
-      const autoPrompt = this.consumePrompt(sessionId) || '(unknown)'
-      this.runCounter++
-      run = {
-        id: `run_${this.runCounter}_${Date.now()}`,
-        prompt: autoPrompt.slice(0, 500),
-        startedAt: Date.now(),
-        endedAt: 0,
-        chunks: [],
-        totalCompressedTokens: 0,
-        totalOriginalTokens: 0,
-        totalSavedTokens: 0,
-        removedWords: [],
-      }
-      state.currentRun = run
-      state.rawBuffer = ''
-    }
-
-    if (state.rawBuffer) state.rawBuffer += ' '
-    state.rawBuffer += clean
-  }
-
   writeSkillFiles(workspacePath: string, agentId: string): void {
     if (!workspacePath) return
     switch (agentId) {
@@ -381,18 +338,22 @@ export class CavemanService {
         const dir = path.join(workspacePath, '.opencode', 'skills', 'caveman')
         const p = path.join(dir, 'SKILL.md')
         try {
+          const firstSession = this.sessions.values().next().value
+          const level = firstSession?.level || 'full'
           fs.mkdirSync(dir, { recursive: true })
-          fs.writeFileSync(p, SKILL_MD, 'utf-8')
+          fs.writeFileSync(p, skillMdForLevel(level), 'utf-8')
         } catch {}
         break
       }
       case 'claude': {
         const p = path.join(workspacePath, 'CLAUDE.md')
         try {
+          const firstSession = this.sessions.values().next().value
+          const level = firstSession?.level || 'full'
           let existing = ''
           try { existing = fs.readFileSync(p, 'utf-8') } catch {}
           if (!existing.includes('Caveman Mode')) {
-            fs.writeFileSync(p, existing.trim() ? existing + '\n\n' + CLAUDE_MD_RULES : CLAUDE_MD_RULES, 'utf-8')
+            fs.writeFileSync(p, existing.trim() ? existing + '\n\n' + claudeMdRulesForLevel(level) : claudeMdRulesForLevel(level), 'utf-8')
           }
         } catch {}
         break
@@ -441,165 +402,17 @@ export class CavemanService {
   }
 
   getAggregateStats(): CavemanAggregateStats {
-    let totalOutputTokens = 0
-    let totalSavedTokens = 0
     let sessionsActive = 0
     let earliestStart = Date.now()
 
     for (const [, state] of this.sessions) {
       if (state.enabled) sessionsActive++
-      for (const run of state.runs) {
-        totalOutputTokens += run.totalOriginalTokens
-        totalSavedTokens += run.totalSavedTokens
-      }
       if (state.startTime < earliestStart) earliestStart = state.startTime
     }
 
     return {
-      totalOutputTokens,
-      totalSavedTokens,
       sessionsActive,
       uptimeMs: Date.now() - earliestStart,
     }
   }
-}
-
-function estimateTokens(text: string): number {
-  if (!text || text.length === 0) return 0
-  return Math.max(1, Math.ceil(text.length / 4))
-}
-
-function cleanTerminalOutput(text: string): string {
-  let clean = text
-    .replace(/\x1b\[[\d;]*[A-Za-z]/g, '')
-    .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1bP[\s\S]*?\x1b\\/g, '')
-    .replace(/\x1b[<>]/g, '')
-    .replace(/\[\?[\d;]+[a-z\$]/gi, '')
-    .replace(/;[\d;]+m?/g, '')
-    .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '')
-    .replace(/[\u2500-\u259F\u2580-\u259F▄▀█▌▐░▒▓▔▕]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  return clean
-}
-
-function compressAgentOutput(text: string): string {
-  const lines = text.split('\n')
-  const result: string[] = []
-  let inCodeBlock = false
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-
-    if (/^```/.test(trimmed)) {
-      result.push(line)
-      inCodeBlock = !inCodeBlock
-      continue
-    }
-
-    if (inCodeBlock) {
-      result.push(line)
-      continue
-    }
-
-    if (!trimmed) continue
-
-    if (THOUGHT_RE.test(trimmed)) continue
-    if (TIMING_RE.test(trimmed)) continue
-    if (TOOK_RE.test(trimmed)) continue
-    if (SYSTEM_REMINDER_RE.test(trimmed)) continue
-    if (TOOL_CALL_RE.test(trimmed)) continue
-    if (LSP_RE.test(trimmed)) continue
-    if (BUILD_RE.test(trimmed)) continue
-    if (TOKEN_STATS_RE.test(trimmed) && trimmed.length < 50) continue
-    if (TOKEN_LABEL_RE.test(trimmed)) continue
-    if (VERSION_RE.test(trimmed) && trimmed.length < 60) continue
-    if (SHELL_PROMPT_RE.test(trimmed) && trimmed.length < 60) continue
-
-    if (/^\[?[\d;]+[A-Za-z$]/.test(trimmed) && trimmed.length < 40) continue
-
-    if (/^⚡/.test(trimmed)) continue
-
-    result.push(line)
-  }
-
-  let compressed = result.join('\n')
-
-  compressed = compressed
-    .replace(/\b(a|an|the)\s+/gi, '')
-    .replace(/\b(just|really|basically|actually|simply|literally|essentially)\s+/gi, '')
-    .replace(/\b(sure|certainly|of course|happy to|absolutely|definitely)\s+/gi, '')
-    .replace(/\b(perhaps|maybe|probably|possibly|likely)\s+/gi, '')
-    .replace(/\bI\s+(think|believe|would say|would think|guess|suppose|reckon)\s+/gi, 'I ')
-    .replace(/\b(Let'?s?)\s+(me|us)\s+/gi, '')
-    .replace(/\binformation\b/gi, 'info')
-    .replace(/\bconfiguration\b/gi, 'config')
-    .replace(/\bdocumentation\b/gi, 'docs')
-    .replace(/\brepository\b/gi, 'repo')
-    .replace(/\bapplication\b/gi, 'app')
-    .replace(/\bimplementation\b/gi, 'impl')
-    .replace(/\binitialize\b/gi, 'init')
-    .replace(/\btemporary\b/gi, 'temp')
-    .replace(/\bapproximately\b/gi, 'approx')
-    .replace(/\bprevious\b/gi, 'prev')
-    .replace(/\bcurrent\b/gi, 'curr')
-    .replace(/\binformation\b/gi, 'info')
-    .replace(/\bparameter(s)?\b/gi, 'param$1')
-    .replace(/\bargument(s)?\b/gi, 'arg$1')
-    .replace(/\bproperty\b/gi, 'prop')
-    .replace(/\bvalue(s)?\b/gi, 'val$1')
-    .replace(/\bdirectory\b/gi, 'dir')
-    .replace(/\bplease\b/gi, '')
-    .replace(/\b(thank you|thanks|thx|ty)\b/gi, '')
-    .replace(/^(Therefore|Thus|Hence|So),?\s*/gim, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
-
-  if (!compressed) return text
-
-  return compressed
-}
-
-const COMMON_WORDS = new Set([
-  'the','and','for','are','was','but','not','you','all','can','has','had','its','that','this',
-  'with','from','they','have','been','were','more','some','which','when','what','your','their',
-  'each','will','about','than','them','into','also','other','after','just','only','very','such',
-  'been','said','does',
-])
-
-function isLikelyRealWord(w: string): boolean {
-  if (w.length < 3 || w.length > 20) return false
-  if (/^[^aeiouy]{4,}$/i.test(w)) return false
-  if (/^[a-z]*([a-z])\1{3,}[a-z]*$/i.test(w)) return false
-  return true
-}
-
-function findRemovedWords(compressed: string, original: string): string[] {
-  const normalized = (s: string) => s.replace(/[^a-zA-Z\s]/g, '').toLowerCase()
-
-  const compNorm = normalized(compressed)
-  const origNorm = normalized(original)
-
-  const compWords = [...new Set(compNorm.split(/\s+/).filter(w => w.length > 2))]
-  const origWords = [...new Set(origNorm.split(/\s+/).filter(w => w.length > 2))]
-
-  const compSet = new Set(compWords)
-
-  const removed: string[] = []
-
-  for (const w of origWords) {
-    if (!compSet.has(w) && !COMMON_WORDS.has(w) && isLikelyRealWord(w)) {
-      removed.push(w)
-    }
-  }
-
-  const scored = removed.map(w => ({
-    word: w,
-    score: w.length + (w.endsWith('ing') ? 3 : 0) + (w.endsWith('tion') ? 3 : 0) + (w.endsWith('ment') ? 2 : 0) + (w.endsWith('ance') ? 2 : 0) + (w.endsWith('ency') ? 2 : 0),
-  }))
-  scored.sort((a, b) => b.score - a.score)
-
-  return scored.slice(0, 15).map(s => s.word)
 }

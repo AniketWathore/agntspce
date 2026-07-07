@@ -88,7 +88,7 @@ export function useSocket(): UseSocketReturn {
   const [filterHistory, setFilterHistory] = useState<FilterEvent[]>([])
   const [cavemanStates, setCavemanStates] = useState<Record<string, CavemanStats>>({})
   const [cavemanAggregateStats, setCavemanAggregateStats] = useState<CavemanAggregateStats>({
-    totalOutputTokens: 0, totalSavedTokens: 0, sessionsActive: 0, uptimeMs: 0,
+    sessionsActive: 0, uptimeMs: 0,
   })
   const cavemanRunCbs = useRef<((data: { sessionId: string, run: CavemanRun }) => void)[]>([])
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
@@ -223,11 +223,7 @@ export function useSocket(): UseSocketReturn {
         },
       }
     })
-    setCavemanAggregateStats(prev => ({
-      ...prev,
-      totalOutputTokens: prev.totalOutputTokens + data.run.totalOriginalTokens,
-      totalSavedTokens: prev.totalSavedTokens + data.run.totalSavedTokens,
-    }))
+    setCavemanAggregateStats(prev => ({ ...prev }))
     cavemanRunCbs.current.forEach(cb => cb(data))
   })
 
@@ -414,7 +410,7 @@ export function useSocket(): UseSocketReturn {
     return new Promise((resolve) => {
       socketRef.current?.emit('caveman-all-states', {}, (res: any) => {
         if (res?.ok) resolve({ states: res.states, aggregate: res.aggregate })
-        else resolve({ states: [], aggregate: { totalOutputTokens: 0, totalSavedTokens: 0, sessionsActive: 0, uptimeMs: 0 } })
+        else resolve({ states: [], aggregate: { sessionsActive: 0, uptimeMs: 0 } })
       })
     })
   }, [])

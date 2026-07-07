@@ -125,25 +125,12 @@ export interface FilterStats {
   eventsProcessed: number
 }
 
-export interface CavemanChunk {
-  compressedText: string
-  originalText: string
-  compressedTokens: number
-  originalTokens: number
-  savedTokens: number
-  removed: string[]
-}
-
 export interface CavemanRun {
   id: string
   prompt: string
   startedAt: number
   endedAt: number
-  chunks: CavemanChunk[]
-  totalCompressedTokens: number
-  totalOriginalTokens: number
-  totalSavedTokens: number
-  removedWords: string[]
+  agentResponseTokens: number
 }
 
 export interface CavemanStats {
@@ -157,8 +144,6 @@ export interface CavemanStats {
 }
 
 export interface CavemanAggregateStats {
-  totalOutputTokens: number
-  totalSavedTokens: number
   sessionsActive: number
   uptimeMs: number
 }
