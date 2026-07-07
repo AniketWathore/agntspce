@@ -213,9 +213,20 @@ export class OutputFilterService {
     if (!detected) return
     const { command, args } = detected
 
+    const AGENT_COMMANDS = ['opencode', 'claude', 'codex', 'gemini', 'aider']
+    if (AGENT_COMMANDS.includes(command)) {
+      this.enableRtk(sessionId)
+      if (!this.sessionConfigs.has(sessionId)) {
+        this.sessionConfigs.set(sessionId, { name: command })
+      }
+    }
+
     const existing = this.commandBuffers.get(sessionId)
     if (existing && existing.exitCode === null) {
-      existing.exitCode = null
+      this.clearFinalizeTimer(sessionId)
+      if (existing.output.trim()) {
+        this.finalizeCommand(sessionId, 0)
+      }
     }
 
     this.commandBuffers.set(sessionId, {
