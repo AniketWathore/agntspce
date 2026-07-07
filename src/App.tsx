@@ -815,7 +815,7 @@ function App() {
           <div className="activity-bar">
             <div className="activity-bar-top">
               <div className="activity-logo" title="AgntSpce">
-                <img src="/img/logo-icon.png" alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
+                <img src="/img/logo.png" alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
               </div>
               <button
                 className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}

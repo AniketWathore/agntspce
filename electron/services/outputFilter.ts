@@ -371,7 +371,7 @@ export class OutputFilterService {
 
     filtered = lines.join('\n')
 
-    if (filtered === data) {
+    if (rulesApplied.length === 0) {
       return null
     }
 
@@ -419,7 +419,7 @@ export class OutputFilterService {
 
   finalizeCommand(sessionId: string, exitCode: number | null = null): CommandEvent | null {
     const cmdBuf = this.commandBuffers.get(sessionId)
-    if (!cmdBuf || !cmdBuf.output.trim()) return null
+    if (!cmdBuf) return null
 
     cmdBuf.exitCode = exitCode
     const rawOutput = cmdBuf.output
