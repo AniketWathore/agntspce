@@ -13,19 +13,17 @@ interface Props {
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
   onRestart: (sessionId: string) => void
-  onStartAgent: (sessionId: string, config: AgentStartConfig) => void
+  onStartAgent: (sessionId: string) => void
   onShowAgentModal: (sessionId: string) => void
   onClose?: (sessionId: string) => void
   writeData: string
-  agentConfigs: AgentConfig[]
-  style?: CSSProperties
+  agentConfigs?: AgentConfig[]
+  style?: React.CSSProperties
   dimmed?: boolean
-  onTerminalOutput?: (cb: (data: any) => void) => () => void
-  cavemanEnabled?: boolean
-  onToggleCaveman?: (sessionId: string, enabled: boolean) => void
+  onTerminalOutput?: (sessionId: string, data: string) => void
 }
 
-export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, cavemanEnabled, onToggleCaveman }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -157,16 +155,7 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
         {session.branch && session.branch !== 'unknown' && (
           <span className="terminal-branch">{session.branch}</span>
         )}
-        {isAgentType && onToggleCaveman && (
-          <button
-            className={`terminal-caveman-btn ${cavemanEnabled ? 'active' : ''}`}
-            onClick={() => onToggleCaveman(session.id, !cavemanEnabled)}
-            title={cavemanEnabled ? 'Caveman mode ON - click to disable' : 'Caveman mode OFF - click to enable'}
-          >
-            <span className="caveman-icon">🪨</span>
-            <span className="caveman-label">{cavemanEnabled ? 'CAVE' : 'CAVE'}</span>
-          </button>
-        )}
+
         <span className="terminal-session-id">{session.id}</span>
         <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>
         {onClose && (

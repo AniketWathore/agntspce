@@ -155,13 +155,6 @@ function App() {
 
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [sessionHistory, setSessionHistory] = useState<HistoryEntry[]>([])
-  const [cavemanEnabled, setCavemanEnabled] = useState<Record<string, boolean>>({})
-
-  function handleToggleCaveman(sessionId: string, enabled: boolean) {
-    setCavemanEnabled(prev => ({ ...prev, [sessionId]: enabled }))
-    toggleCaveman(sessionId, enabled)
-  }
-
   const [fontSize, setFontSize] = useState(() => {
     try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
   })
@@ -978,8 +971,6 @@ function App() {
             shellOnly={viewMode === 'files'}
             onToggleChatSidebar={handleToggleChatSidebar}
             onTerminalOutput={onTerminalOutput}
-            cavemanEnabled={cavemanEnabled}
-            onToggleCaveman={handleToggleCaveman}
             pageViews={[
               { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
                 <Dashboard

@@ -42,8 +42,6 @@ interface Props {
   activeView: string | null
   onViewChange: (view: string | null) => void
   shellOnly?: boolean
-  cavemanEnabled?: Record<string, boolean>
-  onToggleCaveman?: (sessionId: string, enabled: boolean) => void
 }
 
 const AGENT_TYPES = [
@@ -206,7 +204,6 @@ export default function TerminalArea({
   focusMode, agentsList, bottomShellOpen, onToggleShell,
   chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
   pageViews, activeView, onViewChange, shellOnly,
-  cavemanEnabled, onToggleCaveman,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -435,8 +432,6 @@ export default function TerminalArea({
                   onClose={onCloseTab}
                   dimmed={focusMode && session.id !== activeSessionId}
                   onTerminalOutput={onTerminalOutput}
-                  cavemanEnabled={cavemanEnabled?.[session.id]}
-                  onToggleCaveman={onToggleCaveman}
                 />
               ))}
             </div>
