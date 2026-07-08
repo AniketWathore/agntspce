@@ -1,4 +1,4 @@
-import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, TimedExecution, type FilterDefinition } from './rtk'
+import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, hasSpecificFilter, TimedExecution, type FilterDefinition } from './rtk'
 
 interface SkipRule { pattern: RegExp }
 interface ReplaceRule { pattern: RegExp; replacement: string }
@@ -214,7 +214,9 @@ export class OutputFilterService {
     const { command, args } = detected
 
     const AGENT_COMMANDS = ['opencode', 'claude', 'codex', 'gemini', 'aider']
-    if (AGENT_COMMANDS.includes(command)) {
+    const isAgent = AGENT_COMMANDS.includes(command)
+
+    if (isAgent) {
       this.enableRtk(sessionId)
       if (!this.sessionConfigs.has(sessionId)) {
         this.sessionConfigs.set(sessionId, {
@@ -222,6 +224,10 @@ export class OutputFilterService {
           stripAnsi: true,
         })
       }
+    }
+
+    if (!isAgent && !hasSpecificFilter(cmdStr)) {
+      return
     }
 
     const existing = this.commandBuffers.get(sessionId)
@@ -332,9 +338,6 @@ export class OutputFilterService {
     }
 
     const lastLine = this.lastLines.get(sessionId)
-    if (lastLine !== undefined && lines.length > 0 && lines[0].length > 0) {
-      lines[0] = lastLine + lines[0]
-    }
 
     if (config.dedup) {
       const window = config.dedupWindow ?? 0
@@ -423,8 +426,15 @@ export class OutputFilterService {
 
     filtered = lines.join('\n')
 
+    const statsFiltered = filtered
+
+    if (lastLine !== undefined && lines.length > 0 && lines[0].length > 0) {
+      lines[0] = lastLine + lines[0]
+      filtered = lines.join('\n')
+    }
+
     const originalTokens = estimateTokens(data)
-    const filteredTokens = estimateTokens(filtered)
+    const filteredTokens = estimateTokens(statsFiltered)
     const reduction = originalTokens > 0
       ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
       : 0
@@ -434,7 +444,7 @@ export class OutputFilterService {
       original: data,
       filtered,
       originalBytes: data.length,
-      filteredBytes: filtered.length,
+      filteredBytes: statsFiltered.length,
       originalTokens,
       filteredTokens,
       reduction,

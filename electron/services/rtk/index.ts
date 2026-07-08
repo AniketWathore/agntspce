@@ -42,3 +42,7 @@ export function detectCommand(input: string): { command: string; args: string[] 
 export function filterCommandOutput(command: string, output: string): { filtered: string; filterName: string | null } {
   return getRegistry().apply(command, output)
 }
+
+export function hasSpecificFilter(command: string): boolean {
+  return getRegistry().hasSpecificFilter(command)
+}

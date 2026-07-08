@@ -193,6 +193,16 @@ export class FilterRegistry {
     return findFilterIn(command, this.filters)
   }
 
+  /// Check if a command matches any non-catch-all filter.
+  /// Used by processCommandLine to distinguish shell commands from natural-language prompts.
+  hasSpecificFilter(command: string): boolean {
+    for (const filter of this.filters) {
+      if (filter.name === 'strip-ansi') continue
+      if (filter.matchRegex.test(command)) return true
+    }
+    return false
+  }
+
   apply(command: string, output: string): { filtered: string; filterName: string | null } {
     const filter = this.findFilter(command)
     if (!filter) return { filtered: output, filterName: null }
