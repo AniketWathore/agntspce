@@ -1,6 +1,10 @@
 import { execFileSync, spawnSync } from 'child_process'
-import * as path from 'path'
-import * as fs from 'fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
+import * as fs from 'node:fs'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 let rtkBinaryPath: string | null = null
 
@@ -8,14 +12,14 @@ function findRtkBinary(): string {
   if (rtkBinaryPath) return rtkBinaryPath
 
   const candidates = [
-    path.join(__dirname, '..', '..', '..', 'references', 'rtk-develop', 'target', 'release', 'rtk'),
-    path.join(process.resourcesPath || '', 'rtk'),
-    path.join(__dirname, '..', '..', 'bin', 'rtk'),
+    join(__dirname, '..', '..', '..', 'references', 'rtk-develop', 'target', 'release', 'agntspce'),
+    join(process.resourcesPath || '', 'agntspce'),
+    join(__dirname, '..', '..', 'bin', 'agntspce'),
     '/Users/prashik/Aniket/CodingAgents/references/rtk-develop/target/release/agntspce',
   ]
 
   for (const p of candidates) {
-    const resolved = path.resolve(p)
+    const resolved = resolve(p)
     try {
       if (fs.existsSync(resolved)) {
         fs.accessSync(resolved, fs.constants.X_OK)
@@ -29,6 +33,15 @@ function findRtkBinary(): string {
 
 export function getRtkBinaryPath(): string {
   return findRtkBinary()
+}
+
+export function isAvailable(): boolean {
+  try {
+    findRtkBinary()
+    return true
+  } catch {
+    return false
+  }
 }
 
 export interface RewriteResult {

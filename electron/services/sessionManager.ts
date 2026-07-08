@@ -4,6 +4,7 @@ import * as path from 'path'
 import * as os from 'os'
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
 import { hasSpecificFilter, stripAllControl } from './rtk'
+import { rewriteCommand as rtkRewrite, isAvailable as agntspceAvailable } from './rtkBridge'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
@@ -332,10 +333,10 @@ export class SessionManager extends EventEmitter {
       claudeLaunchState: null,
     }
 
+    this.outputFilter.enableRtk(sessionId)
     const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
     if (AGENT_TYPES.includes(config.type)) {
       this.outputFilter.setSessionConfig(sessionId, { name: config.type })
-      this.outputFilter.enableRtk(sessionId)
     }
 
     ptyProcess.onData((data: string) => {
@@ -349,13 +350,22 @@ export class SessionManager extends EventEmitter {
         const { command, args } = detected
         const cmdStr = `${command} ${args.join(' ')}`.trim()
         if (hasSpecificFilter(cmdStr)) {
-          if (stripAllControl(data).match(/^[$#%❯➜λ]\s+/m)) {
-            const escSeq = /\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\][\s\S]*?(?:\x1b\\|\x07)|[\x40-\x5f])/
-            data = data.replace(
-              new RegExp(`^(${escSeq.source})*([$#%❯➜λ])(${escSeq.source})*(\\s+)`, 'm'),
-              '$1agntspce $2$3$4'
-            )
+          let prefix = 'agntspce'
+          if (agntspceAvailable()) {
+            try {
+              const result = rtkRewrite(cmdStr)
+              if (result.shouldRewrite && result.command) {
+                const fromRewrite = result.command.replace(cmdStr, '').trim()
+                if (fromRewrite) prefix = fromRewrite
+              }
+            } catch {}
           }
+          // Match prompt in raw data even when preceded by \r, ANSI codes, or control chars
+          const skipRe = /\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\][\s\S]*?(?:\x1b\\|\x07|\x1b)|[PX^_][\s\S]*?(?:\x1b\\|\x07)|[\x40-\x5f])|[\x00-\x08\x0b\x0c\x0d\x0e-\x1f\x7f\x80-\x9f]/
+          data = data.replace(
+            new RegExp(`^(${skipRe.source})*([$#%❯➜λ])(${skipRe.source})*(\\s+)`, 'm'),
+            `$${1}${prefix} $${2}$${3}$${4}`
+          )
         }
       }
 
