@@ -12,6 +12,7 @@ import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
 import OutputFilterDebug from './components/OutputFilterDebug'
+import RtkDashboard from './components/RtkDashboard'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import { EditorTabs } from './components/EditorTabs'
@@ -122,6 +123,7 @@ function App() {
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
     onChatStreamChunk, onChatResponse, onChatError,
+    commandHistory, executionHistory, sessionStartedAt,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -133,7 +135,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | 'rtk' | null>(null)
   const [gitChangeCount, setGitChangeCount] = useState(0)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
@@ -853,9 +855,7 @@ function App() {
           <div className="activity-bar">
             <div className="activity-bar-top">
               <div className="activity-logo" title="AgntSpce">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#22C55E">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15l-5-5 1.41-1.41L11 14.17l6.59-6.59L19 9l-8 8z"/>
-                </svg>
+                <img src="/img/logo.png" alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
               </div>
               <button
                 className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
@@ -879,6 +879,20 @@ function App() {
                 title="Dashboard"
               >
                 <i className="codicon codicon-dashboard" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className="activity-bar-btn"
+                onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
+                title="Session History"
+              >
+                <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'rtk' ? 'active' : ''}`}
+                onClick={() => setActiveView(prev => prev === 'rtk' ? null : 'rtk')}
+                title="AgntSpce Filter Debug"
+              >
+                <i className="codicon codicon-rocket" style={{ fontSize: 24 }}></i>
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
@@ -1044,6 +1058,13 @@ function App() {
                   gitPush={gitPush}
                   gitFetch={gitFetch}
                   gitDiscardAll={gitDiscardAll}
+                />
+              )},
+              { id: 'rtk', label: 'Filter', icon: '🚀', render: () => (
+                <RtkDashboard
+                  executionHistory={executionHistory}
+                  sessionStartedAt={sessionStartedAt}
+                  onClose={() => setActiveView(null)}
                 />
               )},
               { id: 'output-filter', label: 'Filter', icon: '◈', render: () => (

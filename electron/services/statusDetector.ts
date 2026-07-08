@@ -161,8 +161,8 @@ export class StatusDetector {
   private looksLikeShellPrompt(line: string): boolean {
     const patterns = [
       /^\$$/, /^#$/, /^%$/, /^PS .*>$/i,
-      /^\w+@[\w.-]+:.*[\$#%]$/, /^\(.*\)\s*[\$#%]$/,
-      /^.*[\/~].*[\$#%]$/, /^bash-[\d.]+\$$/i,
+      /^\w+@[\w.-]+:.*[$#%]$/, /^\(.*\)\s*[$#%]$/,
+      /^.*[/~].*[$#%]$/, /^bash-[\d.]+\$$/i,
       /^.+\s[❯»›]$/, /^❯$/
     ]
     return patterns.some(p => p.test(line))

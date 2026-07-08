@@ -125,6 +125,46 @@ export interface FilterStats {
   eventsProcessed: number
 }
 
+export interface CommandEvent {
+  sessionId: string
+  executionId: string | null
+  command: string
+  args: string[]
+  formatted: string
+  rawOutput: string
+  filteredOutput: string
+  filterName: string | null
+  originalTokens: number
+  filteredTokens: number
+  reduction: number
+  exitCode: number | null
+  duration: number
+  timestamp: number
+}
+
+export interface ExecutionEvent {
+  id: string
+  sessionId: string
+  prompt: string
+  startedAt: number
+  endedAt: number
+  commands: CommandEvent[]
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  totalDuration: number
+  success: boolean
+  commandCount: number
+}
+
+export interface RtkStats {
+  totalOriginalBytes: number
+  totalFilteredBytes: number
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  eventsProcessed: number
+  commandsProcessed: number
+}
+
 export interface FileTreeNode {
   name: string
   path: string

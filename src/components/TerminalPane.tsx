@@ -13,14 +13,14 @@ interface Props {
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
   onRestart: (sessionId: string) => void
-  onStartAgent: (sessionId: string, config: AgentStartConfig) => void
+  onStartAgent: (sessionId: string) => void
   onShowAgentModal: (sessionId: string) => void
   onClose?: (sessionId: string) => void
   writeData: string
-  agentConfigs: AgentConfig[]
-  style?: CSSProperties
+  agentConfigs?: AgentConfig[]
+  style?: React.CSSProperties
   dimmed?: boolean
-  onTerminalOutput?: (cb: (data: any) => void) => () => void
+  onTerminalOutput?: (sessionId: string, data: string) => void
 }
 
 export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput }: Props) {
@@ -155,6 +155,7 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
         {session.branch && session.branch !== 'unknown' && (
           <span className="terminal-branch">{session.branch}</span>
         )}
+
         <span className="terminal-session-id">{session.id}</span>
         <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>
         {onClose && (

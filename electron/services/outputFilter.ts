@@ -1,18 +1,9 @@
-interface SkipRule {
-  pattern: RegExp
-}
+import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, hasSpecificFilter, type FilterDefinition, stripAllControl } from './rtk'
+import { formatCommand } from './rtk/formatter'
 
-interface ReplaceRule {
-  pattern: RegExp
-  replacement: string
-}
-
-interface MatchOutputRule {
-  contains?: string
-  pattern?: RegExp
-  output: string
-  unless?: string
-}
+interface SkipRule { pattern: RegExp }
+interface ReplaceRule { pattern: RegExp; replacement: string }
+interface MatchOutputRule { contains?: string; pattern?: RegExp; output: string; unless?: string }
 
 export interface FilterConfig {
   name: string
@@ -54,13 +45,111 @@ export interface FilterStats {
   eventsProcessed: number
 }
 
+export interface CommandEvent {
+  sessionId: string
+  executionId: string | null
+  command: string
+  args: string[]
+  formatted: string
+  rawOutput: string
+  filteredOutput: string
+  filterName: string | null
+  originalTokens: number
+  filteredTokens: number
+  reduction: number
+  exitCode: number | null
+  duration: number
+  timestamp: number
+}
+
+export interface ExecutionEvent {
+  id: string
+  sessionId: string
+  prompt: string
+  startedAt: number
+  endedAt: number
+  commands: CommandEvent[]
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  totalDuration: number
+  success: boolean
+  commandCount: number
+}
+
+const AGENT_TOOL_PATTERNS = [
+  /^(?:Bash|Read|Write|Edit|Grep|Glob|Task|Agent|WebFetch|WebSearch|NotebookEdit|NotebookRead|Skill|AskUserQuestion|ToolSearch|TodoWrite|TaskOutput|TaskStop)\((.+)\)\s*$/,
+  /^\$\s+(.+)$/,
+  /^>\s+(.+)$/,
+  /^●\s*(?:Running command:|Executing:|Running:)?\s*(.+)$/i,
+  /^Running:\s+(.+)$/i,
+]
+
+const AGENT_COMMANDS = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+
+const AGENT_UI_PATTERNS = [
+  /^\u25cf\s/m,    // ● tool markers
+  /^\u2234\s/m,    // ∴ thinking
+  /^\u23bf\s/m,    // ⎿ cursor
+  /^\u25a0\s/m,    // ■ UI elements
+  /^\u25b6\s/m,    // ▶ UI triangle
+  /^\u25c6\s/m,    // ◆ diamond
+  /^\u2713\s/m,    // ✓ check mark
+  /^\u2717\s/m,    // ✗ cross mark
+  /^\u2731\s/m,    // ✱ star
+  /Cost:\s*\$[\d.]+/,
+  /Total cost:\s*\$[\d.]+/,
+  /Session cost:\s*\$[\d.]+/,
+  /Total duration \(wall\):/,
+  /Total code changes:/,
+  /\d+ tokens used/i,
+  /\d+ input, \d+ output.*cache/,
+  /compact(?:ing|ed) conversation/i,
+  /Working\.\.\./i,
+  /Thinking\.\.\./i,
+  /^Thought:/i,
+  /^Tool:/i,
+  /^Result:/i,
+  /^Stdout:|^Stderr:/,
+  /Generating\.\.\./i,
+  /Ask anything\.\.\./i,
+  /^Build\s·/m,
+  /^###\s/m,
+  /^[-—]{3,}$/m,
+  /^={3,}$/m,
+  /Click to expand/i,
+  /Full commit log/i,
+  /Commit history/i,
+  /^Show more/i,
+  /^Hide/i,
+  /^Copy/i,
+  /Assistant/,
+  /^\u2502|^\u251c|^\u2514|^\u2560|^\u255a|^\u250c|^\u2510|^\u2518|^\u2524|^\u252c|^\u2534|^\u253c/,  // box-drawing chars
+]
+
+export function containsAgentUi(text: string): boolean {
+  return AGENT_UI_PATTERNS.some(p => p.test(text))
+}
+
+function extractCommandFromOutput(cleanedLine: string): string | null {
+  for (const pattern of AGENT_TOOL_PATTERNS) {
+    const match = cleanedLine.match(pattern)
+    if (match && match[1]) {
+      const cmd = match[1].trim()
+      if (cmd && cmd.length > 1 && !AGENT_COMMANDS.includes(cmd.split(/\s+/)[0])) {
+        return cmd
+      }
+    }
+  }
+  return null
+}
+
 const DEFAULT_CONFIGS: FilterConfig[] = [
   {
     name: 'default',
     stripAnsi: true,
-    trimLines: true,
-    collapseEmpty: true,
-    stripEmpty: true,
+    trimLines: false,
+    collapseEmpty: false,
+    stripEmpty: false,
     stripProgressBars: true,
     dedup: true,
     truncateLinesAt: 2000,
@@ -113,23 +202,306 @@ export class OutputFilterService {
   private lastLines = new Map<string, string>()
   private dedupWindows = new Map<string, string[]>()
   private onEvent: ((event: FilterEvent) => void) | null = null
+  private onCommandEvent: ((event: CommandEvent) => void) | null = null
+  private onCommandDetected: ((sessionId: string) => void) | null = null
   private commandCounters = new Map<string, number>()
+  private _currentExecutionId = new Map<string, string | null>()
+  private _justDetectedCommand = new Map<string, { command: string; args: string[] } | null>()
+
+  private commandBuffers = new Map<string, { command: string; args: string[]; output: string; startTime: number; exitCode: number | null; prefix: string }>()
+  private inputBuffer = new Map<string, string>()
+  private finalizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private rtkSessions = new Set<string>()
+  private _discardOutput = new Set<string>()
 
   static readonly MAX_HISTORY = 200
+  static readonly AUTO_FINALIZE_DELAY = 3000
 
   constructor(customConfigs?: FilterConfig[]) {
     this.configs = customConfigs ?? DEFAULT_CONFIGS
+  }
+
+  setExecutionId(sessionId: string, executionId: string | null): void {
+    this._currentExecutionId.set(sessionId, executionId)
+  }
+
+  getExecutionId(sessionId: string): string | null {
+    return this._currentExecutionId.get(sessionId) ?? null
+  }
+
+  wasCommandJustDetected(sessionId: string): { command: string; args: string[] } | null {
+    const detected = this._justDetectedCommand.get(sessionId) ?? null
+    this._justDetectedCommand.delete(sessionId)
+    return detected
+  }
+
+  enableRtk(sessionId: string): void {
+    this.rtkSessions.add(sessionId)
+  }
+
+  disableRtk(sessionId: string): void {
+    this.rtkSessions.delete(sessionId)
+  }
+
+  isRtkActive(sessionId: string): boolean {
+    return this.rtkSessions.has(sessionId)
+  }
+
+  private scheduleFinalize(sessionId: string): void {
+    if (!this.rtkSessions.has(sessionId)) return
+    this.clearFinalizeTimer(sessionId)
+    const timer = setTimeout(() => {
+      this.finalizeCommand(sessionId, 0)
+    }, OutputFilterService.AUTO_FINALIZE_DELAY)
+    this.finalizeTimers.set(sessionId, timer)
+  }
+
+  private clearFinalizeTimer(sessionId: string): void {
+    const existing = this.finalizeTimers.get(sessionId)
+    if (existing) {
+      clearTimeout(existing)
+      this.finalizeTimers.delete(sessionId)
+    }
+  }
+
+  private _appendToBuffer(sessionId: string, lines: string[]): void {
+    if (lines.length === 0) return
+    const cmdBuf = this.commandBuffers.get(sessionId)
+    if (!cmdBuf || cmdBuf.exitCode !== null) return
+    cmdBuf.output += lines.join('\n')
+    if (cmdBuf.output.length > 500000) {
+      cmdBuf.output = cmdBuf.output.slice(-500000)
+    }
+    this.scheduleFinalize(sessionId)
   }
 
   setOnEvent(cb: (event: FilterEvent) => void) {
     this.onEvent = cb
   }
 
+  setOnCommandEvent(cb: (event: CommandEvent) => void) {
+    this.onCommandEvent = cb
+  }
+
+  setOnCommandDetected(cb: (sessionId: string) => void) {
+    this.onCommandDetected = cb
+  }
+
+  setCommandPrefix(sessionId: string, prefix: string): void {
+    const buf = this.commandBuffers.get(sessionId)
+    if (buf && buf.exitCode === null) buf.prefix = prefix
+  }
+
   setSessionConfig(sessionId: string, config: FilterConfig) {
     this.sessionConfigs.set(sessionId, config)
   }
 
+  trackInput(sessionId: string, input: string): void {
+    const rtkActive = this.rtkSessions.has(sessionId)
+    const prev = this.inputBuffer.get(sessionId) || ''
+    const full = prev + input
+    this.inputBuffer.set(sessionId, full)
+    const lines = full.split(/[\r\n]+/)
+    if (lines.length > 1) {
+      for (let i = 0; i < lines.length - 1; i++) {
+        const line = lines[i].trim()
+        this.processCommandLine(sessionId, line)
+      }
+      this.inputBuffer.set(sessionId, lines[lines.length - 1])
+    }
+
+    if (rtkActive && full.length > 10000) {
+      this.inputBuffer.set(sessionId, full.slice(-5000))
+    }
+  }
+
+  private detectShellPrompt(text: string): boolean {
+    const promptPatterns = [
+      /^\$\s*$/m, /^%\s*$/m, /^#\s*$/m,
+      /^[\w@~][\w.-]*[:/][\w.-]*(?:\$|%|#)\s*/m,
+      /^\([\w.-]+\)\s*\$\s*/m,
+      /^λ\s*/m,
+      /^❯\s*/m,
+      /^➜\s*/m,
+    ]
+    return promptPatterns.some(p => p.test(text))
+  }
+
+  private processCommandLine(sessionId: string, line: string): void {
+    if (!line || line.startsWith('#') || line.startsWith('//')) return
+    const promptMatch = line.match(/[$#%❯➜λ]\s*(.+)/)
+    const cmdStr = promptMatch ? promptMatch[1].trim() : line.trim()
+    if (!cmdStr) return
+    const detected = detectCommand(cmdStr)
+    if (!detected) return
+    const { command, args } = detected
+
+    const isAgent = AGENT_COMMANDS.includes(command)
+
+    if (isAgent) {
+      this.enableRtk(sessionId)
+      if (!this.sessionConfigs.has(sessionId)) {
+        this.sessionConfigs.set(sessionId, {
+          name: command,
+          stripAnsi: true,
+        })
+      }
+      return
+    }
+
+    if (!hasSpecificFilter(cmdStr)) {
+      return
+    }
+
+    const existing = this.commandBuffers.get(sessionId)
+    if (existing && existing.exitCode === null) {
+      // Skip if same command — prevents duplicate from output echo
+      const sameCmd = existing.command === command && existing.args.join(' ') === args.join(' ')
+      if (sameCmd) return
+      this.clearFinalizeTimer(sessionId)
+      if (existing.output.trim()) {
+        this.finalizeCommand(sessionId, 0)
+      }
+    }
+
+    this.commandBuffers.set(sessionId, {
+      command,
+      args,
+      output: '',
+      startTime: Date.now(),
+      exitCode: null,
+      prefix: 'agntspce',
+    })
+
+    this.onCommandDetected?.(sessionId)
+
+  }
+
   processOutput(sessionId: string, data: string): FilterEvent | null {
+    if (this.rtkSessions.has(sessionId)) {
+      const normalizedData = data.replace(/\r\n/g, '\n')
+      const rawLines = normalizedData.split('\n')
+
+      const outputLines: string[] = []
+
+      for (const rawLine of rawLines) {
+        const cleaned = stripAllControl(rawLine)
+        const trimmed = cleaned.trim()
+
+        if (!trimmed || trimmed.length < 2) {
+          if (!this._discardOutput.has(sessionId)) outputLines.push(rawLine)
+          continue
+        }
+
+        // Match prompt character at end of prompt line (e.g., "user@host %") 
+        // OR at start (e.g., "$ cmd") — unanchored to handle right-side prompts
+        if (/[$#%❯➜λ]\s*$/.test(trimmed) && !/[$#%❯➜λ]\s+\S/.test(trimmed)) {
+          continue
+        }
+
+        // Unanchored: match prompt anywhere in line (right-side: "user@host % cmd", left-side: "$ cmd")
+        if (/[$#%❯➜λ]\s+\S/.test(trimmed)) {
+          const match = trimmed.match(/[$#%❯➜λ]\s+(.+)/)
+          if (match) {
+            const cmdStr = match[1].trim()
+            const detected = detectCommand(cmdStr)
+            if (detected) {
+              this._discardOutput.delete(sessionId)
+              this._appendToBuffer(sessionId, outputLines)
+              outputLines.length = 0
+
+              const existing = this.commandBuffers.get(sessionId)
+              if (existing && existing.exitCode === null) {
+                const sameCmd = existing.command === detected.command &&
+                  existing.args.join(' ') === detected.args.join(' ')
+                if (sameCmd) {
+                  this._justDetectedCommand.set(sessionId, detected)
+                  this.scheduleFinalize(sessionId)
+                  continue
+                }
+                this.clearFinalizeTimer(sessionId)
+                if (existing.output.trim()) {
+                  this.finalizeCommand(sessionId, 0)
+                }
+              }
+              this.commandBuffers.set(sessionId, {
+                command: detected.command,
+                args: detected.args,
+                output: '',
+                startTime: Date.now(),
+                exitCode: null,
+                prefix: 'agntspce',
+              })
+              this._justDetectedCommand.set(sessionId, detected)
+              this.onCommandDetected?.(sessionId)
+              continue
+            }
+          }
+        }
+
+        const extractedCmd = extractCommandFromOutput(trimmed)
+        if (extractedCmd) {
+          if (hasSpecificFilter(extractedCmd)) {
+            this._discardOutput.delete(sessionId)
+            const existing = this.commandBuffers.get(sessionId)
+            if (existing && existing.exitCode === null) {
+              const detected = detectCommand(extractedCmd)
+              if (detected) {
+                const sameCmd = existing.command === detected.command && existing.args.join(' ') === detected.args.join(' ')
+                if (sameCmd) {
+                  this._appendToBuffer(sessionId, outputLines)
+                  outputLines.length = 0
+                  this._justDetectedCommand.set(sessionId, detected)
+                  this.scheduleFinalize(sessionId)
+                  continue
+                }
+              }
+              this._appendToBuffer(sessionId, outputLines)
+              outputLines.length = 0
+              this.clearFinalizeTimer(sessionId)
+              if (existing.output.trim()) {
+                this.finalizeCommand(sessionId, 0)
+              }
+            }
+
+            const detected = detectCommand(extractedCmd)
+            if (detected) {
+              this.commandBuffers.set(sessionId, {
+                command: detected.command,
+                args: detected.args,
+                output: '',
+                startTime: Date.now(),
+                exitCode: null,
+                prefix: 'agntspce',
+              })
+              this._justDetectedCommand.set(sessionId, detected)
+              this.onCommandDetected?.(sessionId)
+            }
+          }
+          continue
+        }
+
+        if (containsAgentUi(trimmed)) {
+          const existing = this.commandBuffers.get(sessionId)
+          if (existing && existing.exitCode === null) {
+            this._discardOutput.add(sessionId)
+            this._appendToBuffer(sessionId, outputLines)
+            outputLines.length = 0
+
+            this.clearFinalizeTimer(sessionId)
+            if (existing.output.trim()) {
+              this.finalizeCommand(sessionId, 0)
+            }
+          }
+          continue
+        }
+
+        if (!this._discardOutput.has(sessionId)) outputLines.push(rawLine)
+      }
+
+      this._appendToBuffer(sessionId, outputLines)
+    }
+
     const config = this.sessionConfigs.get(sessionId)
     if (!config) {
       return null
@@ -140,9 +512,7 @@ export class OutputFilterService {
 
     if (config.stripAnsi) {
       const before = filtered.length
-      filtered = filtered.replace(/\u001b\[\d+(;\d+)*[A-Za-z]/g, '')
-        .replace(/\u001b\][\s\S]*?\u0007/g, '')
-        .replace(/\u001b[[\](]<.+?>|[\x00-\x08\x0B-\x1F\x7F]/g, '')
+      filtered = stripAllControl(filtered)
       if (filtered.length !== before) rulesApplied.push('stripAnsi')
     }
 
@@ -163,20 +533,17 @@ export class OutputFilterService {
         const trimmed = l.trim()
         return !(/^[\d]+\/[\d]+/.test(trimmed) && trimmed.length < 60 && /[\d.]+%/.test(trimmed))
       })
-      if (lines.length !== before && lines.length !== before) rulesApplied.push('stripProgressBars')
+      if (lines.length !== before) rulesApplied.push('stripProgressBars')
     }
 
     if (config.trimLines) {
-      const before = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const before = lines.reduce((a, l) => a + l.length, 0)
       lines = lines.map(l => l.trimEnd())
-      const after = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const after = lines.reduce((a, l) => a + l.length, 0)
       if (before !== after) rulesApplied.push('trimLines')
     }
 
     const lastLine = this.lastLines.get(sessionId)
-    if (lastLine !== undefined && lines.length > 0) {
-      lines[0] = lastLine + lines[0]
-    }
 
     if (config.dedup) {
       const window = config.dedupWindow ?? 0
@@ -213,7 +580,8 @@ export class OutputFilterService {
       if (lines.length !== before) rulesApplied.push('keep')
     }
 
-    this.lastLines.set(sessionId, lines.length > 0 ? lines[lines.length - 1] : '')
+    const rawLastLine = data.length > 0 ? data.split('\n').pop() || '' : ''
+    this.lastLines.set(sessionId, rawLastLine)
 
     if (config.stripEmpty) {
       const before = lines.length
@@ -241,9 +609,9 @@ export class OutputFilterService {
     }
 
     if (config.truncateLinesAt !== undefined) {
-      const before = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const before = lines.reduce((a, l) => a + l.length, 0)
       lines = lines.map(l => l.length > config.truncateLinesAt! ? l.slice(0, config.truncateLinesAt!) + '…' : l)
-      const after = lines.map(l => l.length).reduce((a, b) => a + b, 0)
+      const after = lines.reduce((a, l) => a + l.length, 0)
       if (before !== after) rulesApplied.push(`truncateLinesAt:${config.truncateLinesAt}`)
     }
 
@@ -255,10 +623,7 @@ export class OutputFilterService {
         if (rule.pattern && rule.pattern.test(combined)) matched = true
         if (matched && rule.unless && combined.includes(rule.unless)) matched = false
         if (matched) {
-          const replacement = rule.output
-            .replace('{lines}', String(lines.length))
-            .replace('{bytes}', String(combined.length))
-          lines = replacement.split('\n')
+          lines = rule.output.replace('{lines}', String(lines.length)).replace('{bytes}', String(combined.length)).split('\n')
           rulesApplied.push(`matchOutput:${rule.output.slice(0, 40)}`)
           break
         }
@@ -267,22 +632,26 @@ export class OutputFilterService {
 
     filtered = lines.join('\n')
 
-    if (filtered === data) {
-      return null
+    const statsFiltered = filtered
+
+    if (lastLine !== undefined && lines.length > 0 && lines[0].length > 0) {
+      lines[0] = lastLine + lines[0]
+      filtered = lines.join('\n')
     }
 
-    const originalTokens = estimateTokens(data)
-    const filteredTokens = estimateTokens(filtered)
+    const cleanedOriginal = stripAllControl(data)
+    const originalTokens = estimateTokens(cleanedOriginal)
+    const filteredTokens = estimateTokens(statsFiltered)
     const reduction = originalTokens > 0
       ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
       : 0
 
     const event: FilterEvent = {
       sessionId,
-      original: data,
+      original: cleanedOriginal,
       filtered,
-      originalBytes: data.length,
-      filteredBytes: filtered.length,
+      originalBytes: cleanedOriginal.length,
+      filteredBytes: statsFiltered.length,
       originalTokens,
       filteredTokens,
       reduction,
@@ -310,8 +679,65 @@ export class OutputFilterService {
     this.commandCounters.set(sessionId, counter)
 
     this.onEvent?.(event)
-
     return event
+  }
+
+  finalizeCommand(sessionId: string, exitCode: number | null = null): CommandEvent | null {
+    const cmdBuf = this.commandBuffers.get(sessionId)
+    if (!cmdBuf) return null
+
+    cmdBuf.exitCode = exitCode
+    const rawOutput = cmdBuf.output
+    const cleanedOutput = stripAllControl(rawOutput)
+    const cmdStr = `${cmdBuf.command} ${cmdBuf.args.join(' ')}`.trim()
+
+    const rtkFiltered = filterCommandOutput(cmdStr, cleanedOutput)
+    const filtered = neverWorse(cleanedOutput, rtkFiltered.filtered)
+
+    const originalTokens = estimateTokens(cleanedOutput)
+    const filteredTokens = estimateTokens(filtered)
+    const reduction = originalTokens > 0
+      ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
+      : 0
+
+    const brandedCmd = formatCommand(cmdBuf.command, cmdBuf.args, cmdBuf.prefix)
+    const filterLabel = rtkFiltered.filterName ? `agntspce:${rtkFiltered.filterName}` : 'passthrough'
+
+    const event: CommandEvent = {
+      sessionId,
+      executionId: this._currentExecutionId.get(sessionId) ?? null,
+      command: cmdBuf.command,
+      args: cmdBuf.args,
+      formatted: brandedCmd,
+      rawOutput: cleanedOutput,
+      filteredOutput: filtered,
+      filterName: rtkFiltered.filterName,
+      originalTokens,
+      filteredTokens,
+      reduction,
+      exitCode: cmdBuf.exitCode,
+      duration: Date.now() - cmdBuf.startTime,
+      timestamp: Date.now(),
+    }
+
+    const tracker = getTracker()
+    tracker.record(
+      cmdStr,
+      filterLabel,
+      originalTokens,
+      filteredTokens,
+      event.duration,
+    )
+
+    this.addToCommandHistory(event)
+    this.onCommandEvent?.(event)
+
+    this.commandBuffers.delete(sessionId)
+    return event
+  }
+
+  addCustomFilter(name: string, def: FilterDefinition): void {
+    getRegistry().addFilter(name, def)
   }
 
   getSessionStats(sessionId: string): FilterStats | null {
@@ -340,6 +766,27 @@ export class OutputFilterService {
     return all
   }
 
+  getCommandHistory(sessionId: string): CommandEvent[] {
+    return this._commandHistory.get(sessionId) || []
+  }
+
+  getAllCommandHistory(): CommandEvent[] {
+    const all: CommandEvent[] = []
+    for (const [, hist] of this._commandHistory) {
+      all.push(...hist)
+    }
+    return all
+  }
+
+  private _commandHistory = new Map<string, CommandEvent[]>()
+
+  private addToCommandHistory(event: CommandEvent): void {
+    const hist = this._commandHistory.get(event.sessionId) || []
+    hist.push(event)
+    if (hist.length > 200) hist.shift()
+    this._commandHistory.set(event.sessionId, hist)
+  }
+
   cleanup(sessionId: string) {
     this.sessionConfigs.delete(sessionId)
     this.sessionHistory.delete(sessionId)
@@ -347,6 +794,11 @@ export class OutputFilterService {
     this.lastLines.delete(sessionId)
     this.dedupWindows.delete(sessionId)
     this.commandCounters.delete(sessionId)
+    this.commandBuffers.delete(sessionId)
+    this.inputBuffer.delete(sessionId)
+    this._commandHistory.delete(sessionId)
+    this._justDetectedCommand.delete(sessionId)
+    this._discardOutput.delete(sessionId)
   }
 
   reset() {
@@ -356,6 +808,10 @@ export class OutputFilterService {
     this.lastLines.clear()
     this.dedupWindows.clear()
     this.commandCounters.clear()
+    this.commandBuffers.clear()
+    this.inputBuffer.clear()
+    this._commandHistory.clear()
+    this._justDetectedCommand.clear()
   }
 }
 
@@ -369,8 +825,4 @@ function collapseEmptyLines(lines: string[]): string[] {
     prevEmpty = isEmpty
   }
   return result
-}
-
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4))
 }

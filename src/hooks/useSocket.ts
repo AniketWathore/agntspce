@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, ChatModelInfo, StreamChunk } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, ChatModelInfo, StreamChunk, CommandEvent, ExecutionEvent, RtkStats } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -39,6 +39,9 @@ interface UseSocketReturn {
   onFilterEvent: (cb: (data: FilterEvent) => void) => () => void
   filterStats: FilterStats
   filterHistory: FilterEvent[]
+  commandHistory: CommandEvent[]
+  executionHistory: ExecutionEvent[]
+  sessionStartedAt: number
   requestFilterStats: () => void
   createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
@@ -103,6 +106,9 @@ export function useSocket(): UseSocketReturn {
     eventsProcessed: 0,
   })
   const [filterHistory, setFilterHistory] = useState<FilterEvent[]>([])
+  const [commandHistory, setCommandHistory] = useState<CommandEvent[]>([])
+  const [executionHistory, setExecutionHistory] = useState<ExecutionEvent[]>([])
+  const [sessionStartedAt, setSessionStartedAt] = useState<number>(Date.now())
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
   const statusChangeCbs = useRef<((data: StatusChange) => void)[]>([])
   const branchChangeCbs = useRef<((data: BranchChange) => void)[]>([])
@@ -116,9 +122,12 @@ export function useSocket(): UseSocketReturn {
 
     socket.on('connect', () => {
       setConnected(true)
-      socket.emit('reset-filter-stats')
+      const now = Date.now()
+      setSessionStartedAt(now)
       setFilterStats({ totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 })
       setFilterHistory([])
+      setCommandHistory([])
+      setExecutionHistory([])
     })
     socket.on('disconnect', () => setConnected(false))
 
@@ -208,9 +217,18 @@ export function useSocket(): UseSocketReturn {
     filterEventCbs.current.forEach(cb => cb(event))
   })
 
-  socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[] }) => {
+  socket.on('command-filter-event', (event: CommandEvent) => {
+    setCommandHistory(prev => [event, ...prev].slice(0, 200))
+  })
+
+  socket.on('execution-event', (event: ExecutionEvent) => {
+    setExecutionHistory(prev => [event, ...prev].slice(0, 100))
+  })
+
+  socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[], commandHistory: CommandEvent[] }) => {
     setFilterStats(data.stats)
     if (data.history) setFilterHistory(data.history)
+    if (data.commandHistory) setCommandHistory(data.commandHistory)
   })
 
   return () => {
@@ -705,7 +723,10 @@ export function useSocket(): UseSocketReturn {
     onFilterEvent,
     filterStats,
     filterHistory,
+    commandHistory,
     requestFilterStats,
+    executionHistory,
+    sessionStartedAt,
     getOrchestratorStats,
     getSessionUsage,
     getSessionHistory,

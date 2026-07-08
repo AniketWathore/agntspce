@@ -67,7 +67,7 @@ const SERVER_PORT = 9460
 // Initialize services
 const workspaceManager = WorkspaceManager.getInstance()
 const agentManager = new AgentManager()
-const sessionManager = new SessionManager(io, agentManager)
+const sessionManager = new SessionManager(io, agentManager, app.getPath('userData'))
 const statusDetector = new StatusDetector()
 const gitHelper = new GitHelper()
 const worktreeHelper = new WorktreeHelper()
@@ -448,19 +448,32 @@ io.on('connection', (socket) => {
 
   socket.on('get-filter-stats', () => {
     const allSessions = sessionManager.outputFilter.getAllStats()
+    const allCommandHistory = sessionManager.outputFilter.getAllCommandHistory()
     const aggregated = {
       totalOriginalBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalBytes, 0),
       totalFilteredBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredBytes, 0),
       totalOriginalTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalTokens, 0),
       totalFilteredTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredTokens, 0),
       eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
+      commandsProcessed: allCommandHistory.length,
     }
     const allHistory = sessionManager.outputFilter.getAllHistory()
-    socket.emit('filter-stats', { stats: aggregated, history: allHistory })
+    socket.emit('filter-stats', { stats: aggregated, history: allHistory, commandHistory: allCommandHistory })
   })
 
   socket.on('reset-filter-stats', () => {
     sessionManager.outputFilter.reset()
+    sessionManager.clearAllExecutions()
+  })
+
+  socket.on('get-command-filter-history', ({ sessionId }: { sessionId?: string }, callback?: Function) => {
+    if (sessionId) {
+      const history = sessionManager.outputFilter.getCommandHistory(sessionId)
+      if (callback) callback({ ok: true, history })
+    } else {
+      const allHistory = sessionManager.outputFilter.getAllCommandHistory()
+      if (callback) callback({ ok: true, history: allHistory })
+    }
   })
 
   socket.on('switch-workspace', async ({ workspaceId }) => {
@@ -874,6 +887,23 @@ io.on('connection', (socket) => {
     } catch {
       if (callback) callback([])
     }
+  })
+
+  socket.on('caveman-toggle', ({ sessionId, enabled, level }: { sessionId: string, enabled: boolean, level?: string }) => {
+    sessionManager.toggleCaveman(sessionId, enabled, level)
+    const state = sessionManager.getCavemanState(sessionId)
+    socket.emit('caveman-state', { sessionId, state })
+  })
+
+  socket.on('caveman-state', ({ sessionId }: { sessionId: string }, callback?: Function) => {
+    const state = sessionManager.getCavemanState(sessionId)
+    if (callback) callback({ ok: true, state })
+  })
+
+  socket.on('caveman-all-states', (_data: any, callback?: Function) => {
+    const states = sessionManager.getAllCavemanStates()
+    const aggregate = sessionManager.getCavemanAggregateStats()
+    if (callback) callback({ ok: true, states, aggregate })
   })
 
   socket.on('set-user-settings', (settings: { autoRestartSessions?: boolean }) => {
