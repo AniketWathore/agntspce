@@ -5,9 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-// ── Filter Engine ──────────────────────────────────────────────
+// ── Filter Definitions ─────────────────────────────────────────
 
 const BUILTIN_FILTERS = [
   {
@@ -176,6 +174,10 @@ function stripAnsi(text) {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
 }
 
+function estimateTokens(text) {
+  return Math.max(1, Math.ceil(text.length / 4))
+}
+
 function applyFilter(filter, output) {
   let lines = output.split('\n')
 
@@ -239,8 +241,6 @@ function applyFilter(filter, output) {
   return result
 }
 
-// ── Binary Resolution ─────────────────────────────────────────
-
 function resolveBinary(name) {
   if (name.includes('/')) return name
   const originalPath = process.env.AGNTSPCE_ORIGINAL_PATH || process.env.PATH || ''
@@ -257,7 +257,7 @@ function resolveBinary(name) {
   return name
 }
 
-// ── Subcommands ────────────────────────────────────────────────
+// ── Subcommand: rewrite ────────────────────────────────────────
 
 function cmdRewrite(command) {
   if (!command || !command.trim()) return command
@@ -268,15 +268,15 @@ function cmdRewrite(command) {
   return command.trim()
 }
 
+// ── Subcommand: run ────────────────────────────────────────────
+
 function cmdRun(args) {
   if (args.length === 0) {
-    console.error('agntspce: run requires a command')
     process.exit(1)
   }
 
   const commandStr = args.join(' ')
   const filter = findFilter(commandStr)
-
   const binary = resolveBinary(args[0])
 
   const result = spawnSync(binary, args.slice(1), {
@@ -289,19 +289,27 @@ function cmdRun(args) {
   const stdout = result.stdout ? result.stdout.toString() : ''
   const stderr = result.stderr ? result.stderr.toString() : ''
   const raw = (stdout + stderr).trim()
+  const exitCode = result.status ?? 0
 
   if (!filter) {
     if (stdout) process.stdout.write(stdout)
     if (stderr) process.stderr.write(stderr)
-    process.exit(result.status ?? 0)
-    return
+    process.exit(exitCode)
   }
 
   const filtered = applyFilter(filter, raw)
+
+  const origBytes = raw.length
+  const filtBytes = filtered.length
+  const origTokens = estimateTokens(raw)
+  const filtTokens = estimateTokens(filtered)
+
+  // Output: tag line + compressed output
+  process.stdout.write('agntspce $ ' + commandStr + '\n')
   if (filtered) {
-    process.stdout.write('agntspce $ ' + filtered + '\n')
+    process.stdout.write(filtered + '\n')
   }
-  process.exit(result.status ?? 0)
+  process.exit(exitCode)
 }
 
 // ── Entry Point ────────────────────────────────────────────────
@@ -314,6 +322,5 @@ if (subcommand === 'rewrite') {
 } else if (subcommand === 'run') {
   cmdRun(process.argv.slice(3))
 } else {
-  console.error('agntspce: usage: agntspce rewrite <command> | agntspce run <command...>')
   process.exit(1)
 }
