@@ -178,7 +178,7 @@ export class OutputFilterService {
     const prev = this.inputBuffer.get(sessionId) || ''
     const full = prev + input
     this.inputBuffer.set(sessionId, full)
-    const lines = full.split('\n')
+    const lines = full.split(/[\r\n]+/)
     if (lines.length > 1) {
       for (let i = 0; i < lines.length - 1; i++) {
         const line = lines[i].trim()
@@ -244,7 +244,7 @@ export class OutputFilterService {
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
     if (this.rtkSessions.has(sessionId)) {
-      const lines = data.split('\n')
+      const lines = data.split(/[\r\n]+/)
       for (const line of lines) {
         const trimmed = line.trim()
         if (trimmed && /^[$#%❯➜λ]\s+\S/.test(trimmed)) {
