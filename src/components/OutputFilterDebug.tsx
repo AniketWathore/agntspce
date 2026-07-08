@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { stripAnsi } from '../utils/stripAnsi'
 
 interface FilterEvent {
   sessionId: string
@@ -123,7 +124,7 @@ export default function OutputFilterDebug({ filterStats, filterHistory, onFilter
                   <span className="ofd-event-tokens">{event.originalTokens} → {event.filteredTokens}</span>
                   <span className="ofd-event-rules">{event.rulesApplied.join(', ')}</span>
                 </div>
-                <div className="ofd-event-preview">{event.filtered.slice(0, 120)}</div>
+                <div className="ofd-event-preview">{stripAnsi(event.filtered.slice(0, 120))}</div>
               </div>
             ))}
           </div>
@@ -145,13 +146,13 @@ export default function OutputFilterDebug({ filterStats, filterHistory, onFilter
                   <div className="ofd-panel-label">
                     Original ({selected.originalTokens} tokens)
                   </div>
-                  <div className="ofd-panel-content">{selected.original}</div>
+                  <div className="ofd-panel-content">{stripAnsi(selected.original)}</div>
                 </div>
                 <div className="ofd-panel">
                   <div className="ofd-panel-label">
                     Filtered ({selected.filteredTokens} tokens)
                   </div>
-                  <div className="ofd-panel-content">{selected.filtered}</div>
+                  <div className="ofd-panel-content">{stripAnsi(selected.filtered)}</div>
                 </div>
               </div>
             </>

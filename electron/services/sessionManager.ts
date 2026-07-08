@@ -2,18 +2,30 @@ import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { fileURLToPath } from 'node:url'
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
-import { hasSpecificFilter, stripAllControl } from './rtk'
-import { rewriteCommand as rtkRewrite, isAvailable as agntspceAvailable } from './rtkBridge'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
-import { OutputFilterService, type CommandEvent, type ExecutionEvent } from './outputFilter'
+import { OutputFilterService, type CommandEvent } from './outputFilter'
 import { WorkspaceManager } from './workspaceManager'
 import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
 import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+let AGNTSPCE_BIN_DIR = ''
+for (const dir of [
+  path.resolve(__dirname, '..', '..', 'bin'),
+  path.resolve(process.resourcesPath || '', 'bin'),
+]) {
+  if (fs.existsSync(dir)) {
+    AGNTSPCE_BIN_DIR = dir
+    break
+  }
+}
 
 let pty: any = null
 try {
@@ -80,37 +92,20 @@ export class SessionManager extends EventEmitter {
   tokenUsageTracker = new TokenUsageTracker()
   outputFilter = new OutputFilterService()
   cavemanService = new CavemanService()
-  private _executions = new Map<string, ExecutionEvent>()
-  private _currentExecutionId = new Map<string, string | null>()
-  private _pendingPrompt = new Map<string, string>()
-  private executionCounter = 0
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
     this.io = io
     if (agentManager) this.agentManager = agentManager
     if (dataDir) this.cavemanService.setDataDir(dataDir)
-    this.outputFilter.setOnEvent((event) => {
-      try {
-        this.io.emit('filter-event', event)
-      } catch {}
-    })
     this.outputFilter.setOnCommandEvent((event) => {
       try {
         this.io.emit('command-filter-event', event)
-        this._associateCommandWithExecution(event)
       } catch {}
-    })
-    this.outputFilter.setOnCommandDetected((sessionId) => {
-      const pendingExecId = this._currentExecutionId.get(sessionId)
-      if (!pendingExecId) {
-        this._startExecution(sessionId)
-      }
     })
     this.cavemanService.onRunComplete((sessionId, run) => {
       try {
         this.io.emit('caveman-run-complete', { sessionId, run })
-        this._pendingPrompt.set(sessionId, run.prompt)
       } catch {}
     })
   }
@@ -298,6 +293,17 @@ export class SessionManager extends EventEmitter {
   createSession(sessionId: string, config: SessionConfig) {
     if (!pty) throw new Error('node-pty unavailable')
     const env: any = { ...process.env, TERM: 'xterm-color' }
+
+    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+    if (AGENT_TYPES.includes(config.type)) {
+      const binDir = AGNTSPCE_BIN_DIR
+      if (fs.existsSync(binDir)) {
+        env.AGNTSPCE_ORIGINAL_PATH = env.PATH || ''
+        env.PATH = `${binDir}:${env.PATH || ''}`
+      }
+      env.AGNTSPCE_ENABLED = '1'
+    }
+
     if (this.workspace?.envVars) {
       for (const [key, val] of Object.entries(this.workspace.envVars)) {
         env[key] = val
@@ -333,46 +339,12 @@ export class SessionManager extends EventEmitter {
       claudeLaunchState: null,
     }
 
-    this.outputFilter.enableRtk(sessionId)
-    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
-    if (AGENT_TYPES.includes(config.type)) {
-      this.outputFilter.setSessionConfig(sessionId, { name: config.type })
-    }
-
     ptyProcess.onData((data: string) => {
       session.buffer.write(data)
       session.lastActivity = Date.now()
 
-      this.outputFilter.processOutput(sessionId, data)
-
-      const detected = this.outputFilter.wasCommandJustDetected(sessionId)
-      if (detected) {
-        const { command, args } = detected
-        const cmdStr = `${command} ${args.join(' ')}`.trim()
-        if (hasSpecificFilter(cmdStr)) {
-          let prefix = 'agntspce'
-          if (agntspceAvailable()) {
-            try {
-              const result = rtkRewrite(cmdStr)
-              if (result.shouldRewrite && result.command) {
-                const fromRewrite = result.command.replace(cmdStr, '').trim()
-                if (fromRewrite) prefix = fromRewrite
-              }
-            } catch {}
-          }
-          this.outputFilter.setCommandPrefix(sessionId, prefix)
-          const cmdIdx = data.indexOf(cmdStr)
-          if (cmdIdx >= 0) {
-            const lastNewline = data.lastIndexOf('\n', cmdIdx)
-            const lineStart = lastNewline >= 0 ? lastNewline + 1 : 0
-            const linePrefix = data.substring(lineStart, cmdIdx).trim()
-            if (/[$#%❯➜λ]/.test(linePrefix)) {
-              const prefixStr = `${prefix} $ `
-              data = data.slice(0, lineStart) + prefixStr + data.slice(cmdIdx)
-            }
-          }
-        }
-      }
+      // Process through output filter (detects agntspce $ markers, compresses output, returns modified data for the frontend display)
+      const modifiedData = this.outputFilter.processOutput(sessionId, data)
 
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
@@ -380,7 +352,8 @@ export class SessionManager extends EventEmitter {
       if (isActive) {
         applyBackpressure(this.io)
         try {
-          this.io.emit('terminal-output', { sessionId, data })
+          // Send modified data to frontend (with compression applied by outputFilter)
+          this.io.emit('terminal-output', { sessionId, data: modifiedData })
         } catch { }
         session.deliveredBufferLength = session.buffer.totalBytes
       }
@@ -435,19 +408,6 @@ export class SessionManager extends EventEmitter {
       if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
         this.cavemanService.setPendingPrompt(sessionId, clean)
       }
-      const hasNewline = data.endsWith('\n')
-      if (hasNewline && clean) {
-        if (agntspceAvailable()) {
-          const result = rtkRewrite(clean)
-          if (result.shouldRewrite && result.command) {
-            this.outputFilter.trackInput(sessionId, data)
-            session.pty.write(result.command + '\n')
-            return true
-          }
-        }
-      }
-
-      this.outputFilter.trackInput(sessionId, data)
       session.pty.write(data)
       return true
     } catch { return false }
@@ -481,7 +441,6 @@ export class SessionManager extends EventEmitter {
       }
     } catch { }
     this.outputFilter.finalizeCommand(sessionId)
-    this.outputFilter.disableRtk(sessionId)
     this.outputFilter.cleanup(sessionId)
     this.cavemanService.cleanup(sessionId)
     this.sessions.delete(sessionId)
@@ -812,90 +771,10 @@ export class SessionManager extends EventEmitter {
       if ((oldStatus === 'busy' || oldStatus === 'waiting') && (status === 'idle' || status === 'exited')) {
         this.cavemanService.endRun(sessionId)
         this.outputFilter.finalizeCommand(sessionId)
-        this._finalizeExecution(sessionId)
       } else if (oldStatus === 'idle' && status === 'busy') {
         this.cavemanService.startRun(sessionId)
       }
     }
-  }
-
-  private _startExecution(sessionId: string): void {
-    const pendingExecId = this._currentExecutionId.get(sessionId)
-    if (pendingExecId) {
-      const pendingExec = this._executions.get(pendingExecId)
-      if (pendingExec && pendingExec.endedAt === 0) {
-        this._finalizeExecution(sessionId)
-      }
-    }
-    this.executionCounter++
-    const execId = `exec_${this.executionCounter}_${Date.now()}`
-    this._currentExecutionId.set(sessionId, execId)
-    this.outputFilter.setExecutionId(sessionId, execId)
-    this._executions.set(execId, {
-      id: execId,
-      sessionId,
-      prompt: '',
-      startedAt: Date.now(),
-      endedAt: 0,
-      commands: [],
-      totalOriginalTokens: 0,
-      totalFilteredTokens: 0,
-      totalDuration: 0,
-      success: true,
-      commandCount: 0,
-    })
-  }
-
-  private _associateCommandWithExecution(event: CommandEvent): void {
-    const execId = event.executionId
-    if (!execId) return
-    const exec = this._executions.get(execId)
-    if (!exec) return
-    exec.commands.push(event)
-    exec.totalOriginalTokens += event.originalTokens
-    exec.totalFilteredTokens += event.filteredTokens
-    exec.commandCount++
-    if (event.exitCode !== null && event.exitCode !== 0) {
-      exec.success = false
-    }
-  }
-
-  private _finalizeExecution(sessionId: string): void {
-    const execId = this._currentExecutionId.get(sessionId)
-    if (!execId) return
-    const exec = this._executions.get(execId)
-    if (!exec) return
-    if (exec.endedAt !== 0) return
-    exec.endedAt = Date.now()
-    exec.totalDuration = exec.endedAt - exec.startedAt
-    const pendingPrompt = this._pendingPrompt.get(sessionId)
-    if (pendingPrompt) {
-      exec.prompt = pendingPrompt
-      this._pendingPrompt.delete(sessionId)
-    }
-    this._currentExecutionId.set(sessionId, null)
-    this.outputFilter.setExecutionId(sessionId, null)
-    try {
-      this.io.emit('execution-event', exec)
-    } catch {}
-    if (this._executions.size > 100) {
-      const first = this._executions.keys().next().value
-      if (first) this._executions.delete(first)
-    }
-  }
-
-  getExecutionHistory(): ExecutionEvent[] {
-    const all: ExecutionEvent[] = []
-    for (const [, exec] of this._executions) {
-      all.push(exec)
-    }
-    return all.sort((a, b) => b.startedAt - a.startedAt)
-  }
-
-  clearAllExecutions(): void {
-    this._executions.clear()
-    this._currentExecutionId.clear()
-    this.executionCounter = 0
   }
 
   private startBranchRefresh() {

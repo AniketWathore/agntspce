@@ -44,7 +44,8 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "bin/**/*"
     ],
     "mac": {
       "target": [
