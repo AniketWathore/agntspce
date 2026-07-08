@@ -27,6 +27,7 @@ export function stripAllControl(text: string): string {
     .replace(/\r\n/g, '\n')
     .replace(/(?<!\n)\r(?!\n)/g, '\n')
     .replace(/[\x00\x08\x0b\x0c\x0e\x0f]/g, '')
+    .replace(/\[\d+(?:;\d+)*[A-Za-z]/g, '')
 }
 
 export function truncate(s: string, maxLen: number): string {

@@ -1,4 +1,5 @@
-import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, hasSpecificFilter, TimedExecution, type FilterDefinition, stripAllControl } from './rtk'
+import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, hasSpecificFilter, type FilterDefinition, stripAllControl } from './rtk'
+import { formatCommand } from './rtk/formatter'
 
 interface SkipRule { pattern: RegExp }
 interface ReplaceRule { pattern: RegExp; replacement: string }
@@ -49,6 +50,7 @@ export interface CommandEvent {
   executionId: string | null
   command: string
   args: string[]
+  formatted: string
   rawOutput: string
   filteredOutput: string
   filterName: string | null
@@ -83,6 +85,42 @@ const AGENT_TOOL_PATTERNS = [
 ]
 
 const AGENT_COMMANDS = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+
+const AGENT_UI_PATTERNS = [
+  /^\u25cf\s/m,    // ● tool markers
+  /^\u2234\s/m,    // ∴ thinking
+  /^\u23bf\s/m,    // ⎿ cursor
+  /^\u25a0\s/m,    // ■ UI elements
+  /^\u25b6\s/m,    // ▶ UI triangle
+  /^\u25c6\s/m,    // ◆ diamond
+  /^\u2713\s/m,    // ✓ check mark
+  /^\u2717\s/m,    // ✗ cross mark
+  /^\u2731\s/m,    // ✱ star
+  /Cost:\s*\$[\d.]+/,
+  /Total cost:\s*\$[\d.]+/,
+  /Session cost:\s*\$[\d.]+/,
+  /Total duration \(wall\):/,
+  /Total code changes:/,
+  /tokens used/i,
+  /\d+ input, \d+ output.*cache/,
+  /compact(?:ing|ed) conversation/i,
+  /Working\.\.\./i,
+  /Thinking\.\.\./i,
+  /^Thought:/i,
+  /^Tool:/i,
+  /^Result:/i,
+  /^Stdout:|^Stderr:/,
+  /Generating\.\.\./i,
+  /Ask anything\.\.\./i,
+  /^Build\s·/m,
+  /^###\s/m,
+  /^[-—]{3,}$/m,
+  /^={3,}$/m,
+]
+
+export function containsAgentUi(text: string): boolean {
+  return AGENT_UI_PATTERNS.some(p => p.test(text))
+}
 
 function extractCommandFromOutput(cleanedLine: string): string | null {
   for (const pattern of AGENT_TOOL_PATTERNS) {
@@ -157,8 +195,10 @@ export class OutputFilterService {
   private dedupWindows = new Map<string, string[]>()
   private onEvent: ((event: FilterEvent) => void) | null = null
   private onCommandEvent: ((event: CommandEvent) => void) | null = null
+  private onCommandDetected: ((sessionId: string) => void) | null = null
   private commandCounters = new Map<string, number>()
   private _currentExecutionId = new Map<string, string | null>()
+  private _justDetectedCommand = new Map<string, { command: string; args: string[] } | null>()
 
   private commandBuffers = new Map<string, { command: string; args: string[]; output: string; startTime: number; exitCode: number | null }>()
   private inputBuffer = new Map<string, string>()
@@ -178,6 +218,12 @@ export class OutputFilterService {
 
   getExecutionId(sessionId: string): string | null {
     return this._currentExecutionId.get(sessionId) ?? null
+  }
+
+  wasCommandJustDetected(sessionId: string): { command: string; args: string[] } | null {
+    const detected = this._justDetectedCommand.get(sessionId) ?? null
+    this._justDetectedCommand.delete(sessionId)
+    return detected
   }
 
   enableRtk(sessionId: string): void {
@@ -209,12 +255,27 @@ export class OutputFilterService {
     }
   }
 
+  private _appendToBuffer(sessionId: string, lines: string[]): void {
+    if (lines.length === 0) return
+    const cmdBuf = this.commandBuffers.get(sessionId)
+    if (!cmdBuf || cmdBuf.exitCode !== null) return
+    cmdBuf.output += lines.join('\n')
+    if (cmdBuf.output.length > 500000) {
+      cmdBuf.output = cmdBuf.output.slice(-500000)
+    }
+    this.scheduleFinalize(sessionId)
+  }
+
   setOnEvent(cb: (event: FilterEvent) => void) {
     this.onEvent = cb
   }
 
   setOnCommandEvent(cb: (event: CommandEvent) => void) {
     this.onCommandEvent = cb
+  }
+
+  setOnCommandDetected(cb: (sessionId: string) => void) {
+    this.onCommandDetected = cb
   }
 
   setSessionConfig(sessionId: string, config: FilterConfig) {
@@ -271,9 +332,10 @@ export class OutputFilterService {
           stripAnsi: true,
         })
       }
+      return
     }
 
-    if (!isAgent && !hasSpecificFilter(cmdStr)) {
+    if (!hasSpecificFilter(cmdStr)) {
       return
     }
 
@@ -293,26 +355,46 @@ export class OutputFilterService {
       exitCode: null,
     })
 
+    this.onCommandDetected?.(sessionId)
+
   }
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
     if (this.rtkSessions.has(sessionId)) {
-      const cleanedData = stripAllControl(data)
-      const lines = cleanedData.split(/\n+/)
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.length < 2) continue
+      const normalizedData = data.replace(/\r\n/g, '\n')
+      const rawLines = normalizedData.split('\n')
+
+      const outputLines: string[] = []
+
+      for (const rawLine of rawLines) {
+        const cleaned = stripAllControl(rawLine)
+        const trimmed = cleaned.trim()
+
+        if (!trimmed || trimmed.length < 2) {
+          outputLines.push(rawLine)
+          continue
+        }
+
+        if (/^[$#%❯➜λ]\s+$/.test(trimmed)) {
+          continue
+        }
+
         if (/^[$#%❯➜λ]\s+\S/.test(trimmed)) {
           const match = trimmed.match(/^[$#%❯➜λ]\s+(.+)/)
           if (match) {
             const cmdStr = match[1].trim()
             const detected = detectCommand(cmdStr)
             if (detected) {
+              this._appendToBuffer(sessionId, outputLines)
+              outputLines.length = 0
+
               const existing = this.commandBuffers.get(sessionId)
               if (existing && existing.exitCode === null) {
                 const sameCmd = existing.command === detected.command &&
                   existing.args.join(' ') === detected.args.join(' ')
                 if (sameCmd) {
+                  this._justDetectedCommand.set(sessionId, detected)
+                  this.scheduleFinalize(sessionId)
                   continue
                 }
                 this.clearFinalizeTimer(sessionId)
@@ -327,17 +409,19 @@ export class OutputFilterService {
                 startTime: Date.now(),
                 exitCode: null,
               })
+              this._justDetectedCommand.set(sessionId, detected)
+              this.onCommandDetected?.(sessionId)
               continue
             }
           }
         }
+
         const extractedCmd = extractCommandFromOutput(trimmed)
         if (extractedCmd) {
-          if (!hasSpecificFilter(extractedCmd)) {
-            continue
-          }
-          const detected = detectCommand(extractedCmd)
-          if (detected) {
+          if (hasSpecificFilter(extractedCmd)) {
+            this._appendToBuffer(sessionId, outputLines)
+            outputLines.length = 0
+
             const existing = this.commandBuffers.get(sessionId)
             if (existing && existing.exitCode === null) {
               this.clearFinalizeTimer(sessionId)
@@ -345,26 +429,41 @@ export class OutputFilterService {
                 this.finalizeCommand(sessionId, 0)
               }
             }
-            this.commandBuffers.set(sessionId, {
-              command: detected.command,
-              args: detected.args,
-              output: '',
-              startTime: Date.now(),
-              exitCode: null,
-            })
-          }
-        }
-      }
-    }
 
-    const cmdBuf = this.commandBuffers.get(sessionId)
-    if (cmdBuf && cmdBuf.exitCode === null) {
-      const cleanedOutput = stripAllControl(data)
-      cmdBuf.output += cleanedOutput
-      if (cmdBuf.output.length > 500000) {
-        cmdBuf.output = cmdBuf.output.slice(-500000)
+            const detected = detectCommand(extractedCmd)
+            if (detected) {
+              this.commandBuffers.set(sessionId, {
+                command: detected.command,
+                args: detected.args,
+                output: '',
+                startTime: Date.now(),
+                exitCode: null,
+              })
+              this._justDetectedCommand.set(sessionId, detected)
+              this.onCommandDetected?.(sessionId)
+            }
+          }
+          continue
+        }
+
+        if (containsAgentUi(trimmed)) {
+          const existing = this.commandBuffers.get(sessionId)
+          if (existing && existing.exitCode === null) {
+            this._appendToBuffer(sessionId, outputLines)
+            outputLines.length = 0
+
+            this.clearFinalizeTimer(sessionId)
+            if (existing.output.trim()) {
+              this.finalizeCommand(sessionId, 0)
+            }
+          }
+          continue
+        }
+
+        outputLines.push(rawLine)
       }
-      this.scheduleFinalize(sessionId)
+
+      this._appendToBuffer(sessionId, outputLines)
     }
 
     const config = this.sessionConfigs.get(sessionId)
@@ -515,7 +614,7 @@ export class OutputFilterService {
       sessionId,
       original: cleanedOriginal,
       filtered,
-      originalBytes: data.length,
+      originalBytes: cleanedOriginal.length,
       filteredBytes: statsFiltered.length,
       originalTokens,
       filteredTokens,
@@ -553,18 +652,19 @@ export class OutputFilterService {
 
     cmdBuf.exitCode = exitCode
     const rawOutput = cmdBuf.output
+    const cleanedOutput = stripAllControl(rawOutput)
     const cmdStr = `${cmdBuf.command} ${cmdBuf.args.join(' ')}`.trim()
 
-    const rtkFiltered = filterCommandOutput(cmdStr, rawOutput)
-    const filtered = neverWorse(rawOutput, rtkFiltered.filtered)
+    const rtkFiltered = filterCommandOutput(cmdStr, cleanedOutput)
+    const filtered = neverWorse(cleanedOutput, rtkFiltered.filtered)
 
-    const originalTokens = estimateTokens(rawOutput)
+    const originalTokens = estimateTokens(cleanedOutput)
     const filteredTokens = estimateTokens(filtered)
     const reduction = originalTokens > 0
       ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
       : 0
 
-    const brandedCmd = `agntspce ${cmdStr}`
+    const brandedCmd = formatCommand(cmdBuf.command, cmdBuf.args)
     const filterLabel = rtkFiltered.filterName ? `agntspce:${rtkFiltered.filterName}` : 'passthrough'
 
     const event: CommandEvent = {
@@ -572,7 +672,8 @@ export class OutputFilterService {
       executionId: this._currentExecutionId.get(sessionId) ?? null,
       command: cmdBuf.command,
       args: cmdBuf.args,
-      rawOutput,
+      formatted: brandedCmd,
+      rawOutput: cleanedOutput,
       filteredOutput: filtered,
       filterName: rtkFiltered.filterName,
       originalTokens,
@@ -660,6 +761,7 @@ export class OutputFilterService {
     this.commandBuffers.delete(sessionId)
     this.inputBuffer.delete(sessionId)
     this._commandHistory.delete(sessionId)
+    this._justDetectedCommand.delete(sessionId)
   }
 
   reset() {
@@ -672,6 +774,7 @@ export class OutputFilterService {
     this.commandBuffers.clear()
     this.inputBuffer.clear()
     this._commandHistory.clear()
+    this._justDetectedCommand.clear()
   }
 }
 

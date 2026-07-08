@@ -130,6 +130,7 @@ export interface CommandEvent {
   executionId: string | null
   command: string
   args: string[]
+  formatted: string
   rawOutput: string
   filteredOutput: string
   filterName: string | null

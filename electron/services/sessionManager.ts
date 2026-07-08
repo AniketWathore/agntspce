@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
+import { hasSpecificFilter, stripAllControl } from './rtk'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
@@ -80,6 +81,7 @@ export class SessionManager extends EventEmitter {
   cavemanService = new CavemanService()
   private _executions = new Map<string, ExecutionEvent>()
   private _currentExecutionId = new Map<string, string | null>()
+  private _pendingPrompt = new Map<string, string>()
   private executionCounter = 0
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
@@ -98,10 +100,16 @@ export class SessionManager extends EventEmitter {
         this._associateCommandWithExecution(event)
       } catch {}
     })
+    this.outputFilter.setOnCommandDetected((sessionId) => {
+      const pendingExecId = this._currentExecutionId.get(sessionId)
+      if (!pendingExecId) {
+        this._startExecution(sessionId)
+      }
+    })
     this.cavemanService.onRunComplete((sessionId, run) => {
       try {
         this.io.emit('caveman-run-complete', { sessionId, run })
-        this._finalizeExecution(sessionId, run.prompt)
+        this._pendingPrompt.set(sessionId, run.prompt)
       } catch {}
     })
   }
@@ -336,7 +344,20 @@ export class SessionManager extends EventEmitter {
 
       this.outputFilter.processOutput(sessionId, data)
 
-
+      const detected = this.outputFilter.wasCommandJustDetected(sessionId)
+      if (detected) {
+        const { command, args } = detected
+        const cmdStr = `${command} ${args.join(' ')}`.trim()
+        if (hasSpecificFilter(cmdStr)) {
+          if (stripAllControl(data).match(/^[$#%❯➜λ]\s+/m)) {
+            const escSeq = /\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\][\s\S]*?(?:\x1b\\|\x07)|[\x40-\x5f])/
+            data = data.replace(
+              new RegExp(`^(${escSeq.source})*([$#%❯➜λ])(${escSeq.source})*(\\s+)`, 'm'),
+              '$1agntspce $2$3$4'
+            )
+          }
+        }
+      }
 
       session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
       this.tokenUsageTracker.trackOutput(sessionId, data)
@@ -765,9 +786,8 @@ export class SessionManager extends EventEmitter {
         this.cavemanService.endRun(sessionId)
         this.outputFilter.finalizeCommand(sessionId)
         this._finalizeExecution(sessionId)
-      } else if ((oldStatus === 'idle' || oldStatus === 'waiting') && status === 'busy') {
+      } else if (oldStatus === 'idle' && status === 'busy') {
         this.cavemanService.startRun(sessionId)
-        this._startExecution(sessionId)
       }
     }
   }
@@ -813,7 +833,7 @@ export class SessionManager extends EventEmitter {
     }
   }
 
-  private _finalizeExecution(sessionId: string, prompt?: string): void {
+  private _finalizeExecution(sessionId: string): void {
     const execId = this._currentExecutionId.get(sessionId)
     if (!execId) return
     const exec = this._executions.get(execId)
@@ -821,7 +841,11 @@ export class SessionManager extends EventEmitter {
     if (exec.endedAt !== 0) return
     exec.endedAt = Date.now()
     exec.totalDuration = exec.endedAt - exec.startedAt
-    if (prompt) exec.prompt = prompt
+    const pendingPrompt = this._pendingPrompt.get(sessionId)
+    if (pendingPrompt) {
+      exec.prompt = pendingPrompt
+      this._pendingPrompt.delete(sessionId)
+    }
     this._currentExecutionId.set(sessionId, null)
     this.outputFilter.setExecutionId(sessionId, null)
     try {

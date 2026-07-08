@@ -103,6 +103,6 @@ export function getVersion(): string {
     const result = execFileSync(binary, ['--version'], { encoding: 'utf-8', timeout: 2000 })
     return result.trim()
   } catch {
-    return 'rtk (unavailable)'
+    return 'agntspce (unavailable)'
   }
 }
