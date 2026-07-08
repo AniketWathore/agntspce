@@ -1,6 +1,6 @@
 let ansiRegex: RegExp | null = null
 function getAnsiRegex(): RegExp {
-  if (!ansiRegex) ansiRegex = /\x1b\[[0-9;]*[a-zA-Z]/g
+  if (!ansiRegex) ansiRegex = /(?:\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][\s\S]*?(?:\x1b\\|\x07)|\x1b[\x40-\x5f]|[\x08\x0e\x0f])/g
   return ansiRegex
 }
 

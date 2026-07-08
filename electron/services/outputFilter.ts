@@ -297,9 +297,10 @@ export class OutputFilterService {
 
     if (config.stripAnsi) {
       const before = filtered.length
-      filtered = filtered.replace(/\u001b\[\d+(;\d+)*[A-Za-z]/g, '')
-        .replace(/\u001b\][\s\S]*?\u0007/g, '')
-        .replace(/\u001b[[\](]<.+?>|[\x00-\x08\x0B-\x1F\x7F]/g, '')
+      filtered = filtered
+        .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, '')
+        .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07)/g, '')
+        .replace(/\x1b[\x40-\x5f]/g, '')
       if (filtered.length !== before) rulesApplied.push('stripAnsi')
     }
 
@@ -331,7 +332,7 @@ export class OutputFilterService {
     }
 
     const lastLine = this.lastLines.get(sessionId)
-    if (lastLine !== undefined && lines.length > 0) {
+    if (lastLine !== undefined && lines.length > 0 && lines[0].length > 0) {
       lines[0] = lastLine + lines[0]
     }
 
@@ -370,7 +371,8 @@ export class OutputFilterService {
       if (lines.length !== before) rulesApplied.push('keep')
     }
 
-    this.lastLines.set(sessionId, lines.length > 0 ? lines[lines.length - 1] : '')
+    const rawLastLine = data.length > 0 ? data.split('\n').pop() || '' : ''
+    this.lastLines.set(sessionId, rawLastLine)
 
     if (config.stripEmpty) {
       const before = lines.length
