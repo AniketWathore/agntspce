@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { ExecutionEvent } from '../types'
+import { stripAnsi } from '../utils/stripAnsi'
 
 interface Props {
   executionHistory: ExecutionEvent[]
@@ -99,7 +100,7 @@ export default function RtkDashboard({ executionHistory, sessionStartedAt, onClo
                 </div>
                 <div className="ofd-event-preview" style={{ fontSize: 11, color: '#e6edf3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   execution #{i + 1}
-                  {exec.prompt ? `: ${exec.prompt.slice(0, 80)}` : ''}
+                  {exec.prompt ? `: ${stripAnsi(exec.prompt.slice(0, 80))}` : ''}
                 </div>
               </div>
             ))}
@@ -116,7 +117,7 @@ export default function RtkDashboard({ executionHistory, sessionStartedAt, onClo
               {selected.prompt && (
                 <div style={{ marginBottom: 12, padding: 8, background: '#161b22', borderRadius: 6, fontSize: 12 }}>
                   <div style={{ color: '#8b949e', marginBottom: 4 }}>prompt</div>
-                  <div style={{ color: '#e6edf3', whiteSpace: 'pre-wrap', fontFamily: 'var(--mono-font)' }}>{selected.prompt}</div>
+                  <div style={{ color: '#e6edf3', whiteSpace: 'pre-wrap', fontFamily: 'var(--mono-font)' }}>{stripAnsi(selected.prompt)}</div>
                 </div>
               )}
 
@@ -133,7 +134,7 @@ export default function RtkDashboard({ executionHistory, sessionStartedAt, onClo
                     onClick={() => setExpandedCmd(expandedCmd === ci ? null : ci)}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ color: '#7ee787', fontSize: 13, fontFamily: 'var(--mono-font)' }}>{cmd.formatted || `${cmd.command} ${cmd.args.join(' ')}`}</span>
+                      <span style={{ color: '#7ee787', fontSize: 13, fontFamily: 'var(--mono-font)' }}>{stripAnsi(cmd.formatted || `${cmd.command} ${cmd.args.join(' ')}`)}</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8, fontSize: 10, color: '#8b949e' }}>
                       <span>{timeStr(cmd.timestamp)}</span>
@@ -154,7 +155,7 @@ export default function RtkDashboard({ executionHistory, sessionStartedAt, onClo
                             original ({cmd.originalTokens} tok)
                           </div>
                           <div className="ofd-panel-content" style={{ fontSize: 11, lineHeight: 1.5, textShadow: 'none' }}>
-                            {cmd.rawOutput ? cmd.rawOutput.slice(0, 3000) : <span style={{ color: '#6e7681' }}>(empty)</span>}
+                            {cmd.rawOutput ? stripAnsi(cmd.rawOutput.slice(0, 3000)) : <span style={{ color: '#6e7681' }}>(empty)</span>}
                           </div>
                         </div>
                         <div className="ofd-panel" style={{ flex: 1 }}>
@@ -162,7 +163,7 @@ export default function RtkDashboard({ executionHistory, sessionStartedAt, onClo
                             filtered ({cmd.filteredTokens} tok)
                           </div>
                           <div className="ofd-panel-content" style={{ fontSize: 11, lineHeight: 1.5, textShadow: 'none' }}>
-                            {cmd.filteredOutput ? cmd.filteredOutput.slice(0, 3000) : <span style={{ color: '#6e7681' }}>(empty)</span>}
+                            {cmd.filteredOutput ? stripAnsi(cmd.filteredOutput.slice(0, 3000)) : <span style={{ color: '#6e7681' }}>(empty)</span>}
                           </div>
                         </div>
                       </div>

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { fileURLToPath } from 'node:url'
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
 import { hasSpecificFilter, stripAllControl } from './rtk'
 import { rewriteCommand as rtkRewrite, isAvailable as agntspceAvailable } from './rtkBridge'
@@ -14,6 +15,19 @@ import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
 import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+let AGNTSPCE_BIN_DIR = ''
+for (const dir of [
+  path.resolve(__dirname, '..', '..', 'bin'),
+  path.resolve(process.resourcesPath || '', 'bin'),
+]) {
+  if (fs.existsSync(dir)) {
+    AGNTSPCE_BIN_DIR = dir
+    break
+  }
+}
 
 let pty: any = null
 try {
@@ -84,6 +98,7 @@ export class SessionManager extends EventEmitter {
   private _currentExecutionId = new Map<string, string | null>()
   private _pendingPrompt = new Map<string, string>()
   private executionCounter = 0
+  private _sessionInputBuf = new Map<string, string>()
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
@@ -298,6 +313,17 @@ export class SessionManager extends EventEmitter {
   createSession(sessionId: string, config: SessionConfig) {
     if (!pty) throw new Error('node-pty unavailable')
     const env: any = { ...process.env, TERM: 'xterm-color' }
+
+    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+    if (AGENT_TYPES.includes(config.type)) {
+      const binDir = AGNTSPCE_BIN_DIR
+      if (fs.existsSync(binDir)) {
+        env.AGNTSPCE_ORIGINAL_PATH = env.PATH || ''
+        env.PATH = `${binDir}:${env.PATH || ''}`
+      }
+      env.AGNTSPCE_ENABLED = '1'
+    }
+
     if (this.workspace?.envVars) {
       for (const [key, val] of Object.entries(this.workspace.envVars)) {
         env[key] = val
@@ -334,7 +360,6 @@ export class SessionManager extends EventEmitter {
     }
 
     this.outputFilter.enableRtk(sessionId)
-    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
     if (AGENT_TYPES.includes(config.type)) {
       this.outputFilter.setSessionConfig(sessionId, { name: config.type })
     }
@@ -435,6 +460,45 @@ export class SessionManager extends EventEmitter {
       if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
         this.cavemanService.setPendingPrompt(sessionId, clean)
       }
+
+      const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+      const isAgent = AGENT_TYPES.includes(session.type)
+
+      if (isAgent) {
+        const prev = this._sessionInputBuf.get(sessionId) || ''
+        this._sessionInputBuf.set(sessionId, prev + data)
+        
+        const hasNewline = data.endsWith('\n')
+        if (hasNewline) {
+          const raw = this._sessionInputBuf.get(sessionId) || ''
+          const cleaned = this._cleanInputBuf(raw)
+          this._sessionInputBuf.set(sessionId, '')
+          
+          const fullCmd = cleaned.replace(/[\r\n]+$/, '').trim()
+          if (fullCmd) {
+            this.outputFilter.trackInput(sessionId, fullCmd + '\n')
+            
+            if (agntspceAvailable()) {
+              const result = rtkRewrite(fullCmd)
+              if (result.shouldRewrite && result.command) {
+                const rewritten = '\x15' + result.command + '\n'
+                session.pty.write(rewritten)
+                return true
+              }
+            }
+
+            // No rewrite: write original data to PTY
+            // For char-by-char (data is just '\n'), chars were already echoed so write just newline
+            // For complete command (data has chars + '\n'), write all of it so shell executes it
+            session.pty.write(data)
+            return true
+          }
+        }
+        
+        session.pty.write(data)
+        return true
+      }
+
       const hasNewline = data.endsWith('\n')
       if (hasNewline && clean) {
         if (agntspceAvailable()) {
@@ -451,6 +515,20 @@ export class SessionManager extends EventEmitter {
       session.pty.write(data)
       return true
     } catch { return false }
+  }
+
+  private _cleanInputBuf(s: string): string {
+    const result: string[] = []
+    for (const ch of s) {
+      if (ch === '\x7f' || ch === '\b') {
+        result.pop()
+      } else if (ch === '\x15') {
+        result.length = 0
+      } else if (ch >= ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+        result.push(ch)
+      }
+    }
+    return result.join('')
   }
 
   resizeSession(sessionId: string, cols: number, rows: number) {
@@ -484,6 +562,7 @@ export class SessionManager extends EventEmitter {
     this.outputFilter.disableRtk(sessionId)
     this.outputFilter.cleanup(sessionId)
     this.cavemanService.cleanup(sessionId)
+    this._sessionInputBuf.delete(sessionId)
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)

@@ -378,11 +378,12 @@ export class OutputFilterService {
   }
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
+    let outputLines: string[] | null = null
     if (this.rtkSessions.has(sessionId)) {
       const normalizedData = data.replace(/\r\n/g, '\n')
       const rawLines = normalizedData.split('\n')
 
-      const outputLines: string[] = []
+      outputLines = []
 
       for (const rawLine of rawLines) {
         const cleaned = stripAllControl(rawLine)
@@ -424,16 +425,19 @@ export class OutputFilterService {
                   this.finalizeCommand(sessionId, 0)
                 }
               }
-              this.commandBuffers.set(sessionId, {
-                command: detected.command,
-                args: detected.args,
-                output: '',
-                startTime: Date.now(),
-                exitCode: null,
-                prefix: 'agntspce',
-              })
-              this._justDetectedCommand.set(sessionId, detected)
-              this.onCommandDetected?.(sessionId)
+              // Only create command buffer for commands with specific filters
+              if (hasSpecificFilter(cmdStr)) {
+                this.commandBuffers.set(sessionId, {
+                  command: detected.command,
+                  args: detected.args,
+                  output: '',
+                  startTime: Date.now(),
+                  exitCode: null,
+                  prefix: 'agntspce',
+                })
+                this._justDetectedCommand.set(sessionId, detected)
+                this.onCommandDetected?.(sessionId)
+              }
               continue
             }
           }
@@ -499,7 +503,7 @@ export class OutputFilterService {
         if (!this._discardOutput.has(sessionId)) outputLines.push(rawLine)
       }
 
-      this._appendToBuffer(sessionId, outputLines)
+      if (outputLines) this._appendToBuffer(sessionId, outputLines)
     }
 
     const config = this.sessionConfigs.get(sessionId)
@@ -639,7 +643,8 @@ export class OutputFilterService {
       filtered = lines.join('\n')
     }
 
-    const cleanedOriginal = stripAllControl(data)
+    // Re-strip combined output to catch ANSI codes split across chunk boundaries
+    const cleanedOriginal = stripAllControl(outputLines && outputLines.length > 0 ? outputLines.join('\n') : data)
     const originalTokens = estimateTokens(cleanedOriginal)
     const filteredTokens = estimateTokens(statsFiltered)
     const reduction = originalTokens > 0

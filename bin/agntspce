@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# agntspce - Token-aware command wrapper
+# Replaces RTK for the AgntSpce app with "agntspce" tag
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+case "${1:-}" in
+  rewrite)
+    shift
+    node "$SCRIPT_DIR/agntspce.mjs" rewrite "$@"
+    ;;
+  run)
+    shift
+    exec node "$SCRIPT_DIR/agntspce.mjs" run "$@"
+    ;;
+  *)
+    echo "agntspce: usage: agntspce rewrite <command> | agntspce run <command...>"
+    exit 1
+    ;;
+esac
