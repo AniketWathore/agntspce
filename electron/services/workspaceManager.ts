@@ -358,12 +358,9 @@ export class WorkspaceManager {
 
   async createWorkspace(data: Workspace): Promise<Workspace> {
     if (this.workspaces.has(data.id)) throw new Error(`Workspace ID exists: ${data.id}`)
-    if (data.repository?.path) {
-      try {
-        if (!fsSync.existsSync(data.repository.path) || !fsSync.statSync(data.repository.path).isDirectory()) {
-          data.repository.path = os.homedir()
-        }
-      } catch {
+    if (data.repository) {
+      const rp = data.repository.path
+      if (!rp || !fsSync.existsSync(rp) || !fsSync.statSync(rp).isDirectory()) {
         data.repository.path = os.homedir()
       }
     }

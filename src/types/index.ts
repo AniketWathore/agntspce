@@ -213,6 +213,7 @@ declare global {
       selectDirectory: () => Promise<string | null>
       getDefaultPath: () => Promise<string>
       getServerPort: () => Promise<number>
+      openInExplorer: (filePath: string) => Promise<boolean>
       exportWorkspace: () => Promise<string | null>
       importWorkspace: () => Promise<{ workspace: any; path: string } | null>
       duplicateWorkspace: (newName: string) => Promise<any>

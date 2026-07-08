@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -1178,8 +1178,8 @@ ipcMain.handle('popup-menu', (event, menuName: string, x: number, y: number) => 
 
 ipcMain.handle('select-directory', async () => {
   const result = await dialog.showOpenDialog({
-    parent: mainWindow || undefined,
     properties: ['openDirectory'],
+    ...(mainWindow ? { parent: mainWindow } : {}),
   })
   return result.canceled ? null : result.filePaths[0]
 })
@@ -1219,6 +1219,16 @@ ipcMain.handle('duplicate-workspace', async (_event, newName: string) => {
   const dup = await workspaceManager.duplicateWorkspace(activeId, newName)
   rebuildMenu()
   return dup
+})
+
+ipcMain.handle('open-in-explorer', async (_event, filePath: string) => {
+  if (!filePath) return false
+  try {
+    await shell.openPath(filePath)
+    return true
+  } catch {
+    return false
+  }
 })
 
 app.whenReady().then(async () => {

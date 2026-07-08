@@ -1,6 +1,7 @@
 export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>
   getDefaultPath: () => Promise<string>
+  getDropPath: () => Promise<string | null>
   getServerPort: () => Promise<number>
   exportWorkspace: () => Promise<string | null>
   importWorkspace: () => Promise<{ workspace: any; path: string } | null>
