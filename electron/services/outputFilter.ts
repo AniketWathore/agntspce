@@ -101,7 +101,7 @@ const AGENT_UI_PATTERNS = [
   /Session cost:\s*\$[\d.]+/,
   /Total duration \(wall\):/,
   /Total code changes:/,
-  /tokens used/i,
+  /\d+ tokens used/i,
   /\d+ input, \d+ output.*cache/,
   /compact(?:ing|ed) conversation/i,
   /Working\.\.\./i,
@@ -116,6 +116,14 @@ const AGENT_UI_PATTERNS = [
   /^###\s/m,
   /^[-—]{3,}$/m,
   /^={3,}$/m,
+  /Click to expand/i,
+  /Full commit log/i,
+  /Commit history/i,
+  /^Show more/i,
+  /^Hide/i,
+  /^Copy/i,
+  /Assistant/,
+  /^\u2502|^\u251c|^\u2514|^\u2560|^\u255a|^\u250c|^\u2510|^\u2518|^\u2524|^\u252c|^\u2534|^\u253c/,  // box-drawing chars
 ]
 
 export function containsAgentUi(text: string): boolean {
@@ -200,10 +208,11 @@ export class OutputFilterService {
   private _currentExecutionId = new Map<string, string | null>()
   private _justDetectedCommand = new Map<string, { command: string; args: string[] } | null>()
 
-  private commandBuffers = new Map<string, { command: string; args: string[]; output: string; startTime: number; exitCode: number | null }>()
+  private commandBuffers = new Map<string, { command: string; args: string[]; output: string; startTime: number; exitCode: number | null; prefix: string }>()
   private inputBuffer = new Map<string, string>()
   private finalizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private rtkSessions = new Set<string>()
+  private _discardOutput = new Set<string>()
 
   static readonly MAX_HISTORY = 200
   static readonly AUTO_FINALIZE_DELAY = 3000
@@ -278,6 +287,11 @@ export class OutputFilterService {
     this.onCommandDetected = cb
   }
 
+  setCommandPrefix(sessionId: string, prefix: string): void {
+    const buf = this.commandBuffers.get(sessionId)
+    if (buf && buf.exitCode === null) buf.prefix = prefix
+  }
+
   setSessionConfig(sessionId: string, config: FilterConfig) {
     this.sessionConfigs.set(sessionId, config)
   }
@@ -341,6 +355,9 @@ export class OutputFilterService {
 
     const existing = this.commandBuffers.get(sessionId)
     if (existing && existing.exitCode === null) {
+      // Skip if same command — prevents duplicate from output echo
+      const sameCmd = existing.command === command && existing.args.join(' ') === args.join(' ')
+      if (sameCmd) return
       this.clearFinalizeTimer(sessionId)
       if (existing.output.trim()) {
         this.finalizeCommand(sessionId, 0)
@@ -353,6 +370,7 @@ export class OutputFilterService {
       output: '',
       startTime: Date.now(),
       exitCode: null,
+      prefix: 'agntspce',
     })
 
     this.onCommandDetected?.(sessionId)
@@ -371,20 +389,24 @@ export class OutputFilterService {
         const trimmed = cleaned.trim()
 
         if (!trimmed || trimmed.length < 2) {
-          outputLines.push(rawLine)
+          if (!this._discardOutput.has(sessionId)) outputLines.push(rawLine)
           continue
         }
 
-        if (/^[$#%❯➜λ]\s+$/.test(trimmed)) {
+        // Match prompt character at end of prompt line (e.g., "user@host %") 
+        // OR at start (e.g., "$ cmd") — unanchored to handle right-side prompts
+        if (/[$#%❯➜λ]\s*$/.test(trimmed) && !/[$#%❯➜λ]\s+\S/.test(trimmed)) {
           continue
         }
 
-        if (/^[$#%❯➜λ]\s+\S/.test(trimmed)) {
-          const match = trimmed.match(/^[$#%❯➜λ]\s+(.+)/)
+        // Unanchored: match prompt anywhere in line (right-side: "user@host % cmd", left-side: "$ cmd")
+        if (/[$#%❯➜λ]\s+\S/.test(trimmed)) {
+          const match = trimmed.match(/[$#%❯➜λ]\s+(.+)/)
           if (match) {
             const cmdStr = match[1].trim()
             const detected = detectCommand(cmdStr)
             if (detected) {
+              this._discardOutput.delete(sessionId)
               this._appendToBuffer(sessionId, outputLines)
               outputLines.length = 0
 
@@ -408,6 +430,7 @@ export class OutputFilterService {
                 output: '',
                 startTime: Date.now(),
                 exitCode: null,
+                prefix: 'agntspce',
               })
               this._justDetectedCommand.set(sessionId, detected)
               this.onCommandDetected?.(sessionId)
@@ -419,11 +442,22 @@ export class OutputFilterService {
         const extractedCmd = extractCommandFromOutput(trimmed)
         if (extractedCmd) {
           if (hasSpecificFilter(extractedCmd)) {
-            this._appendToBuffer(sessionId, outputLines)
-            outputLines.length = 0
-
+            this._discardOutput.delete(sessionId)
             const existing = this.commandBuffers.get(sessionId)
             if (existing && existing.exitCode === null) {
+              const detected = detectCommand(extractedCmd)
+              if (detected) {
+                const sameCmd = existing.command === detected.command && existing.args.join(' ') === detected.args.join(' ')
+                if (sameCmd) {
+                  this._appendToBuffer(sessionId, outputLines)
+                  outputLines.length = 0
+                  this._justDetectedCommand.set(sessionId, detected)
+                  this.scheduleFinalize(sessionId)
+                  continue
+                }
+              }
+              this._appendToBuffer(sessionId, outputLines)
+              outputLines.length = 0
               this.clearFinalizeTimer(sessionId)
               if (existing.output.trim()) {
                 this.finalizeCommand(sessionId, 0)
@@ -438,6 +472,7 @@ export class OutputFilterService {
                 output: '',
                 startTime: Date.now(),
                 exitCode: null,
+                prefix: 'agntspce',
               })
               this._justDetectedCommand.set(sessionId, detected)
               this.onCommandDetected?.(sessionId)
@@ -449,6 +484,7 @@ export class OutputFilterService {
         if (containsAgentUi(trimmed)) {
           const existing = this.commandBuffers.get(sessionId)
           if (existing && existing.exitCode === null) {
+            this._discardOutput.add(sessionId)
             this._appendToBuffer(sessionId, outputLines)
             outputLines.length = 0
 
@@ -460,7 +496,7 @@ export class OutputFilterService {
           continue
         }
 
-        outputLines.push(rawLine)
+        if (!this._discardOutput.has(sessionId)) outputLines.push(rawLine)
       }
 
       this._appendToBuffer(sessionId, outputLines)
@@ -664,7 +700,7 @@ export class OutputFilterService {
       ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
       : 0
 
-    const brandedCmd = formatCommand(cmdBuf.command, cmdBuf.args)
+    const brandedCmd = formatCommand(cmdBuf.command, cmdBuf.args, cmdBuf.prefix)
     const filterLabel = rtkFiltered.filterName ? `agntspce:${rtkFiltered.filterName}` : 'passthrough'
 
     const event: CommandEvent = {
@@ -762,6 +798,7 @@ export class OutputFilterService {
     this.inputBuffer.delete(sessionId)
     this._commandHistory.delete(sessionId)
     this._justDetectedCommand.delete(sessionId)
+    this._discardOutput.delete(sessionId)
   }
 
   reset() {

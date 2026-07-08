@@ -1,4 +1,5 @@
-export function formatCommand(command: string, args: string[]): string {
+export function formatCommand(command: string, args: string[], prefix?: string): string {
   const cmdStr = `${command} ${args.join(' ')}`.trim()
-  return `agntspce $ ${cmdStr}`
+  const p = prefix || 'agntspce'
+  return `${p} $ ${cmdStr}`
 }

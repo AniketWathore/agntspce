@@ -360,12 +360,17 @@ export class SessionManager extends EventEmitter {
               }
             } catch {}
           }
-          // Match prompt in raw data even when preceded by \r, ANSI codes, or control chars
-          const skipRe = /\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\][\s\S]*?(?:\x1b\\|\x07|\x1b)|[PX^_][\s\S]*?(?:\x1b\\|\x07)|[\x40-\x5f])|[\x00-\x08\x0b\x0c\x0d\x0e-\x1f\x7f\x80-\x9f]/
-          data = data.replace(
-            new RegExp(`^(${skipRe.source})*([$#%❯➜λ])(${skipRe.source})*(\\s+)`, 'm'),
-            `$${1}${prefix} $${2}$${3}$${4}`
-          )
+          this.outputFilter.setCommandPrefix(sessionId, prefix)
+          const cmdIdx = data.indexOf(cmdStr)
+          if (cmdIdx >= 0) {
+            const lastNewline = data.lastIndexOf('\n', cmdIdx)
+            const lineStart = lastNewline >= 0 ? lastNewline + 1 : 0
+            const linePrefix = data.substring(lineStart, cmdIdx).trim()
+            if (/[$#%❯➜λ]/.test(linePrefix)) {
+              const prefixStr = `${prefix} $ `
+              data = data.slice(0, lineStart) + prefixStr + data.slice(cmdIdx)
+            }
+          }
         }
       }
 
@@ -430,6 +435,18 @@ export class SessionManager extends EventEmitter {
       if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
         this.cavemanService.setPendingPrompt(sessionId, clean)
       }
+      const hasNewline = data.endsWith('\n')
+      if (hasNewline && clean) {
+        if (agntspceAvailable()) {
+          const result = rtkRewrite(clean)
+          if (result.shouldRewrite && result.command) {
+            this.outputFilter.trackInput(sessionId, data)
+            session.pty.write(result.command + '\n')
+            return true
+          }
+        }
+      }
+
       this.outputFilter.trackInput(sessionId, data)
       session.pty.write(data)
       return true
