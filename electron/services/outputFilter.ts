@@ -169,10 +169,6 @@ export class OutputFilterService {
     this.onCommandEvent = cb
   }
 
-  setOnCommandTag(cb: (sessionId: string, tag: string) => void) {
-    this.onCommandTagCallback = cb
-  }
-
   setSessionConfig(sessionId: string, config: FilterConfig) {
     this.sessionConfigs.set(sessionId, config)
   }
@@ -221,7 +217,10 @@ export class OutputFilterService {
     if (AGENT_COMMANDS.includes(command)) {
       this.enableRtk(sessionId)
       if (!this.sessionConfigs.has(sessionId)) {
-        this.sessionConfigs.set(sessionId, { name: command })
+        this.sessionConfigs.set(sessionId, {
+          name: command,
+          stripAnsi: true,
+        })
       }
     }
 
@@ -241,9 +240,6 @@ export class OutputFilterService {
       exitCode: null,
     })
 
-    if (this.rtkSessions.has(sessionId) && this.onCommandTagCallback) {
-      this.onCommandTagCallback(sessionId, `[agntspce] ${command} ${args.join(' ')}`)
-    }
   }
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
@@ -259,6 +255,11 @@ export class OutputFilterService {
             if (detected) {
               const existing = this.commandBuffers.get(sessionId)
               if (existing && existing.exitCode === null) {
+                const sameCmd = existing.command === detected.command &&
+                  existing.args.join(' ') === detected.args.join(' ')
+                if (sameCmd) {
+                  continue
+                }
                 this.clearFinalizeTimer(sessionId)
                 if (existing.output.trim()) {
                   this.finalizeCommand(sessionId, 0)
@@ -271,9 +272,6 @@ export class OutputFilterService {
                 startTime: Date.now(),
                 exitCode: null,
               })
-              if (this.onCommandTagCallback) {
-                this.onCommandTagCallback(sessionId, `[agntspce] ${detected.command} ${detected.args.join(' ')}`)
-              }
             }
           }
         }
@@ -422,10 +420,6 @@ export class OutputFilterService {
     }
 
     filtered = lines.join('\n')
-
-    if (rulesApplied.length === 0) {
-      return null
-    }
 
     const originalTokens = estimateTokens(data)
     const filteredTokens = estimateTokens(filtered)

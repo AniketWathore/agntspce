@@ -94,14 +94,6 @@ export class SessionManager extends EventEmitter {
         this.io.emit('command-filter-event', event)
       } catch {}
     })
-    this.outputFilter.setOnCommandTag((sessionId, tag) => {
-      try {
-        const session = this.sessions.get(sessionId)
-        if (session?.pty) {
-          session.pty.write(`\r\n\x1b[90m${tag}\x1b[0m\r\n`)
-        }
-      } catch {}
-    })
     this.cavemanService.onRunComplete((sessionId, run) => {
       try {
         this.io.emit('caveman-run-complete', { sessionId, run })
