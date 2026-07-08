@@ -169,12 +169,16 @@ export class OutputFilterService {
     this.onCommandEvent = cb
   }
 
+  setOnCommandTag(cb: (sessionId: string, tag: string) => void) {
+    this.onCommandTagCallback = cb
+  }
+
   setSessionConfig(sessionId: string, config: FilterConfig) {
     this.sessionConfigs.set(sessionId, config)
   }
 
   trackInput(sessionId: string, input: string): void {
-    if (!this.rtkSessions.has(sessionId)) return
+    const rtkActive = this.rtkSessions.has(sessionId)
     const prev = this.inputBuffer.get(sessionId) || ''
     const full = prev + input
     this.inputBuffer.set(sessionId, full)
@@ -187,7 +191,7 @@ export class OutputFilterService {
       this.inputBuffer.set(sessionId, lines[lines.length - 1])
     }
 
-    if (full.length > 10000) {
+    if (rtkActive && full.length > 10000) {
       this.inputBuffer.set(sessionId, full.slice(-5000))
     }
   }
@@ -236,6 +240,10 @@ export class OutputFilterService {
       startTime: Date.now(),
       exitCode: null,
     })
+
+    if (this.rtkSessions.has(sessionId) && this.onCommandTagCallback) {
+      this.onCommandTagCallback(sessionId, `[agntspce] ${command} ${args.join(' ')}`)
+    }
   }
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
@@ -263,6 +271,9 @@ export class OutputFilterService {
                 startTime: Date.now(),
                 exitCode: null,
               })
+              if (this.onCommandTagCallback) {
+                this.onCommandTagCallback(sessionId, `[agntspce] ${detected.command} ${detected.args.join(' ')}`)
+              }
             }
           }
         }
