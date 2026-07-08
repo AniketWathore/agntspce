@@ -123,7 +123,7 @@ function App() {
     filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit,
-    commandHistory,
+    commandHistory, executionHistory, sessionStartedAt,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -999,8 +999,8 @@ function App() {
               )},
               { id: 'rtk', label: 'Filter', icon: '🚀', render: () => (
                 <RtkDashboard
-                  filterStats={filterStats}
-                  commandHistory={commandHistory}
+                  executionHistory={executionHistory}
+                  sessionStartedAt={sessionStartedAt}
                   onClose={() => setActiveView(null)}
                 />
               )},

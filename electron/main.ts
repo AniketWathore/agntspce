@@ -305,20 +305,22 @@ io.on('connection', (socket) => {
 
   socket.on('get-filter-stats', () => {
     const allSessions = sessionManager.outputFilter.getAllStats()
+    const allCommandHistory = sessionManager.outputFilter.getAllCommandHistory()
     const aggregated = {
       totalOriginalBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalBytes, 0),
       totalFilteredBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredBytes, 0),
       totalOriginalTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalTokens, 0),
       totalFilteredTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredTokens, 0),
       eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
+      commandsProcessed: allCommandHistory.length,
     }
     const allHistory = sessionManager.outputFilter.getAllHistory()
-    const allCommandHistory = sessionManager.outputFilter.getAllCommandHistory()
     socket.emit('filter-stats', { stats: aggregated, history: allHistory, commandHistory: allCommandHistory })
   })
 
   socket.on('reset-filter-stats', () => {
     sessionManager.outputFilter.reset()
+    sessionManager.clearAllExecutions()
   })
 
   socket.on('get-command-filter-history', ({ sessionId }: { sessionId?: string }, callback?: Function) => {

@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 
-const TEE_DIR = path.join(os.homedir(), '.local', 'share', 'rtk', 'tee')
+const TEE_DIR = path.join(os.homedir(), '.local', 'share', 'agntspce', 'tee')
 
 function ensureTeeDir(): void {
   try { fs.mkdirSync(TEE_DIR, { recursive: true }) } catch { }

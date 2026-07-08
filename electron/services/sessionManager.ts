@@ -6,7 +6,7 @@ import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } fr
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
-import { OutputFilterService } from './outputFilter'
+import { OutputFilterService, type CommandEvent, type ExecutionEvent } from './outputFilter'
 import { WorkspaceManager } from './workspaceManager'
 import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
@@ -78,6 +78,9 @@ export class SessionManager extends EventEmitter {
   tokenUsageTracker = new TokenUsageTracker()
   outputFilter = new OutputFilterService()
   cavemanService = new CavemanService()
+  private _executions = new Map<string, ExecutionEvent>()
+  private _currentExecutionId = new Map<string, string | null>()
+  private executionCounter = 0
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
@@ -92,11 +95,13 @@ export class SessionManager extends EventEmitter {
     this.outputFilter.setOnCommandEvent((event) => {
       try {
         this.io.emit('command-filter-event', event)
+        this._associateCommandWithExecution(event)
       } catch {}
     })
     this.cavemanService.onRunComplete((sessionId, run) => {
       try {
         this.io.emit('caveman-run-complete', { sessionId, run })
+        this._finalizeExecution(sessionId, run.prompt)
       } catch {}
     })
   }
@@ -319,8 +324,9 @@ export class SessionManager extends EventEmitter {
       claudeLaunchState: null,
     }
 
-    if (config.type === 'opencode') {
-      this.outputFilter.setSessionConfig(sessionId, { name: 'opencode' })
+    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+    if (AGENT_TYPES.includes(config.type)) {
+      this.outputFilter.setSessionConfig(sessionId, { name: config.type })
       this.outputFilter.enableRtk(sessionId)
     }
 
@@ -758,15 +764,87 @@ export class SessionManager extends EventEmitter {
       if ((oldStatus === 'busy' || oldStatus === 'waiting') && (status === 'idle' || status === 'exited')) {
         this.cavemanService.endRun(sessionId)
         this.outputFilter.finalizeCommand(sessionId)
+        this._finalizeExecution(sessionId)
       } else if ((oldStatus === 'idle' || oldStatus === 'waiting') && status === 'busy') {
         this.cavemanService.startRun(sessionId)
+        this._startExecution(sessionId)
       }
     }
+  }
 
-    if (status === 'idle') {
-      this.cavemanService.endRun(sessionId)
-      this.outputFilter.finalizeCommand(sessionId)
+  private _startExecution(sessionId: string): void {
+    const pendingExecId = this._currentExecutionId.get(sessionId)
+    if (pendingExecId) {
+      const pendingExec = this._executions.get(pendingExecId)
+      if (pendingExec && pendingExec.endedAt === 0) {
+        this._finalizeExecution(sessionId)
+      }
     }
+    this.executionCounter++
+    const execId = `exec_${this.executionCounter}_${Date.now()}`
+    this._currentExecutionId.set(sessionId, execId)
+    this.outputFilter.setExecutionId(sessionId, execId)
+    this._executions.set(execId, {
+      id: execId,
+      sessionId,
+      prompt: '',
+      startedAt: Date.now(),
+      endedAt: 0,
+      commands: [],
+      totalOriginalTokens: 0,
+      totalFilteredTokens: 0,
+      totalDuration: 0,
+      success: true,
+      commandCount: 0,
+    })
+  }
+
+  private _associateCommandWithExecution(event: CommandEvent): void {
+    const execId = event.executionId
+    if (!execId) return
+    const exec = this._executions.get(execId)
+    if (!exec) return
+    exec.commands.push(event)
+    exec.totalOriginalTokens += event.originalTokens
+    exec.totalFilteredTokens += event.filteredTokens
+    exec.commandCount++
+    if (event.exitCode !== null && event.exitCode !== 0) {
+      exec.success = false
+    }
+  }
+
+  private _finalizeExecution(sessionId: string, prompt?: string): void {
+    const execId = this._currentExecutionId.get(sessionId)
+    if (!execId) return
+    const exec = this._executions.get(execId)
+    if (!exec) return
+    if (exec.endedAt !== 0) return
+    exec.endedAt = Date.now()
+    exec.totalDuration = exec.endedAt - exec.startedAt
+    if (prompt) exec.prompt = prompt
+    this._currentExecutionId.set(sessionId, null)
+    this.outputFilter.setExecutionId(sessionId, null)
+    try {
+      this.io.emit('execution-event', exec)
+    } catch {}
+    if (this._executions.size > 100) {
+      const first = this._executions.keys().next().value
+      if (first) this._executions.delete(first)
+    }
+  }
+
+  getExecutionHistory(): ExecutionEvent[] {
+    const all: ExecutionEvent[] = []
+    for (const [, exec] of this._executions) {
+      all.push(exec)
+    }
+    return all.sort((a, b) => b.startedAt - a.startedAt)
+  }
+
+  clearAllExecutions(): void {
+    this._executions.clear()
+    this._currentExecutionId.clear()
+    this.executionCounter = 0
   }
 
   private startBranchRefresh() {

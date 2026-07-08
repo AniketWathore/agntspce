@@ -186,10 +186,9 @@ export class CavemanService {
           for (const [sid, s] of data.sessions) {
             s.currentRun = null
             s.pendingPrompt = ''
+            s.runs = [] // clear old runs — fresh session
+            s.startTime = Date.now()
             this.sessions.set(sid, s as InternalSession)
-            if (s.runs.length > this.runCounter) {
-              this.runCounter = s.runs.length
-            }
           }
         }
       }

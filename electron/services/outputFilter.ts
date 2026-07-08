@@ -1,4 +1,4 @@
-import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, hasSpecificFilter, TimedExecution, type FilterDefinition } from './rtk'
+import { getRegistry, getTracker, detectCommand, filterCommandOutput, estimateTokens, neverWorse, hasSpecificFilter, TimedExecution, type FilterDefinition, stripAllControl } from './rtk'
 
 interface SkipRule { pattern: RegExp }
 interface ReplaceRule { pattern: RegExp; replacement: string }
@@ -46,6 +46,7 @@ export interface FilterStats {
 
 export interface CommandEvent {
   sessionId: string
+  executionId: string | null
   command: string
   args: string[]
   rawOutput: string
@@ -56,15 +57,53 @@ export interface CommandEvent {
   reduction: number
   exitCode: number | null
   duration: number
+  timestamp: number
+}
+
+export interface ExecutionEvent {
+  id: string
+  sessionId: string
+  prompt: string
+  startedAt: number
+  endedAt: number
+  commands: CommandEvent[]
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  totalDuration: number
+  success: boolean
+  commandCount: number
+}
+
+const AGENT_TOOL_PATTERNS = [
+  /^(?:Bash|Read|Write|Edit|Grep|Glob|Task|Agent|WebFetch|WebSearch|NotebookEdit|NotebookRead|Skill|AskUserQuestion|ToolSearch|TodoWrite|TaskOutput|TaskStop)\((.+)\)\s*$/,
+  /^\$\s+(.+)$/,
+  /^>\s+(.+)$/,
+  /^●\s*(?:Running command:|Executing:|Running:)?\s*(.+)$/i,
+  /^Running:\s+(.+)$/i,
+]
+
+const AGENT_COMMANDS = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+
+function extractCommandFromOutput(cleanedLine: string): string | null {
+  for (const pattern of AGENT_TOOL_PATTERNS) {
+    const match = cleanedLine.match(pattern)
+    if (match && match[1]) {
+      const cmd = match[1].trim()
+      if (cmd && cmd.length > 1 && !AGENT_COMMANDS.includes(cmd.split(/\s+/)[0])) {
+        return cmd
+      }
+    }
+  }
+  return null
 }
 
 const DEFAULT_CONFIGS: FilterConfig[] = [
   {
     name: 'default',
     stripAnsi: true,
-    trimLines: true,
-    collapseEmpty: true,
-    stripEmpty: true,
+    trimLines: false,
+    collapseEmpty: false,
+    stripEmpty: false,
     stripProgressBars: true,
     dedup: true,
     truncateLinesAt: 2000,
@@ -119,6 +158,7 @@ export class OutputFilterService {
   private onEvent: ((event: FilterEvent) => void) | null = null
   private onCommandEvent: ((event: CommandEvent) => void) | null = null
   private commandCounters = new Map<string, number>()
+  private _currentExecutionId = new Map<string, string | null>()
 
   private commandBuffers = new Map<string, { command: string; args: string[]; output: string; startTime: number; exitCode: number | null }>()
   private inputBuffer = new Map<string, string>()
@@ -130,6 +170,14 @@ export class OutputFilterService {
 
   constructor(customConfigs?: FilterConfig[]) {
     this.configs = customConfigs ?? DEFAULT_CONFIGS
+  }
+
+  setExecutionId(sessionId: string, executionId: string | null): void {
+    this._currentExecutionId.set(sessionId, executionId)
+  }
+
+  getExecutionId(sessionId: string): string | null {
+    return this._currentExecutionId.get(sessionId) ?? null
   }
 
   enableRtk(sessionId: string): void {
@@ -213,7 +261,6 @@ export class OutputFilterService {
     if (!detected) return
     const { command, args } = detected
 
-    const AGENT_COMMANDS = ['opencode', 'claude', 'codex', 'gemini', 'aider']
     const isAgent = AGENT_COMMANDS.includes(command)
 
     if (isAgent) {
@@ -250,10 +297,12 @@ export class OutputFilterService {
 
   processOutput(sessionId: string, data: string): FilterEvent | null {
     if (this.rtkSessions.has(sessionId)) {
-      const lines = data.split(/[\r\n]+/)
+      const cleanedData = stripAllControl(data)
+      const lines = cleanedData.split(/\n+/)
       for (const line of lines) {
         const trimmed = line.trim()
-        if (trimmed && /^[$#%❯➜λ]\s+\S/.test(trimmed)) {
+        if (!trimmed || trimmed.length < 2) continue
+        if (/^[$#%❯➜λ]\s+\S/.test(trimmed)) {
           const match = trimmed.match(/^[$#%❯➜λ]\s+(.+)/)
           if (match) {
             const cmdStr = match[1].trim()
@@ -278,7 +327,31 @@ export class OutputFilterService {
                 startTime: Date.now(),
                 exitCode: null,
               })
+              continue
             }
+          }
+        }
+        const extractedCmd = extractCommandFromOutput(trimmed)
+        if (extractedCmd) {
+          if (!hasSpecificFilter(extractedCmd)) {
+            continue
+          }
+          const detected = detectCommand(extractedCmd)
+          if (detected) {
+            const existing = this.commandBuffers.get(sessionId)
+            if (existing && existing.exitCode === null) {
+              this.clearFinalizeTimer(sessionId)
+              if (existing.output.trim()) {
+                this.finalizeCommand(sessionId, 0)
+              }
+            }
+            this.commandBuffers.set(sessionId, {
+              command: detected.command,
+              args: detected.args,
+              output: '',
+              startTime: Date.now(),
+              exitCode: null,
+            })
           }
         }
       }
@@ -286,7 +359,8 @@ export class OutputFilterService {
 
     const cmdBuf = this.commandBuffers.get(sessionId)
     if (cmdBuf && cmdBuf.exitCode === null) {
-      cmdBuf.output += data
+      const cleanedOutput = stripAllControl(data)
+      cmdBuf.output += cleanedOutput
       if (cmdBuf.output.length > 500000) {
         cmdBuf.output = cmdBuf.output.slice(-500000)
       }
@@ -303,10 +377,7 @@ export class OutputFilterService {
 
     if (config.stripAnsi) {
       const before = filtered.length
-      filtered = filtered
-        .replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/g, '')
-        .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07)/g, '')
-        .replace(/\x1b[\x40-\x5f]/g, '')
+      filtered = stripAllControl(filtered)
       if (filtered.length !== before) rulesApplied.push('stripAnsi')
     }
 
@@ -433,7 +504,8 @@ export class OutputFilterService {
       filtered = lines.join('\n')
     }
 
-    const originalTokens = estimateTokens(data)
+    const cleanedOriginal = stripAllControl(data)
+    const originalTokens = estimateTokens(cleanedOriginal)
     const filteredTokens = estimateTokens(statsFiltered)
     const reduction = originalTokens > 0
       ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
@@ -441,7 +513,7 @@ export class OutputFilterService {
 
     const event: FilterEvent = {
       sessionId,
-      original: data,
+      original: cleanedOriginal,
       filtered,
       originalBytes: data.length,
       filteredBytes: statsFiltered.length,
@@ -492,8 +564,12 @@ export class OutputFilterService {
       ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
       : 0
 
+    const brandedCmd = `agntspce ${cmdStr}`
+    const filterLabel = rtkFiltered.filterName ? `agntspce:${rtkFiltered.filterName}` : 'passthrough'
+
     const event: CommandEvent = {
       sessionId,
+      executionId: this._currentExecutionId.get(sessionId) ?? null,
       command: cmdBuf.command,
       args: cmdBuf.args,
       rawOutput,
@@ -504,12 +580,13 @@ export class OutputFilterService {
       reduction,
       exitCode: cmdBuf.exitCode,
       duration: Date.now() - cmdBuf.startTime,
+      timestamp: Date.now(),
     }
 
     const tracker = getTracker()
     tracker.record(
       cmdStr,
-      rtkFiltered.filterName ? `${cmdBuf.command} (filtered)` : cmdStr,
+      filterLabel,
       originalTokens,
       filteredTokens,
       event.duration,
