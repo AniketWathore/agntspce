@@ -299,7 +299,7 @@ export default function TerminalArea({
     : 0
   const tilingStyle = getTilingStyle(filteredSessions.length)
 
-  if (shellOnly && !bottomShellOpen) return null
+  if (shellOnly && !bottomShellOpen && !activeView) return null
 
   return (
     <div className={`terminal-area-wrapper${terminalFullscreen ? ' fullscreen' : ''}`} style={{ position: 'relative' }}>

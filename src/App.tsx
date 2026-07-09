@@ -805,6 +805,7 @@ function App() {
   }, [wsPath, openFiles, readFile, detectLanguage])
 
   const closeFile = useCallback((fileId: string) => {
+    const isLastFile = openFiles.length <= 1
     setOpenFiles(prev => {
       const idx = prev.findIndex(f => f.id === fileId)
       const next = prev.filter(f => f.id !== fileId)
@@ -833,7 +834,10 @@ function App() {
       delete next[fileId]
       return next
     })
-  }, [activeFileId])
+    if (isLastFile) {
+      setViewMode('agents')
+    }
+  }, [activeFileId, openFiles])
 
   const handleFileContentChange = useCallback((value: string | undefined) => {
     if (!activeFileId || value === undefined) return
@@ -895,7 +899,7 @@ function App() {
                 <img src="/img/logo.png" alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
               </div>
               <button
-                className={`activity-bar-btn ${workspaceSidebarOpen ? 'active' : ''}`}
+                className="activity-bar-btn active"
                 onClick={() => { handleToggleWorkspaceSidebar(); setActiveView(null) }}
                 title="Explorer (Workspaces)"
               >
@@ -1004,8 +1008,8 @@ function App() {
           )}
         </div>
         {(workspaceSidebarOpen || activeView === 'git-review') && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
-        <main className={`main-content${viewMode === 'files' || openFiles.some(f => f.isDiff) ? ' file-viewer' : ''}`}>
-          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && (
+        <main className={`main-content${(viewMode === 'files' || openFiles.some(f => f.isDiff)) && !activeView ? ' file-viewer' : ''}`}>
+          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && !activeView && (
             <div className="editor-area">
               {openFiles.length > 0 ? (
                 <>
@@ -1054,7 +1058,7 @@ function App() {
               )}
             </div>
           )}
-          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && bottomShellOpen && (
+          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && !activeView && bottomShellOpen && (
             <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
           )}
           <TerminalArea
