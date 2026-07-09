@@ -107,6 +107,8 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
 
     termInstance.current = term
 
+    term.focus()
+
     if (writeData) term.write(writeData)
 
     const unsub = onTerminalOutput?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {

@@ -23,10 +23,14 @@ export function EditorTabs({
         {openFiles.map((file) => (
           <div
             key={file.id}
-            className={`editor-tab ${activeFileId === file.id ? 'active' : ''}`}
+            className={`editor-tab ${activeFileId === file.id ? 'active' : ''}${file.isDiff ? ' editor-tab-diff' : ''}`}
             onClick={() => onSelectFile(file.id)}
           >
-            {file.isDirty && <span className="editor-tab-dirty">●</span>}
+            {file.isDiff ? (
+              <i className="codicon codicon-diff" style={{ fontSize: 13, marginRight: 3, flexShrink: 0 }}></i>
+            ) : file.isDirty ? (
+              <span className="editor-tab-dirty">●</span>
+            ) : null}
             <span className="editor-tab-name">{file.fileName}</span>
             <button
               className="editor-tab-close"

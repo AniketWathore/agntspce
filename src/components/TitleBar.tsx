@@ -1,14 +1,16 @@
-interface Props {
-  unreadCount: number
-  notificationPanelOpen: boolean
-  onNotificationClick: () => void
-}
-
 const MENUS = ['File', 'Edit', 'View', 'Window', 'Help']
 
-export default function TitleBar({ unreadCount, notificationPanelOpen, onNotificationClick }: Props) {
+export default function TitleBar() {
   const isMac = navigator.platform?.startsWith('Mac')
-  if (isMac) return null
+
+  if (isMac) {
+    return (
+      <div className="macos-title-bar" onDoubleClick={() => window.electronAPI?.windowMaximize?.()}>
+        <div className="macos-traffic-light-spacer" />
+        <div className="macos-title-drag" />
+      </div>
+    )
+  }
 
   function handleMenuClick(e: React.MouseEvent, label: string) {
     window.electronAPI?.popupMenu(label, Math.round(e.screenX), Math.round(e.screenY))

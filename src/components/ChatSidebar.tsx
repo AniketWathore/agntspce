@@ -35,8 +35,6 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showApiKeyInput, setShowApiKeyInput] = useState<string | null>(null)
-  const [apiKeyValue, setApiKeyValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const anyConfigured = models.some(m => m.configured)
@@ -176,8 +174,6 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     }
   }
 
-  const selectedModel = models.find(m => m.id === selectedProvider)
-
   return (
     <aside className="chat-sidebar">
       <div className="chat-header">
@@ -194,69 +190,6 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
           </button>
         </div>
       </div>
-
-      <div className="chat-model-bar">
-        <select
-          className="chat-model-select"
-          value={selectedProvider}
-          onChange={e => {
-            const newProvider = e.target.value as ProviderId
-            setSelectedProvider(newProvider)
-            const newId = generateId()
-            setThreadId(newId)
-            setMessages([])
-          }}
-        >
-          {models.length === 0 && <option value="">Loading...</option>}
-          {models.map(m => (
-            <option key={m.id} value={m.id} disabled={!m.configured}>
-              {m.name} — {m.model}{!m.configured ? ' (not configured)' : ''}
-            </option>
-          ))}
-        </select>
-        {selectedModel && !selectedModel.configured && (
-          <button
-            className="chat-config-btn"
-            onClick={() => setShowApiKeyInput(selectedProvider)}
-            title="Configure API key"
-          >
-            <i className="codicon codicon-key" style={{ fontSize: 13 }}></i>
-          </button>
-        )}
-      </div>
-
-      {showApiKeyInput && (
-        <div className="chat-api-key-bar">
-          <input
-            className="chat-api-key-input"
-            type="password"
-            placeholder={`Enter ${showApiKeyInput} API key...`}
-            value={apiKeyValue}
-            onChange={e => setApiKeyValue(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && apiKeyValue.trim()) {
-                socket.chatUpdateApiKey(showApiKeyInput, apiKeyValue.trim())
-                setShowApiKeyInput(null)
-                setApiKeyValue('')
-                socket.chatGetModels().then(setModels)
-              }
-            }}
-          />
-          <button
-            className="chat-api-key-btn"
-            onClick={() => {
-              if (apiKeyValue.trim()) {
-                socket.chatUpdateApiKey(showApiKeyInput, apiKeyValue.trim())
-                setShowApiKeyInput(null)
-                setApiKeyValue('')
-                socket.chatGetModels().then(setModels)
-              }
-            }}
-          >
-            Set
-          </button>
-        </div>
-      )}
 
       <div className="chat-messages">
         {loading ? (

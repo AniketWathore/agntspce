@@ -11,7 +11,8 @@ import Profile from './components/Profile'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
-import OutputFilterDebug from './components/OutputFilterDebug'
+import GitReviewPanel from './components/GitReviewPanel'
+import GitDiffViewer from './components/GitDiffViewer'
 import RtkDashboard from './components/RtkDashboard'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
@@ -20,7 +21,7 @@ import { CodeEditor } from './components/CodeEditor'
 import type { Notification } from './components/NotificationPanel'
 
 import { useSocket } from './hooks/useSocket'
-import GitChangesPanel from './components/GitChangesPanel'
+
 import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenFile } from './types'
 import '@vscode/codicons/dist/codicon.css'
 import './App.css'
@@ -116,10 +117,9 @@ function App() {
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
     createWorkspaceFromGit,
-    getSessionHistory, getGitFileDiff,
+    getSessionHistory, getGitFileDiff, getGitLog, getGitBranches, getGitCommitFiles,
     getGitFullStatus, gitRevertFile, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit, gitPull, gitPush, gitFetch, gitDiscardAll,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
-    filterStats, filterHistory, onFilterEvent,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
     onChatStreamChunk, onChatResponse, onChatError,
@@ -131,11 +131,12 @@ function App() {
   const [modal, setModal] = useState<ModalState | null>(null)
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
   const [agentModalSession, setAgentModalSession] = useState<string | null>(null)
+  const [gitDiffContents, setGitDiffContents] = useState<Record<string, string>>({})
   const [chatSidebarOpen, setChatSidebarOpen] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'debug' | 'output-filter' | 'rtk' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'rtk' | null>(null)
   const [gitChangeCount, setGitChangeCount] = useState(0)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
@@ -167,7 +168,7 @@ function App() {
       const saved = localStorage.getItem('agent-workspace-left-width')
       if (saved) return parseInt(saved, 10)
     } catch {}
-    return Math.round(window.innerWidth * 0.12)
+    return Math.round(window.innerWidth * 0.15)
   })
   const leftWidthRef = useRef(leftWidth)
   const [chatWidth, setChatWidth] = useState(() => {
@@ -279,6 +280,8 @@ function App() {
     })
     return unsub
   }, [onTerminalOutput])
+
+
 
   const prevSessionRef = useRef<Record<string, SessionState>>({})
   const firstMountRef = useRef(true)
@@ -737,6 +740,39 @@ function App() {
     return langMap[ext] || 'plaintext'
   }, [])
 
+  const openGitDiffTab = useCallback(async (filePath: string, status: string, commitHash?: string) => {
+    const tabId = `git-diff:${filePath}:${commitHash || 'staged'}`
+    const existing = openFiles.find(f => f.id === tabId)
+    if (existing) {
+      setActiveFileId(tabId)
+      return
+    }
+    const fileName = filePath.split('/').pop() || filePath
+    const diffEntry: OpenFile = {
+      id: tabId,
+      filePath,
+      fileName: `${fileName} (diff)`,
+      language: detectLanguage(filePath),
+      isDirty: false,
+      isDiff: true,
+      gitStatus: status,
+      commitHash,
+    }
+    setOpenFiles(prev => [...prev, diffEntry])
+    setActiveFileId(tabId)
+    setViewMode('files')
+    if (gitDiffContents[tabId]) return
+    const worktreePath = activeWorkspace?.repository?.path || ''
+    if (!worktreePath) return
+    const base = commitHash ? `${commitHash}^` : undefined
+    const head = commitHash
+    getGitFileDiff(worktreePath, filePath, base, head).then(content => {
+      if (content) {
+        setGitDiffContents(prev => ({ ...prev, [tabId]: content }))
+      }
+    })
+  }, [openFiles, detectLanguage, gitDiffContents, activeWorkspace, getGitFileDiff])
+
   const selectFile = useCallback(async (filePath: string) => {
     setSelectedFilePath(filePath)
     setViewMode('files')
@@ -790,6 +826,11 @@ function App() {
     setDirtyFiles(prev => {
       const next = new Set(prev)
       next.delete(fileId)
+      return next
+    })
+    setGitDiffContents(prev => {
+      const next = { ...prev }
+      delete next[fileId]
       return next
     })
   }, [activeFileId])
@@ -846,11 +887,7 @@ function App() {
 
   return (
     <div className="app">
-      <TitleBar
-        unreadCount={notifications.filter(n => !n.read).length}
-        notificationPanelOpen={notificationPanelOpen}
-        onNotificationClick={() => setNotificationPanelOpen(o => !o)}
-      />
+      <TitleBar />
       <div className="app-body" ref={appBodyRef}>
           <div className="activity-bar">
             <div className="activity-bar-top">
@@ -863,6 +900,16 @@ function App() {
                 title="Explorer (Workspaces)"
               >
                 <i className="codicon codicon-files" style={{ fontSize: 24 }}></i>
+              </button>
+              <button
+                className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
+                onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
+                title="Source Control"
+              >
+                <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
+                {gitChangeCount > 0 && (
+                  <span className="activity-bar-badge">{gitChangeCount > 99 ? '99+' : gitChangeCount}</span>
+                )}
               </button>
             </div>
             <div className="activity-bar-bottom">
@@ -895,23 +942,6 @@ function App() {
                 <i className="codicon codicon-rocket" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className={`activity-bar-btn ${activeView === 'output-filter' ? 'active' : ''}`}
-                onClick={() => setActiveView(prev => prev === 'output-filter' ? null : 'output-filter')}
-                title="Output Filter Debug"
-              >
-                <i className="codicon codicon-output" style={{ fontSize: 24 }}></i>
-              </button>
-              <button
-                className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
-                onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
-                title="Source Control"
-              >
-                <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
-                {gitChangeCount > 0 && (
-                  <span className="activity-bar-badge">{gitChangeCount > 99 ? '99+' : gitChangeCount}</span>
-                )}
-              </button>
-              <button
                 className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
                 onClick={() => setView('profile')}
                 title="Profile"
@@ -927,8 +957,8 @@ function App() {
               </button>
             </div>
           </div>
-        <div className={`panel-left${closingLeft.current ? ' closing' : ''}`} style={{ width: workspaceSidebarOpen ? leftWidth : 0, minWidth: workspaceSidebarOpen ? leftWidth : 0 }}>
-          {workspaceSidebarOpen && (
+        <div className={`panel-left${closingLeft.current ? ' closing' : ''}`} style={{ width: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0, minWidth: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0 }}>
+          {workspaceSidebarOpen && activeView !== 'git-review' && (
             <WorkspaceSidebar
               workspaces={workspaces}
               sessions={sessions}
@@ -955,10 +985,27 @@ function App() {
               deleteFile={deleteFile}
             />
           )}
+          {activeView === 'git-review' && (
+            <GitReviewPanel
+              worktreePath={activeWorkspace?.repository?.path || ''}
+              onSelectDiff={(filePath, status, commitHash) => openGitDiffTab(filePath, status, commitHash)}
+              getGitFullStatus={getGitFullStatus}
+              getGitFileDiff={getGitFileDiff}
+              getGitLog={getGitLog}
+              getGitBranches={getGitBranches}
+              getGitCommitFiles={getGitCommitFiles}
+              gitStageFile={gitStageFile}
+              gitUnstageFile={gitUnstageFile}
+              gitCommit={gitCommit}
+              gitPull={gitPull}
+              gitPush={gitPush}
+              gitFetch={gitFetch}
+            />
+          )}
         </div>
-        {workspaceSidebarOpen && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
-        <main className={`main-content${viewMode === 'files' ? ' file-viewer' : ''}`}>
-          {viewMode === 'files' && (
+        {(workspaceSidebarOpen || activeView === 'git-review') && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
+        <main className={`main-content${viewMode === 'files' || openFiles.some(f => f.isDiff) ? ' file-viewer' : ''}`}>
+          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && (
             <div className="editor-area">
               {openFiles.length > 0 ? (
                 <>
@@ -967,12 +1014,23 @@ function App() {
                     activeFileId={activeFileId}
                     onSelectFile={(id) => {
                       setActiveFileId(id)
-                      setSelectedFilePath(id)
+                      if (!openFiles.find(f => f.id === id)?.isDiff) {
+                        setSelectedFilePath(id)
+                      }
                     }}
                     onCloseFile={closeFile}
                     onNewAssistant={() => { handleToggleChatSidebar() }}
                   />
-                  {activeFile && (
+                  {activeFile?.isDiff ? (
+                    <GitDiffViewer
+                      key={activeFile.id}
+                      diffContent={gitDiffContents[activeFile.id] || ''}
+                      filePath={activeFile.filePath}
+                      gitStatus={activeFile.gitStatus || ''}
+                      theme={theme}
+                      language={activeFile.language}
+                    />
+                  ) : activeFile ? (
                     <CodeEditor
                       key={activeFile.id + (activeFileContent ? '' : '-empty')}
                       filePath={activeFile.filePath}
@@ -985,20 +1043,18 @@ function App() {
                       onSave={handleSaveFile}
                       onScrollChange={handleEditorScrollChange}
                     />
-                  )}
+                  ) : null}
                 </>
               ) : (
                 <div className="editor-empty-state">
-                  <div className="editor-empty-state-content">
-                    <i className="codicon codicon-file" style={{ fontSize: 48, opacity: 0.3 }}></i>
-                    <p>No file open</p>
-                    <p className="editor-empty-hint">Select a file from the explorer to start editing</p>
-                  </div>
+                  <i className="codicon codicon-file" style={{ fontSize: 48, opacity: 0.3 }}></i>
+                  <p>No file open</p>
+                  <p className="editor-empty-hint">Select a file from the explorer to start editing</p>
                 </div>
               )}
             </div>
           )}
-          {viewMode === 'files' && bottomShellOpen && (
+          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && bottomShellOpen && (
             <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
           )}
           <TerminalArea
@@ -1042,36 +1098,10 @@ function App() {
                   onClose={() => setActiveView(null)}
                 />
               )},
-              { id: 'git-review', label: 'Git Review', icon: '⑂', render: () => (
-                <GitChangesPanel
-                  worktreePath={activeWorkspace?.repository?.path || ''}
-                  onClose={() => setActiveView(null)}
-                  getGitFullStatus={getGitFullStatus}
-                  getGitFileDiff={getGitFileDiff}
-                  gitRevertFile={gitRevertFile}
-                  gitStageFile={gitStageFile}
-                  gitUnstageFile={gitUnstageFile}
-                  gitStageAll={gitStageAll}
-                  gitUnstageAll={gitUnstageAll}
-                  gitCommit={gitCommit}
-                  gitPull={gitPull}
-                  gitPush={gitPush}
-                  gitFetch={gitFetch}
-                  gitDiscardAll={gitDiscardAll}
-                />
-              )},
               { id: 'rtk', label: 'Filter', icon: '🚀', render: () => (
                 <RtkDashboard
                   executionHistory={executionHistory}
                   sessionStartedAt={sessionStartedAt}
-                  onClose={() => setActiveView(null)}
-                />
-              )},
-              { id: 'output-filter', label: 'Filter', icon: '◈', render: () => (
-                <OutputFilterDebug
-                  filterStats={filterStats}
-                  filterHistory={filterHistory}
-                  onFilterEvent={onFilterEvent}
                   onClose={() => setActiveView(null)}
                 />
               )},

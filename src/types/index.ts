@@ -173,11 +173,14 @@ export interface FileTreeNode {
 }
 
 export interface OpenFile {
-  id: string        // unique tab id (same as filePath for single files)
+  id: string
   filePath: string
   fileName: string
   language: string
   isDirty: boolean
+  isDiff?: boolean
+  gitStatus?: string
+  commitHash?: string
 }
 
 export type ProviderId = 'openai' | 'anthropic' | 'google' | 'deepseek'
