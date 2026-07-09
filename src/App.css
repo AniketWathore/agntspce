@@ -348,7 +348,7 @@
 
 /* ── macOS Title Bar ─────────────────────── */
 .macos-title-bar {
-  height: 15px;
+  height: 20px;
   display: flex;
   align-items: center;
   flex-shrink: 0;

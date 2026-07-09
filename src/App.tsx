@@ -764,7 +764,7 @@ function App() {
     if (gitDiffContents[tabId]) return
     const worktreePath = activeWorkspace?.repository?.path || ''
     if (!worktreePath) return
-    const base = commitHash ? `${commitHash}^` : undefined
+    const base = commitHash ? `${commitHash}^` : '--cached'
     const head = commitHash
     getGitFileDiff(worktreePath, filePath, base, head).then(content => {
       if (content) {
@@ -1008,8 +1008,8 @@ function App() {
           )}
         </div>
         {(workspaceSidebarOpen || activeView === 'git-review') && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
-        <main className={`main-content${(viewMode === 'files' || openFiles.some(f => f.isDiff)) && !activeView ? ' file-viewer' : ''}`}>
-          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && !activeView && (
+        <main className={`main-content${(viewMode === 'files' || openFiles.some(f => f.isDiff)) && (!activeView || activeView === 'git-review') ? ' file-viewer' : ''}`}>
+          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && (!activeView || activeView === 'git-review') && (
             <div className="editor-area">
               {openFiles.length > 0 ? (
                 <>
@@ -1058,7 +1058,7 @@ function App() {
               )}
             </div>
           )}
-          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && !activeView && bottomShellOpen && (
+          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && (!activeView || activeView === 'git-review') && bottomShellOpen && (
             <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
           )}
           <TerminalArea

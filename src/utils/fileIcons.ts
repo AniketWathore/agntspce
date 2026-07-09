@@ -1,0 +1,43 @@
+const ICON_MAP: Record<string, string> = {
+  tsx: 'react',
+  ts: 'typescript',
+  js: 'javascript',
+  jsx: 'react',
+  json: 'json',
+  md: 'markdown',
+  css: 'css',
+  html: 'html',
+  svg: 'image',
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  ico: 'image',
+  yml: 'yaml',
+  yaml: 'yaml',
+  toml: 'toml',
+  py: 'python',
+  rs: 'rust',
+  go: 'go',
+  rb: 'ruby',
+  java: 'java',
+  cpp: 'cpp',
+  c: 'c',
+  h: 'c',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  gitignore: 'git',
+  env: 'env',
+  lock: 'lock',
+  sql: 'database',
+  graphql: 'graphql',
+  vue: 'vue',
+  svelte: 'svelte',
+  astro: 'astro',
+}
+
+export function getFileIconClass(fileName: string): string {
+  const ext = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : ''
+  return ICON_MAP[ext ?? ''] || 'file'
+}

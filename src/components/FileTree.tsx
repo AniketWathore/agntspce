@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import type { FileTreeNode } from '../types'
+import { getFileIconClass } from '../utils/fileIcons'
 
 interface FileTreeProps {
   nodes: FileTreeNode[]
@@ -12,47 +13,8 @@ interface FileTreeProps {
 }
 
 function FileIcon({ name }: { name: string }) {
-  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() : ''
-  const iconMap: Record<string, string> = {
-    tsx: 'react',
-    ts: 'typescript',
-    js: 'javascript',
-    jsx: 'react',
-    json: 'json',
-    md: 'markdown',
-    css: 'css',
-    html: 'html',
-    svg: 'image',
-    png: 'image',
-    jpg: 'image',
-    jpeg: 'image',
-    gif: 'image',
-    ico: 'image',
-    yml: 'yaml',
-    yaml: 'yaml',
-    toml: 'toml',
-    py: 'python',
-    rs: 'rust',
-    go: 'go',
-    rb: 'ruby',
-    java: 'java',
-    cpp: 'cpp',
-    c: 'c',
-    h: 'c',
-    sh: 'shell',
-    bash: 'shell',
-    zsh: 'shell',
-    gitignore: 'git',
-    env: 'env',
-    lock: 'lock',
-    sql: 'database',
-    graphql: 'graphql',
-    vue: 'vue',
-    svelte: 'svelte',
-    astro: 'astro',
-  }
-  const icon = iconMap[ext ?? ''] || 'file'
-  return <i className={`codicon codicon-${icon}`} style={{ fontSize: 14, flexShrink: 0 }} />
+  const icon = getFileIconClass(name)
+  return <i className={`codicon codicon-${icon}`} style={{ fontSize: 14, flexShrink: 0, color: '#CCCCCC' }} />
 }
 
 export function FileTree({
