@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # agntspce - Token-aware command wrapper
-# Replaces RTK for the AgntSpce app with "agntspce" tag
+# Rewrites commands via the Rust rtk binary or the built-in Node.js filter.
+# Bare invocations (e.g. "agntspce git status") are treated as "run" calls.
 
 set -euo pipefail
 
@@ -16,7 +17,8 @@ case "${1:-}" in
     exec node "$SCRIPT_DIR/agntspce.mjs" run "$@"
     ;;
   *)
-    echo "agntspce: usage: agntspce rewrite <command> | agntspce run <command...>"
-    exit 1
+    # Bare commands like "agntspce git status" — treat as "run git status".
+    # This is the format produced by the Rust RTK binary's rewrite engine.
+    exec node "$SCRIPT_DIR/agntspce.mjs" run "$@"
     ;;
 esac

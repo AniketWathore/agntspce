@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { fileURLToPath } from 'node:url'
+import * as crypto from 'node:crypto'
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
@@ -56,6 +57,42 @@ function buildShellArgs(commands: string | string[]): string[] {
   const joined = Array.isArray(commands) ? commands.join(' && ') : commands
   const keepOpen = joined && joined.trim() ? `${joined} && exec ${shellName}` : `exec ${shellName}`
   return ['-c', keepOpen]
+}
+
+// ─── RTK Integration ────────────────────────────────────────────
+
+// Must match EMBEDDED_SECRET in rtk-develop/src/core/activation.rs
+const RTK_HMAC_SECRET = 'agntspce-rtk-integration-v1-do-not-rely-on-this-for-security'
+const RTK_TOKEN_TTL_SECS = 120
+
+/// Resolve the path to the bundled RTK binary.
+/// Installed at ~/.local/share/agntspce/rtk/rtk by the build process.
+function getRtkBinaryPath(): string {
+  const homeDir = os.homedir()
+  const candidates = [
+    path.join(homeDir, '.local', 'share', 'agntspce', 'rtk', 'rtk'),
+    // Also check alongside the app's own bin directory for dev builds
+    path.join(path.resolve(__dirname, '..', '..', 'bin', 'rtk')),
+  ]
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate
+    }
+  }
+  return candidates[0] // fallback even if not present — env var still set
+}
+
+/// Generate an HMAC-signed session token for the RTK binary.
+/// Format: base64url(payload || HMAC-SHA256(secret, payload))
+/// payload = `${pid}:${expiry}:${nonce}`
+function generateRtkToken(): string {
+  const now = Math.floor(Date.now() / 1000)
+  const expiry = now + RTK_TOKEN_TTL_SECS
+  const nonce = crypto.randomBytes(8).toString('hex')
+  const payload = `${process.pid}:${expiry}:${nonce}`
+  const sig = crypto.createHmac('sha256', RTK_HMAC_SECRET).update(payload).digest()
+  const combined = Buffer.concat([Buffer.from(payload, 'utf-8'), sig])
+  return combined.toString('base64url')
 }
 
 const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
@@ -302,6 +339,34 @@ export class SessionManager extends EventEmitter {
         env.PATH = `${binDir}:${env.PATH || ''}`
       }
       env.AGNTSPCE_ENABLED = '1'
+
+      // Inject RTK token and binary path for the Rust RTK integration.
+      // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
+      // AGNTSPCE_RTK_BINARY tells hook scripts where to find the binary.
+      env.AGNTSPCE_RTK_SESSION = generateRtkToken()
+      env.AGNTSPCE_RTK_BINARY = getRtkBinaryPath()
+
+      // AGNTSPCE_WRAPPER_PATH tells the OpenCode plugin where to find the
+      // agntspce wrapper script (used to run rewritten commands).
+      const homeLocalBin = path.join(os.homedir(), '.local', 'bin', 'agntspce')
+      const rtkDir = path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk', 'agntspce')
+      for (const candidate of [homeLocalBin, rtkDir, path.join(binDir, 'agntspce')]) {
+        if (fs.existsSync(candidate)) {
+          env.AGNTSPCE_WRAPPER_PATH = candidate
+          break
+        }
+      }
+      // Prepend wrapper directories to PATH so agent subprocesses can find
+      // the agntspce command even if PATH gets sanitized or reset by .zshrc.
+      const rtkParentDir = path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk')
+      const localBinDir = path.join(os.homedir(), '.local', 'bin')
+      // Only prepend directories that actually exist and aren't already prepended
+      const prependDirs = [rtkParentDir, localBinDir].filter(d =>
+        fs.existsSync(d) && !env.PATH?.startsWith(d + ':')
+      )
+      if (prependDirs.length > 0) {
+        env.PATH = `${prependDirs.join(':')}:${env.PATH || ''}`
+      }
     }
 
     if (this.workspace?.envVars) {
