@@ -47,7 +47,9 @@ function postBuildPlugin(): Plugin {
         // Copy RTK binary + wrapper scripts to dist-electron/rtk/
         const rtkDir = join(__dirname, 'dist-electron', 'rtk')
         mkdirSync(rtkDir, { recursive: true })
-        for (const file of ['rtk', 'agntspce', 'agntspce.mjs']) {
+        const isWin = process.platform === 'win32'
+        const rtkFiles = isWin ? ['rtk.exe'] : ['rtk']
+        for (const file of [...rtkFiles, 'agntspce', 'agntspce.mjs']) {
           const srcFile = join(__dirname, 'bin', file)
           if (existsSync(srcFile)) {
             copyFileSync(srcFile, join(rtkDir, file))

@@ -23,9 +23,9 @@ const key = `${platform}-${arch}`
 const srcName = binaryMap[key]
 
 if (!srcName) {
-  console.error(`[copy-rtk] Unsupported platform: ${key}`)
-  console.error(`[copy-rtk] Supported: ${Object.keys(binaryMap).join(', ')}`)
-  process.exit(1)
+  console.warn(`[copy-rtk] No RTK binary for ${key} — skipping. Supported: ${Object.keys(binaryMap).join(', ')}`)
+  console.warn(`[copy-rtk] RTK filtering will not be available. The app will work without it.`)
+  process.exit(0)
 }
 
 const src = join(__dirname, srcName)
@@ -34,9 +34,9 @@ const dest = join(__dirname, isWindows ? 'rtk.exe' : 'rtk')
 const versionDest = join(__dirname, 'rtk-version.txt')
 
 if (!existsSync(src)) {
-  console.error(`[copy-rtk] Missing binary: ${src}`)
-  console.error(`[copy-rtk] Build it first: npm run build:rtk:source`)
-  process.exit(1)
+  console.warn(`[copy-rtk] Missing binary: ${src} — skipping RTK install.`)
+  console.warn(`[copy-rtk] RTK filtering will not be available. The app will work without it.`)
+  process.exit(0)
 }
 
 copyFileSync(src, dest)

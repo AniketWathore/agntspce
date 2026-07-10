@@ -308,7 +308,7 @@ export class SessionManager extends EventEmitter {
       const binDir = AGNTSPCE_BIN_DIR
       if (fs.existsSync(binDir)) {
         env.AGNTSPCE_ORIGINAL_PATH = env.PATH || ''
-        env.PATH = `${binDir}:${env.PATH || ''}`
+        env.PATH = `${binDir}${path.delimiter}${env.PATH || ''}`
       }
       env.AGNTSPCE_ENABLED = '1'
 
@@ -321,7 +321,7 @@ export class SessionManager extends EventEmitter {
         env.AGNTSPCE_RTK_BINARY = activeRtkPath
       } else {
         // Fallback — use the bundled path directly
-        env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', 'rtk')
+        env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', process.platform === 'win32' ? 'rtk.exe' : 'rtk')
       }
 
       // AGNTSPCE_WRAPPER_PATH tells hooks/plugins where to find the agntspce
@@ -333,8 +333,8 @@ export class SessionManager extends EventEmitter {
       }
       // Prepend the RTK directory to PATH so agent subprocesses can find
       // the agntspce command even when PATH gets sanitized by .zshrc.
-      if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + ':')) {
-        env.PATH = `${rtkDir}:${env.PATH || ''}`
+      if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + path.delimiter)) {
+        env.PATH = `${rtkDir}${path.delimiter}${env.PATH || ''}`
       }
     }
 

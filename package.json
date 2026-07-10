@@ -73,16 +73,9 @@
     ],
     "extraResources": [
       {
-        "from": "bin/rtk",
-        "to": "rtk/rtk"
-      },
-      {
-        "from": "bin/agntspce",
-        "to": "rtk/agntspce"
-      },
-      {
-        "from": "bin/agntspce.mjs",
-        "to": "rtk/agntspce.mjs"
+        "from": "bin",
+        "to": "rtk",
+        "filter": ["rtk", "rtk.exe", "agntspce", "agntspce.mjs"]
       }
     ],
     "mac": {
