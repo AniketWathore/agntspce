@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
-import { copyFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readdirSync, chmodSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -43,6 +43,17 @@ function postBuildPlugin(): Plugin {
           }
         } else {
           console.warn('[post-build] node-pty prebuilds not found at', src)
+        }
+        // Copy RTK binary + wrapper scripts to dist-electron/rtk/
+        const rtkDir = join(__dirname, 'dist-electron', 'rtk')
+        mkdirSync(rtkDir, { recursive: true })
+        for (const file of ['rtk', 'agntspce', 'agntspce.mjs']) {
+          const srcFile = join(__dirname, 'bin', file)
+          if (existsSync(srcFile)) {
+            copyFileSync(srcFile, join(rtkDir, file))
+            try { chmodSync(join(rtkDir, file), 0o755) } catch {}
+            console.log(`[post-build] Copied bin/${file} → dist-electron/rtk/${file}`)
+          }
         }
         copyPreload()
       } catch (e) {

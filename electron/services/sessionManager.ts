@@ -63,16 +63,22 @@ function buildShellArgs(commands: string | string[]): string[] {
 
 // Must match EMBEDDED_SECRET in rtk-develop/src/core/activation.rs
 const RTK_HMAC_SECRET = 'agntspce-rtk-integration-v1-do-not-rely-on-this-for-security'
-const RTK_TOKEN_TTL_SECS = 120
+const RTK_TOKEN_TTL_SECS = 86400 // 24 hours — covers realistic session lifetimes
 
 /// Resolve the path to the bundled RTK binary.
-/// Installed at ~/.local/share/agntspce/rtk/rtk by the build process.
+/// Priority:
+///   1. Bundled alongside the app's own resources (production — `extraResources`)
+///   2. Bundled alongside the app's bin directory (dev builds)
+///   3. Installed at ~/.local/share/agntspce/rtk/rtk (legacy/manual install)
 function getRtkBinaryPath(): string {
   const homeDir = os.homedir()
   const candidates = [
+    // Production: bundled via electron-builder extraResources → Resources/rtk/rtk
+    path.join(process.resourcesPath || '', 'rtk', 'rtk'),
+    // Dev: alongside the app's bin directory
+    path.resolve(__dirname, '..', '..', 'bin', 'rtk'),
+    // Legacy: manually installed at the data directory
     path.join(homeDir, '.local', 'share', 'agntspce', 'rtk', 'rtk'),
-    // Also check alongside the app's own bin directory for dev builds
-    path.join(path.resolve(__dirname, '..', '..', 'bin', 'rtk')),
   ]
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
@@ -348,20 +354,29 @@ export class SessionManager extends EventEmitter {
 
       // AGNTSPCE_WRAPPER_PATH tells the OpenCode plugin where to find the
       // agntspce wrapper script (used to run rewritten commands).
-      const homeLocalBin = path.join(os.homedir(), '.local', 'bin', 'agntspce')
-      const rtkDir = path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk', 'agntspce')
-      for (const candidate of [homeLocalBin, rtkDir, path.join(binDir, 'agntspce')]) {
+      const wrapperCandidates = [
+        // Bundled via extraResources → Resources/rtk/agntspce (production)
+        path.join(process.resourcesPath || '', 'rtk', 'agntspce'),
+        // Dev: alongside the app's bin directory
+        path.join(binDir, 'agntspce'),
+        // User-local install
+        path.join(os.homedir(), '.local', 'bin', 'agntspce'),
+        // Legacy: manually placed in the RTK data directory
+        path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk', 'agntspce'),
+      ]
+      for (const candidate of wrapperCandidates) {
         if (fs.existsSync(candidate)) {
           env.AGNTSPCE_WRAPPER_PATH = candidate
           break
         }
       }
-      // Prepend wrapper directories to PATH so agent subprocesses can find
-      // the agntspce command even if PATH gets sanitized or reset by .zshrc.
-      const rtkParentDir = path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk')
-      const localBinDir = path.join(os.homedir(), '.local', 'bin')
-      // Only prepend directories that actually exist and aren't already prepended
-      const prependDirs = [rtkParentDir, localBinDir].filter(d =>
+      // Prepend the RTK resource directory to PATH so agent subprocesses
+      // can find the agntspce command even if PATH gets sanitized.
+      const resourcesRtk = path.join(process.resourcesPath || '', 'rtk')
+      const prependDirs = [
+        resourcesRtk,
+        path.join(os.homedir(), '.local', 'bin'),
+      ].filter(d =>
         fs.existsSync(d) && !env.PATH?.startsWith(d + ':')
       )
       if (prependDirs.length > 0) {
