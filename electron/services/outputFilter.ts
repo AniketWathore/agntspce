@@ -51,17 +51,13 @@ export class OutputFilterService {
     if (t) { clearTimeout(t); this.finalizeTimers.delete(sessionId) }
   }
 
-  // Process incoming PTY data. Returns the modified data for the frontend.
+  // Process incoming PTY data. Returns data for the frontend.
+  // VT sequences MUST pass through unmodified — xterm.js's parser depends on
+  // receiving the exact stream. Marker detection and command accumulation
+  // happen independently without altering the display data.
   processOutput(sessionId: string, data: string): string {
-    const isAgent = [...this.commandBuffers.keys()].some(id => id.startsWith(sessionId))
-
-    // Replace shell echoes of "agntspce run <tool>" with empty
-    let modified = data.replace(/^.*?\$\s+(?:\/[^\s]*\/)?agntspce(?:\s+run)?\s+.*$/gm, '')
-
-    // Detect our wrapper's output markers: "agntspce $ <command>"
-    const lines = modified.split('\n')
-    const outLines: string[] = []
-
+    // Detect wrapper markers: "agntspce $ <command>" — for command tracking only
+    const lines = data.split('\n')
     for (const line of lines) {
       const tagMatch = line.match(AGNTSPCE_CMD_RE)
       if (tagMatch) {
@@ -80,31 +76,21 @@ export class OutputFilterService {
           this.insideCommand.set(sessionId, true)
           this.outputAccum.set(sessionId, [])
         }
-        outLines.push(line)
-        continue
       }
 
       if (this.insideCommand.get(sessionId)) {
         const accum = this.outputAccum.get(sessionId) || []
         accum.push(line)
         this.outputAccum.set(sessionId, accum)
-        outLines.push(line)
-        // Auto-finalize after output stops (heuristic: detect empty line or prompt-like line)
         if (/^[$#%❯➜]\s*$/.test(line.trim()) || line.trim() === '') {
           this.scheduleFinalize(sessionId)
         }
-        continue
       }
-
-      outLines.push(line)
     }
 
-    modified = outLines.join('\n')
-
-    // Clear empty lines from shell echo replacement
-    modified = modified.replace(/\n{3,}/g, '\n\n')
-
-    return modified
+    // Pass raw data through unmodified — any change to the VT stream
+    // desynchronizes xterm.js's internal buffer (cursor, scroll regions, colors).
+    return data
   }
 
   private _detectCommand(cmdStr: string): { command: string; args: string[] } | null {
