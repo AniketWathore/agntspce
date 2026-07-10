@@ -118,12 +118,12 @@ function App() {
     closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
     createWorkspaceFromGit,
     getSessionHistory, getGitFileDiff, getGitLog, getGitBranches, getGitCommitFiles,
-    getGitFullStatus, gitRevertFile, gitStageFile, gitUnstageFile, gitStageAll, gitUnstageAll, gitCommit, gitPull, gitPush, gitFetch, gitDiscardAll,
+    getGitFullStatus, gitStageFile, gitUnstageFile, gitCommit, gitPull, gitPush, gitFetch,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
     onChatStreamChunk, onChatResponse, onChatError,
-    commandHistory, executionHistory, sessionStartedAt,
+    executionHistory, sessionStartedAt,
   } = useSocket()
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
@@ -155,6 +155,8 @@ function App() {
   const [viewMode, setViewMode] = useState<'agents' | 'files'>('agents')
 
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [, setSessionHistory] = useState<any[]>([])
+  const [, setHistoryPanelOpen] = useState(false)
   const [fontSize, setFontSize] = useState(() => {
     try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
   })

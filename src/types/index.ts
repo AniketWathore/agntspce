@@ -210,6 +210,29 @@ export interface StreamChunk {
   error?: string
 }
 
+export interface CavemanRun {
+  id: string
+  prompt: string
+  startedAt: number
+  endedAt: number
+  agentResponseTokens: number
+}
+
+export interface CavemanStats {
+  sessionId: string
+  enabled: boolean
+  level: string
+  runs: CavemanRun[]
+  currentRun: CavemanRun | null
+  startTime: number
+  uptime: number
+}
+
+export interface CavemanAggregateStats {
+  sessionsActive: number
+  uptimeMs: number
+}
+
 declare global {
   interface Window {
     electronAPI?: {

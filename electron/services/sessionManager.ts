@@ -3,7 +3,6 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { fileURLToPath } from 'node:url'
-import * as crypto from 'node:crypto'
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
@@ -14,12 +13,16 @@ import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
 import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
+import * as rtkManager from './rtkManager'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 let AGNTSPCE_BIN_DIR = ''
 for (const dir of [
   path.resolve(__dirname, '..', '..', 'bin'),
+  // Production: asarUnpack puts wrappers at app.asar.unpacked/bin/
+  path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bin'),
+  // Production fallback: direct resourcesPath/bin (for some electron-builder configs)
   path.resolve(process.resourcesPath || '', 'bin'),
 ]) {
   if (fs.existsSync(dir)) {
@@ -60,46 +63,9 @@ function buildShellArgs(commands: string | string[]): string[] {
 }
 
 // ─── RTK Integration ────────────────────────────────────────────
-
-// Must match EMBEDDED_SECRET in rtk-develop/src/core/activation.rs
-const RTK_HMAC_SECRET = 'agntspce-rtk-integration-v1-do-not-rely-on-this-for-security'
-const RTK_TOKEN_TTL_SECS = 86400 // 24 hours — covers realistic session lifetimes
-
-/// Resolve the path to the bundled RTK binary.
-/// Priority:
-///   1. Bundled alongside the app's own resources (production — `extraResources`)
-///   2. Bundled alongside the app's bin directory (dev builds)
-///   3. Installed at ~/.local/share/agntspce/rtk/rtk (legacy/manual install)
-function getRtkBinaryPath(): string {
-  const homeDir = os.homedir()
-  const candidates = [
-    // Production: bundled via electron-builder extraResources → Resources/rtk/rtk
-    path.join(process.resourcesPath || '', 'rtk', 'rtk'),
-    // Dev: alongside the app's bin directory
-    path.resolve(__dirname, '..', '..', 'bin', 'rtk'),
-    // Legacy: manually installed at the data directory
-    path.join(homeDir, '.local', 'share', 'agntspce', 'rtk', 'rtk'),
-  ]
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate
-    }
-  }
-  return candidates[0] // fallback even if not present — env var still set
-}
-
-/// Generate an HMAC-signed session token for the RTK binary.
-/// Format: base64url(payload || HMAC-SHA256(secret, payload))
-/// payload = `${pid}:${expiry}:${nonce}`
-function generateRtkToken(): string {
-  const now = Math.floor(Date.now() / 1000)
-  const expiry = now + RTK_TOKEN_TTL_SECS
-  const nonce = crypto.randomBytes(8).toString('hex')
-  const payload = `${process.pid}:${expiry}:${nonce}`
-  const sig = crypto.createHmac('sha256', RTK_HMAC_SECRET).update(payload).digest()
-  const combined = Buffer.concat([Buffer.from(payload, 'utf-8'), sig])
-  return combined.toString('base64url')
-}
+// Token generation, path resolution, and hook management are delegated
+// to electron/services/rtkManager.ts. rtkManager.initialize() is called
+// in the main process before any sessions are created.
 
 const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
 
@@ -346,41 +312,29 @@ export class SessionManager extends EventEmitter {
       }
       env.AGNTSPCE_ENABLED = '1'
 
-      // Inject RTK token and binary path for the Rust RTK integration.
+      // Inject RTK session token and binary path.
       // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
       // AGNTSPCE_RTK_BINARY tells hook scripts where to find the binary.
-      env.AGNTSPCE_RTK_SESSION = generateRtkToken()
-      env.AGNTSPCE_RTK_BINARY = getRtkBinaryPath()
-
-      // AGNTSPCE_WRAPPER_PATH tells the OpenCode plugin where to find the
-      // agntspce wrapper script (used to run rewritten commands).
-      const wrapperCandidates = [
-        // Bundled via extraResources → Resources/rtk/agntspce (production)
-        path.join(process.resourcesPath || '', 'rtk', 'agntspce'),
-        // Dev: alongside the app's bin directory
-        path.join(binDir, 'agntspce'),
-        // User-local install
-        path.join(os.homedir(), '.local', 'bin', 'agntspce'),
-        // Legacy: manually placed in the RTK data directory
-        path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk', 'agntspce'),
-      ]
-      for (const candidate of wrapperCandidates) {
-        if (fs.existsSync(candidate)) {
-          env.AGNTSPCE_WRAPPER_PATH = candidate
-          break
-        }
+      env.AGNTSPCE_RTK_SESSION = rtkManager.generateRtkToken()
+      const activeRtkPath = rtkManager.getActiveRtkPath()
+      if (activeRtkPath) {
+        env.AGNTSPCE_RTK_BINARY = activeRtkPath
+      } else {
+        // Fallback — use the bundled path directly
+        env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', 'rtk')
       }
-      // Prepend the RTK resource directory to PATH so agent subprocesses
-      // can find the agntspce command even if PATH gets sanitized.
-      const resourcesRtk = path.join(process.resourcesPath || '', 'rtk')
-      const prependDirs = [
-        resourcesRtk,
-        path.join(os.homedir(), '.local', 'bin'),
-      ].filter(d =>
-        fs.existsSync(d) && !env.PATH?.startsWith(d + ':')
-      )
-      if (prependDirs.length > 0) {
-        env.PATH = `${prependDirs.join(':')}:${env.PATH || ''}`
+
+      // AGNTSPCE_WRAPPER_PATH tells hooks/plugins where to find the agntspce
+      // wrapper script (used to run rewritten commands).
+      const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
+      const wrapperPath = path.join(rtkDir, 'agntspce')
+      if (fs.existsSync(wrapperPath)) {
+        env.AGNTSPCE_WRAPPER_PATH = wrapperPath
+      }
+      // Prepend the RTK directory to PATH so agent subprocesses can find
+      // the agntspce command even when PATH gets sanitized by .zshrc.
+      if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + ':')) {
+        env.PATH = `${rtkDir}:${env.PATH || ''}`
       }
     }
 

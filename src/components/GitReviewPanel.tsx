@@ -72,8 +72,7 @@ function statusBadge(code: string): string {
 export default function GitReviewPanel({
   worktreePath, onSelectDiff,
   getGitFullStatus, getGitLog, getGitBranches, getGitCommitFiles,
-  gitStageFile, gitUnstageFile, gitCommit,
-  gitPull, gitPush, gitFetch,
+  gitUnstageFile, gitCommit,
 }: Props) {
   const [status, setStatus] = useState<FullStatus | null>(null)
   const [commitMsg, setCommitMsg] = useState('')
@@ -92,8 +91,8 @@ export default function GitReviewPanel({
   const loadStatus = useCallback(() => {
     if (!worktreePath) return
     getGitFullStatus(worktreePath).then(setStatus)
-    getGitLog(worktreePath, 50).then(setLogs)
-    getGitBranches(worktreePath).then(setBranches)
+    getGitLog(worktreePath, 50).then(v => setLogs(v ?? []))
+    getGitBranches(worktreePath).then(v => setBranches(v ?? []))
   }, [worktreePath, getGitFullStatus, getGitLog, getGitBranches])
 
   useEffect(() => {
@@ -233,7 +232,6 @@ export default function GitReviewPanel({
             <div className="git-files-empty">No commits</div>
           ) : (
             logs.map((commit, idx) => {
-              const branch = branches?.find(b => b.name === commit.hash)
               return (
                 <div key={commit.hash}>
                   <div

@@ -56,7 +56,7 @@ export class OutputFilterService {
     const isAgent = [...this.commandBuffers.keys()].some(id => id.startsWith(sessionId))
 
     // Replace shell echoes of "agntspce run <tool>" with empty
-    let modified = data.replace(/^.*?\$\s+agntspce\s+run\s+.*$/gm, '')
+    let modified = data.replace(/^.*?\$\s+(?:\/[^\s]*\/)?agntspce(?:\s+run)?\s+.*$/gm, '')
 
     // Detect our wrapper's output markers: "agntspce $ <command>"
     const lines = modified.split('\n')

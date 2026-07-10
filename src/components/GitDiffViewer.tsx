@@ -64,9 +64,6 @@ export default function GitDiffViewer({
     setChunk(parseDiff(diffContent))
   }, [diffContent])
 
-  const isNewFile = gitStatus === 'A' || gitStatus === '??'
-  const isDeleted = gitStatus === 'D'
-
   const handleEditorMount = (editorInstance: editor.IStandaloneDiffEditor, monaco: any) => {
     editorRef.current = editorInstance
     monacoRef.current = monaco
@@ -89,10 +86,6 @@ export default function GitDiffViewer({
       </div>
     )
   }
-
-  const label = isNewFile ? `New file: ${filePath.split('/').pop()}` :
-    isDeleted ? `Deleted file: ${filePath.split('/').pop()}` :
-    filePath.split('/').pop() || filePath
 
   return (
     <div className="git-diff-root">

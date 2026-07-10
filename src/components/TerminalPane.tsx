@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
-import { useSocket } from '../hooks/useSocket'
 import StatusDot from './StatusDot'
 import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 import StartupUI from './StartupUI'
@@ -13,14 +12,14 @@ interface Props {
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
   onRestart: (sessionId: string) => void
-  onStartAgent: (sessionId: string) => void
+  onStartAgent: (sessionId: string, config: AgentStartConfig) => void
   onShowAgentModal: (sessionId: string) => void
   onClose?: (sessionId: string) => void
   writeData: string
   agentConfigs?: AgentConfig[]
   style?: React.CSSProperties
   dimmed?: boolean
-  onTerminalOutput?: (sessionId: string, data: string) => void
+  onTerminalOutput?: (cb: (event: { sessionId: string, data: string }) => void) => () => void
 }
 
 export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput }: Props) {
@@ -170,7 +169,7 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
           <div className="terminal-startup-overlay">
             <StartupUI
               sessionId={session.id}
-              agentConfigs={agentConfigs}
+              agentConfigs={agentConfigs ?? []}
               onStart={onStartAgent}
               onAdvanced={() => onShowAgentModal(session.id)}
               onDismiss={() => setShowStartup(false)}

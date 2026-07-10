@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import type { ChatModelInfo, ProviderId } from '../types'
+import type { ChatModelInfo } from '../types'
 
 interface UserPrefs {
   fontSize: number

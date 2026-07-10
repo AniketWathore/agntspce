@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:rtk": "bash bin/build-rtk.sh",
+    "build:rtk": "node bin/copy-rtk.js",
+    "build:rtk:source": "bash bin/build-rtk.sh",
+    "postinstall": "node bin/copy-rtk.js",
     "lint": "oxlint",
     "preview": "vite preview",
     "electron:dev": "vite",
@@ -46,10 +48,28 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "bin/**/*"
+      "bin/**/*",
+      "!bin/rtk",
+      "!bin/rtk.exe"
     ],
     "asarUnpack": [
-      "bin/**/*"
+      "bin/agntspce",
+      "bin/agntspce.mjs",
+      "bin/cargo",
+      "bin/docker",
+      "bin/git",
+      "bin/just",
+      "bin/kubectl",
+      "bin/ls",
+      "bin/make",
+      "bin/nls",
+      "bin/npm",
+      "bin/npx",
+      "bin/pip",
+      "bin/pnpm",
+      "bin/pytest",
+      "bin/terraform",
+      "bin/tree"
     ],
     "extraResources": [
       {

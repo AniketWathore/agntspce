@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
 import { useSocket } from '../hooks/useSocket'
 import ActivityFeed from './ActivityFeed'

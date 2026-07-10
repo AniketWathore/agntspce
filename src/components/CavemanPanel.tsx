@@ -16,7 +16,7 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, onCavemanR
   const allSessions = Object.values(cavemanStates)
   const activeSessions = allSessions.filter(s => s.enabled)
   const selectedSession = allSessions.find(s => s.sessionId === selectedSessionId)
-  const selectedRun = selectedSession?.runs.find(r => r.id === selectedRunId)
+  const selectedRun = selectedSession?.runs.find((r: CavemanRun) => r.id === selectedRunId)
     || (selectedSession?.currentRun?.id === selectedRunId ? selectedSession.currentRun : null)
 
   function formatTime(ms: number): string {
@@ -26,12 +26,6 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, onCavemanR
     if (h > 0) return `${h}h ${m % 60}m`
     if (m > 0) return `${m}m ${s % 60}s`
     return `${s}s`
-  }
-
-  const levelLabel: Record<string, string> = {
-    lite: 'LITE — ~30% fewer output tokens. Drop filler, keep grammar.',
-    full: 'FULL — ~65% fewer output tokens. Fragments, no articles.',
-    ultra: 'ULTRA — ~75% fewer output tokens. Telegraphic, abbreviations.',
   }
 
   const levelClass: Record<string, string> = {
@@ -135,7 +129,7 @@ export default function CavemanPanel({ cavemanStates, aggregateStats, onCavemanR
                           {s.runs.length === 0 && !s.currentRun && (
                             <div className="caveman-run-empty">No runs yet</div>
                           )}
-                          {s.runs.slice().reverse().map(r => {
+                          {s.runs.slice().reverse().map((r: CavemanRun) => {
                             const runDuration = r.endedAt ? r.endedAt - r.startedAt : 0
                             return (
                               <div

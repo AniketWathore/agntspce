@@ -14,6 +14,7 @@ import { WorktreeHelper } from './services/worktreeHelper'
 import { AgentManager } from './services/agentManager'
 import { AgentOrchestrator } from './services/agentOrchestrator'
 import { ChatManager } from './services/chatManager'
+import { initialize as initRtk } from './services/rtkManager'
 
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
@@ -1232,6 +1233,9 @@ ipcMain.handle('open-in-explorer', async (_event, filePath: string) => {
 })
 
 app.whenReady().then(async () => {
+  // Initialize RTK: install binary to userData + register agent hooks
+  initRtk()
+
   createWindow()
   await startServer()
 })
