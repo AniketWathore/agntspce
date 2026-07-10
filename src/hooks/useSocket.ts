@@ -170,8 +170,15 @@ export function useSocket(): UseSocketReturn {
       setWorkspaces(data)
     })
 
-    socket.on('session-created', ({ sessionId: _sid, sessions: newSessions }: { sessionId: string, sessions: Record<string, SessionState> }) => {
-      setSessions(prev => ({ ...prev, ...newSessions }))
+    socket.on('session-created', ({ sessionId, sessions: newSessions }: { sessionId: string, sessions: Record<string, SessionState> }) => {
+      setSessions(prev => {
+        // Backend sends ALL session states — only merge the new session
+        // to avoid replacing existing session object references, which
+        // would cause TerminalPane to re-render with new props.
+        const session = newSessions[sessionId]
+        if (!session || prev[sessionId]) return prev
+        return { ...prev, [sessionId]: session }
+      })
     })
 
     socket.on('session-exited', ({ sessionId }: { sessionId: string }) => {
