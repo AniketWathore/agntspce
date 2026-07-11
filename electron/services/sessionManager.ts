@@ -14,6 +14,7 @@ import { TokenUsageTracker } from './outputCompressor'
 import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
 import * as rtkManager from './rtkManager'
+import { getActiveSearchPath, generateSessionToken } from './searchManager'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -34,13 +35,47 @@ for (const dir of [
 let pty: any = null
 try {
   pty = require('node-pty')
+  // Quick smoke-test to confirm node-pty actually works in this environment.
+  // The native module can load but still fail at spawn time due to macOS
+  // sandbox/permissions or Electron version ABI mismatches with the prebuild.
+  try {
+    const testShell = getDefaultShell()
+    if (fs.existsSync(testShell)) {
+      const testPty = pty.spawn(testShell, ['-c', 'echo ok'], {
+        name: 'xterm-color',
+        cols: 40,
+        rows: 10,
+        cwd: os.tmpdir(),
+        env: { TERM: 'xterm-color', PATH: process.env.PATH || '/usr/bin:/bin' },
+      })
+      testPty.on('data', () => {})
+      testPty.on('exit', () => {})
+      testPty.kill()
+      console.log('[sessionManager] node-pty smoke-test passed')
+    }
+  } catch (smokeErr: any) {
+    console.warn('[sessionManager] node-pty smoke-test FAILED — spawns will likely fail:', {
+      shell: getDefaultShell(),
+      shellExists: fs.existsSync(getDefaultShell()),
+      error: smokeErr.message,
+      code: (smokeErr as any).code,
+      errno: (smokeErr as any).errno,
+    })
+  }
 } catch (e) {
   console.error('node-pty failed to load:', e)
 }
 
 function getDefaultShell(): string {
   if (process.platform === 'win32') return 'powershell.exe'
-  return process.env.SHELL || '/bin/bash'
+  const shell = process.env.SHELL || '/bin/bash'
+  // Validate shell exists; this is a common gotcha when Electron's environment
+  // differs from the terminal's (e.g. SHELL unset by sandbox or build tooling).
+  if (!fs.existsSync(shell)) {
+    console.warn(`[sessionManager] SHELL="${shell}" not found, falling back to /bin/bash`)
+    return '/bin/bash'
+  }
+  return shell
 }
 
 function getShellName(): string {
@@ -336,6 +371,16 @@ export class SessionManager extends EventEmitter {
       if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + path.delimiter)) {
         env.PATH = `${rtkDir}${path.delimiter}${env.PATH || ''}`
       }
+
+      // Inject search session token for MCP activation gate.
+      // AGNTSPCE_SEARCH_SESSION is verified by the search distribution's
+      // activation gate (agntspce_search.activation.check).
+      // AGNTSPCE_SEARCH_BINARY tells the agent/hooks where the MCP server binary lives.
+      const searchPath = getActiveSearchPath()
+      if (searchPath) {
+        env.AGNTSPCE_SEARCH_SESSION = generateSessionToken()
+        env.AGNTSPCE_SEARCH_BINARY = searchPath
+      }
     }
 
     if (this.workspace?.envVars) {
@@ -343,13 +388,34 @@ export class SessionManager extends EventEmitter {
         env[key] = val
       }
     }
-    const ptyProcess = pty.spawn(config.command, config.args, {
-      name: 'xterm-color',
-      cols: 80,
-      rows: 24,
-      cwd: config.cwd,
-      env,
-    })
+    let ptyProcess
+    try {
+      ptyProcess = pty.spawn(config.command, config.args, {
+        name: 'xterm-color',
+        cols: 80,
+        rows: 24,
+        cwd: config.cwd,
+        env,
+      })
+    } catch (spawnErr: any) {
+      const shellPath = config.command || ''
+      const shellExists = fs.existsSync(shellPath)
+      let shellMode = '?'
+      try { if (shellExists) shellMode = fs.statSync(shellPath).mode.toString(8) } catch {}
+      console.error('[sessionManager] pty.spawn failed:', {
+        command: config.command,
+        args: config.args,
+        cwd: config.cwd,
+        cwdExists: fs.existsSync(config.cwd || ''),
+        shellExists,
+        shellMode,
+        envKeys: Object.keys(env).filter(k => !k.startsWith('AGNTSPCE_')),
+        error: spawnErr.message,
+        code: (spawnErr as any).code,
+        errno: (spawnErr as any).errno,
+      })
+      throw spawnErr
+    }
 
     const session: Session = {
       id: sessionId,

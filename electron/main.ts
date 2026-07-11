@@ -15,6 +15,7 @@ import { AgentManager } from './services/agentManager'
 import { AgentOrchestrator } from './services/agentOrchestrator'
 import { ChatManager } from './services/chatManager'
 import { initialize as initRtk } from './services/rtkManager'
+import { initialize as initSearch, injectClaudeCodeConfig, injectOpenCodeConfig } from './services/searchManager'
 
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
@@ -490,6 +491,9 @@ io.on('connection', (socket) => {
       await worktreeHelper.ensureWorktreesExist(newWs)
       try { await workspaceManager.runSetupScript(newWs) } catch (e) {
         console.warn('Setup script failed:', e)
+      }
+      if (newWs?.repository?.path) {
+        injectClaudeCodeConfig(newWs.repository.path)
       }
       const { sessions } = await sessionManager.switchWorkspacePreservingSessions(newWs)
       socket.emit('workspace-changed', { workspace: newWs, sessions })
@@ -1106,6 +1110,9 @@ async function startServer() {
       if (savedSessions.length > 0) {
         await sessionManager.restoreSessions(savedSessions)
       }
+      if (activeWs.repository?.path) {
+        injectClaudeCodeConfig(activeWs.repository.path)
+      }
     }
   } catch (e) {
     console.error('Failed to initialize workspace system:', e)
@@ -1235,6 +1242,10 @@ ipcMain.handle('open-in-explorer', async (_event, filePath: string) => {
 app.whenReady().then(async () => {
   // Initialize RTK: install binary to userData + register agent hooks
   initRtk()
+
+  // Initialize search: install bundled search distribution to userData
+  initSearch()
+  injectOpenCodeConfig()
 
   createWindow()
   await startServer()
