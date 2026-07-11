@@ -38,6 +38,9 @@ function postBuildPlugin(): Plugin {
             for (const file of readdirSync(srcDir, { withFileTypes: true })) {
               if (file.isFile()) {
                 copyFileSync(join(srcDir, file.name), join(destDir, file.name))
+                if (file.name === 'spawn-helper') {
+                  try { chmodSync(join(destDir, file.name), 0o755) } catch {}
+                }
               }
             }
           }

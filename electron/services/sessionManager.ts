@@ -33,6 +33,19 @@ for (const dir of [
   }
 }
 
+// Ensure spawn-helper has execute permission (npm install can produce 644)
+try {
+  const ptyPkgPath = path.resolve(require.resolve('node-pty/package.json'), '..')
+  const helperPath = path.join(ptyPkgPath, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')
+  if (fs.existsSync(helperPath)) {
+    const stat = fs.statSync(helperPath)
+    if (stat && !(stat.mode & 0o111)) {
+      fs.chmodSync(helperPath, 0o755)
+      console.log('[sessionManager] Restored execute permission on spawn-helper')
+    }
+  }
+} catch {}
+
 let pty: any = null
 try {
   pty = require('node-pty')
