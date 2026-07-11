@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
-import { copyFileSync, mkdirSync, existsSync, readdirSync, chmodSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readdirSync, chmodSync, cpSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -57,6 +57,17 @@ function postBuildPlugin(): Plugin {
             console.log(`[post-build] Copied bin/${file} → dist-electron/rtk/${file}`)
           }
         }
+        // Copy search distribution to dist-electron/search/ for production
+        const searchDir = join(__dirname, 'search')
+        const searchDest = join(__dirname, 'dist-electron', 'search')
+        if (existsSync(searchDir)) {
+          rmSync(searchDest, { recursive: true, force: true })
+          cpSync(searchDir, searchDest, { recursive: true })
+          console.log('[post-build] Copied search/ → dist-electron/search/')
+        } else {
+          console.warn('[post-build] search/ not found — skipping copy')
+        }
+
         copyPreload()
       } catch (e) {
         console.error('[post-build] Error in closeBundle:', e)
@@ -66,6 +77,7 @@ function postBuildPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     electron([

@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec agntspce run "pip" "$@"
+exec "${AGNTSPCE_WRAPPER_PATH:-agntspce}" run "pip" "$@"

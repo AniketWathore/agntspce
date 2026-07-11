@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "build:rtk": "node bin/copy-rtk.js",
     "build:rtk:source": "bash bin/build-rtk.sh",
-    "postinstall": "node bin/copy-rtk.js",
+    "build:search": "bash scripts/build-semble.sh",
+    "download:search": "node scripts/download-semble.js",
+    "postinstall": "node bin/copy-rtk.js && node scripts/download-semble.js",
     "lint": "oxlint",
     "preview": "vite preview",
     "electron:dev": "vite",
@@ -76,6 +78,11 @@
         "from": "bin",
         "to": "rtk",
         "filter": ["rtk", "rtk.exe", "agntspce", "agntspce.mjs"]
+      },
+      {
+        "from": "dist-electron/search",
+        "to": "search",
+        "filter": ["**/*"]
       }
     ],
     "mac": {

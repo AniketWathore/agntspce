@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec agntspce run "pytest" "$@"
+exec "${AGNTSPCE_WRAPPER_PATH:-agntspce}" run "pytest" "$@"

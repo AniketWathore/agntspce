@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec agntspce run "git" "$@"
+exec "${AGNTSPCE_WRAPPER_PATH:-agntspce}" run "git" "$@"

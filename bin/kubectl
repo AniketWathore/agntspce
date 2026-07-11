@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec agntspce run "kubectl" "$@"
+exec "${AGNTSPCE_WRAPPER_PATH:-agntspce}" run "kubectl" "$@"

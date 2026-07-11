@@ -15,6 +15,7 @@ import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
 import * as rtkManager from './rtkManager'
 import { getActiveSearchPath, generateSessionToken } from './searchManager'
+import { resolveAgent, getLoginPath, getAllAgentBinaryDirs, resetCache as resetAgentCache } from './agentResolver'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -216,7 +217,13 @@ export class SessionManager extends EventEmitter {
     const restored = this.workspaceSessionMaps.get(workspace.id)
     this.sessions = restored || new Map()
     this.workspaceSessionMaps.set(workspace.id, this.sessions)
-    await this.initializeSessions({ preserveExisting: true })
+    // When sessions were restored from the session map, DO NOT re-create
+    // sessions from workspace.terminals — that data is stale and can have
+    // wrong agent types (e.g. 'claude' instead of 'opencode'), causing
+    // duplicate or incorrect sessions. Only restore from the live map.
+    if (!restored || restored.size === 0) {
+      await this.initializeSessions({ preserveExisting: true })
+    }
     return { sessions: this.getSessionStates(), backlog: this.getUndeliveredOutputAndMarkDelivered() }
   }
 
@@ -341,11 +348,25 @@ export class SessionManager extends EventEmitter {
     const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
     if (AGENT_TYPES.includes(config.type)) {
       const binDir = AGNTSPCE_BIN_DIR
-      if (fs.existsSync(binDir)) {
-        env.AGNTSPCE_ORIGINAL_PATH = env.PATH || ''
-        env.PATH = `${binDir}${path.delimiter}${env.PATH || ''}`
+
+      // Build PATH: bundled wrappers → resolved agent binary dirs → login shell PATH → inherited PATH
+      const loginPath = getLoginPath()
+      const agentDirs = getAllAgentBinaryDirs()
+      const pathParts: string[] = []
+      if (fs.existsSync(binDir)) pathParts.push(binDir)
+      for (const d of agentDirs) {
+        if (!pathParts.includes(d)) pathParts.push(d)
       }
+      if (loginPath) pathParts.push(loginPath)
+      if (env.PATH) pathParts.push(env.PATH)
+
+      env.AGNTSPCE_ORIGINAL_PATH = loginPath || env.PATH || ''
+      env.PATH = pathParts.join(path.delimiter)
       env.AGNTSPCE_ENABLED = '1'
+
+      // Inject the Electron-bundled Node.js path so the agntspce wrapper can
+      // run agntspce.mjs without depending on a system-installed Node.js.
+      env.AGNTSPCE_NODE_PATH = process.execPath
 
       // Inject RTK session token and binary path.
       // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
@@ -355,27 +376,22 @@ export class SessionManager extends EventEmitter {
       if (activeRtkPath) {
         env.AGNTSPCE_RTK_BINARY = activeRtkPath
       } else {
-        // Fallback — use the bundled path directly
         env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', process.platform === 'win32' ? 'rtk.exe' : 'rtk')
       }
 
-      // AGNTSPCE_WRAPPER_PATH tells hooks/plugins where to find the agntspce
-      // wrapper script (used to run rewritten commands).
+      // AGNTSPCE_WRAPPER_PATH tells bundled command wrappers where to find the
+      // agntspce wrapper script. Wrappers use "${AGNTSPCE_WRAPPER_PATH:-agntspce}"
+      // so they resolve deterministically even when PATH is accidentally stripped.
       const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
       const wrapperPath = path.join(rtkDir, 'agntspce')
       if (fs.existsSync(wrapperPath)) {
         env.AGNTSPCE_WRAPPER_PATH = wrapperPath
       }
-      // Prepend the RTK directory to PATH so agent subprocesses can find
-      // the agntspce command even when PATH gets sanitized by .zshrc.
       if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + path.delimiter)) {
         env.PATH = `${rtkDir}${path.delimiter}${env.PATH || ''}`
       }
 
       // Inject search session token for MCP activation gate.
-      // AGNTSPCE_SEARCH_SESSION is verified by the search distribution's
-      // activation gate (agntspce_search.activation.check).
-      // AGNTSPCE_SEARCH_BINARY tells the agent/hooks where the MCP server binary lives.
       const searchPath = getActiveSearchPath()
       if (searchPath) {
         env.AGNTSPCE_SEARCH_SESSION = generateSessionToken()

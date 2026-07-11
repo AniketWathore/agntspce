@@ -25,6 +25,7 @@ import { useSocket } from './hooks/useSocket'
 import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenFile } from './types'
 import '@vscode/codicons/dist/codicon.css'
 import './App.css'
+import { assetUrl } from './utils/assetUrl'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'claude', name: 'Claude Code', icon: '🤖' },
@@ -898,7 +899,7 @@ function App() {
           <div className="activity-bar">
             <div className="activity-bar-top">
               <div className="activity-logo" title="AgntSpce">
-                <img src="/img/logo.png" alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
+                <img src={assetUrl('/img/logo.png')} alt="AgntSpce" width="24" height="24" style={{ objectFit: 'contain' }} />
               </div>
               <button
                 className="activity-bar-btn active"

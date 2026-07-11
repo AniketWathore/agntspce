@@ -1,4 +1,4 @@
-const IMG_BASE = '/img'
+import { assetUrl } from './utils/assetUrl'
 
 const AGENT_IMAGE_MAP: Record<string, { text: string; color: string }> = {
   claude: { text: 'claudecode-text.png', color: 'claudecode-color.png' },
@@ -14,9 +14,9 @@ const AGENT_IMAGE_MAP: Record<string, { text: string; color: string }> = {
 }
 
 export function getAgentTextImage(type: string): string {
-  return `${IMG_BASE}/${AGENT_IMAGE_MAP[type]?.text || 'codex-text.png'}`
+  return assetUrl(`/img/${AGENT_IMAGE_MAP[type]?.text || 'codex-text.png'}`)
 }
 
 export function getAgentColorImage(type: string): string {
-  return `${IMG_BASE}/${AGENT_IMAGE_MAP[type]?.color || 'codex-color.png'}`
+  return assetUrl(`/img/${AGENT_IMAGE_MAP[type]?.color || 'codex-color.png'}`)
 }

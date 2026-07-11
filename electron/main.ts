@@ -1105,10 +1105,14 @@ async function startServer() {
     if (activeWs) {
       sessionManager.setWorkspace(activeWs)
       await worktreeHelper.ensureWorktreesExist(activeWs)
-      await sessionManager.initializeSessions()
+      // Check for saved sessions first. If they exist (with correct agent types),
+      // restore them directly and skip creating default sessions from workspace.terminals.
+      // This prevents wrong-type or duplicate sessions on app restart.
       const savedSessions = await workspaceManager.loadSessionState(activeWs.id)
       if (savedSessions.length > 0) {
         await sessionManager.restoreSessions(savedSessions)
+      } else {
+        await sessionManager.initializeSessions()
       }
       if (activeWs.repository?.path) {
         injectClaudeCodeConfig(activeWs.repository.path)
