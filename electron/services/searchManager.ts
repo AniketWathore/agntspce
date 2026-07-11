@@ -97,6 +97,13 @@ function getInstalledVersion(): string | null {
 function installSearch(): string | null {
   const bundled = getBundledSearchDir()
   if (!bundled) {
+    // Fall back to already-installed search in userData (from a previous install)
+    const installedBinary = getInstalledBinaryPath()
+    if (fs.existsSync(installedBinary)) {
+      const installedVersion = getInstalledVersion()
+      console.log(`[agntspce] Search v${installedVersion || '?'} already installed (no bundle)`)
+      return installedBinary
+    }
     console.warn('[agntspce] Search bundle not found — skipping install')
     return null
   }
