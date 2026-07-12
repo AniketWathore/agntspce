@@ -209,6 +209,7 @@ export class WorkspaceManager {
       const proc = spawn('git', ['clone', gitUrl, cloneDir], {
         stdio: 'pipe',
         env: { ...process.env },
+        windowsHide: true,
       })
       proc.on('close', async (code) => {
         if (code !== 0) {
@@ -251,6 +252,7 @@ export class WorkspaceManager {
         cwd,
         stdio: 'pipe',
         env: { ...process.env, ...workspace.envVars },
+        windowsHide: true,
       })
       const timeout = setTimeout(() => {
         proc.kill()

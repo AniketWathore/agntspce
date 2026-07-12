@@ -12,16 +12,18 @@ let agntspceScriptPath: string | null = null
 function findAgntspceScript(): string | null {
   if (agntspceScriptPath) return agntspceScriptPath
 
+  const ext = process.platform === 'win32' ? '.cmd' : ''
   const candidates = [
+    join(__dirname, '..', '..', 'bin', 'agntspce' + ext),
     join(__dirname, '..', '..', 'bin', 'agntspce'),
+    join(process.resourcesPath || '', 'bin', 'agntspce' + ext),
     join(process.resourcesPath || '', 'bin', 'agntspce'),
   ]
 
   for (const p of candidates) {
     const resolved = resolve(p)
     try {
-      if (fs.existsSync(resolved)) {
-        fs.accessSync(resolved, fs.constants.X_OK)
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
         agntspceScriptPath = resolved
         return resolved
       }

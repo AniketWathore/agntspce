@@ -164,8 +164,26 @@ const BUILTIN_FILTERS = [
   },
 ]
 
+function normalizeCommand(command) {
+  const tokens = command.split(/\s+/)
+  const result = []
+  const skipNext = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'])
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i]
+    if (/^--(?:no-)?(?:pager|paginate)$/.test(t)) { i++; continue }
+    if (/^--(?:literal|glob|noglob|icase)-pathspecs$/.test(t)) { i++; continue }
+    if (/^--(?:html|man|info)-path$/.test(t)) { i++; continue }
+    if (/^--(?:git-dir|work-tree|namespace|exec-path)=/.test(t)) { i++; continue }
+    if (skipNext.has(t)) { i += 2; continue }
+    result.push(t)
+    i++
+  }
+  return result.join(' ')
+}
+
 function findFilter(command) {
-  return BUILTIN_FILTERS.find(f => f.matchCommand.test(command))
+  return BUILTIN_FILTERS.find(f => f.matchCommand.test(normalizeCommand(command)))
 }
 
 function stripAnsi(text) {
@@ -242,17 +260,24 @@ function applyFilter(filter, output) {
 }
 
 function resolveBinary(name) {
-  if (name.includes('/')) return name
+  if (name.includes('/') || name.includes('\\')) return name
   const originalPath = process.env.AGNTSPCE_ORIGINAL_PATH || process.env.PATH || ''
-  const dirs = originalPath.split(':')
+  const ourDir = path.dirname(fileURLToPath(import.meta.url))
+  const dirs = originalPath.split(path.delimiter)
+  const candidates = [name]
+  if (process.platform === 'win32' && !path.extname(name)) {
+    candidates.push(name + '.exe', name + '.cmd', name + '.bat')
+  }
   for (const dir of dirs) {
-    if (!dir) continue
-    try {
-      const fullPath = path.resolve(dir, name)
-      fs.accessSync(fullPath, fs.constants.X_OK)
-      const stat = fs.statSync(fullPath)
-      if (stat.isFile()) return fullPath
-    } catch {}
+    if (!dir || path.resolve(dir) === ourDir) continue
+    for (const cand of candidates) {
+      try {
+        const fullPath = path.resolve(dir, cand)
+        fs.accessSync(fullPath, fs.constants.X_OK)
+        const stat = fs.statSync(fullPath)
+        if (stat.isFile()) return fullPath
+      } catch {}
+    }
   }
   return name
 }
@@ -281,6 +306,7 @@ function cmdRun(args) {
 
   const result = spawnSync(binary, args.slice(1), {
     stdio: ['inherit', 'pipe', 'pipe'],
+    windowsHide: true,
     cwd: process.cwd(),
     env: { ...process.env, AGNTSPCE_RUN: '1' },
     maxBuffer: 50 * 1024 * 1024,
@@ -291,6 +317,9 @@ function cmdRun(args) {
   const raw = (stdout + stderr).trim()
   const exitCode = result.status ?? 0
 
+  // Always emit tag line for the output filter to detect
+  process.stdout.write('agntspce $ ' + commandStr + '\n')
+
   if (!filter) {
     if (stdout) process.stdout.write(stdout)
     if (stderr) process.stderr.write(stderr)
@@ -298,14 +327,6 @@ function cmdRun(args) {
   }
 
   const filtered = applyFilter(filter, raw)
-
-  const origBytes = raw.length
-  const filtBytes = filtered.length
-  const origTokens = estimateTokens(raw)
-  const filtTokens = estimateTokens(filtered)
-
-  // Output: tag line + compressed output
-  process.stdout.write('agntspce $ ' + commandStr + '\n')
   if (filtered) {
     process.stdout.write(filtered + '\n')
   }

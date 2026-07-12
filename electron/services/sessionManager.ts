@@ -380,6 +380,7 @@ export class SessionManager extends EventEmitter {
       // Inject the Electron-bundled Node.js path so the agntspce wrapper can
       // run agntspce.mjs without depending on a system-installed Node.js.
       env.AGNTSPCE_NODE_PATH = process.execPath
+      env.ELECTRON_RUN_AS_NODE = '1'
 
       // Inject RTK session token and binary path.
       // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
@@ -392,14 +393,24 @@ export class SessionManager extends EventEmitter {
         env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', process.platform === 'win32' ? 'rtk.exe' : 'rtk')
       }
 
-      // AGNTSPCE_WRAPPER_PATH tells bundled command wrappers where to find the
-      // agntspce wrapper script. Wrappers use "${AGNTSPCE_WRAPPER_PATH:-agntspce}"
-      // so they resolve deterministically even when PATH is accidentally stripped.
-      const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
-      const wrapperPath = path.join(rtkDir, 'agntspce')
-      if (fs.existsSync(wrapperPath)) {
-        env.AGNTSPCE_WRAPPER_PATH = wrapperPath
+      // AGNTSPCE_WRAPPER_PATH tells the RTK plugin where to find the agntspce
+      // wrapper. Prefer the .exe in binDir (Windows) or the script in binDir
+      // (macOS/Linux), then fall back to the RTK install directory.
+      const wrapperExt = process.platform === 'win32' ? '.exe' : ''
+      let wrapperPath = ''
+      if (AGNTSPCE_BIN_DIR && fs.existsSync(path.join(AGNTSPCE_BIN_DIR, 'agntspce' + wrapperExt))) {
+        wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce' + wrapperExt)
+      } else {
+        const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
+        const rtkWrapper = fs.existsSync(path.join(rtkDir, 'agntspce.cmd'))
+          ? path.join(rtkDir, 'agntspce.cmd')
+          : fs.existsSync(path.join(rtkDir, 'agntspce'))
+            ? path.join(rtkDir, 'agntspce')
+            : ''
+        if (rtkWrapper) wrapperPath = rtkWrapper
       }
+      if (wrapperPath) env.AGNTSPCE_WRAPPER_PATH = wrapperPath
+      const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
       if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + path.delimiter)) {
         env.PATH = `${rtkDir}${path.delimiter}${env.PATH || ''}`
       }

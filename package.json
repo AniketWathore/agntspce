@@ -11,7 +11,7 @@
     "build:rtk:source": "bash bin/build-rtk.sh",
     "build:search": "bash scripts/build-semble.sh",
     "download:search": "node scripts/download-semble.js",
-    "postinstall": "node bin/copy-rtk.js && node scripts/download-semble.js",
+    "postinstall": "node bin/copy-rtk.js && node scripts/download-semble.js && node bin/compile-wrappers.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "electron:dev": "vite",
@@ -56,28 +56,40 @@
     ],
     "asarUnpack": [
       "bin/agntspce",
+      "bin/agntspce.exe",
       "bin/agntspce.mjs",
       "bin/cargo",
+      "bin/cargo.exe",
       "bin/docker",
+      "bin/docker.exe",
       "bin/git",
+      "bin/git.exe",
       "bin/just",
       "bin/kubectl",
+      "bin/kubectl.exe",
       "bin/ls",
+      "bin/ls.exe",
       "bin/make",
+      "bin/make.exe",
       "bin/nls",
       "bin/npm",
+      "bin/npm.exe",
       "bin/npx",
       "bin/pip",
+      "bin/pip.exe",
       "bin/pnpm",
       "bin/pytest",
+      "bin/pytest.exe",
       "bin/terraform",
-      "bin/tree"
+      "bin/terraform.exe",
+      "bin/tree",
+      "bin/wrapper.exe"
     ],
     "extraResources": [
       {
         "from": "bin",
         "to": "rtk",
-        "filter": ["rtk", "rtk.exe", "agntspce", "agntspce.mjs"]
+        "filter": ["rtk", "rtk.exe", "agntspce", "agntspce.exe", "agntspce.mjs"]
       },
       {
         "from": "dist-electron/search",

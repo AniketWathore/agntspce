@@ -64,6 +64,7 @@ export class ResourceTracker {
       const { stdout } = await execFile('ps', ['-eo', 'pid=,pcpu=,rss=', '-p', pids.join(',')], {
         timeout: 3000,
         maxBuffer: 1024 * 1024,
+        windowsHide: true,
       })
 
       for (const line of stdout.trim().split('\n')) {

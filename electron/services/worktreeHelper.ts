@@ -97,7 +97,7 @@ export class WorktreeHelper {
       const parts = command.split(' ')
       const cmd = parts[0]!
       const args = parts.slice(1)
-      const child = spawn(cmd, args, { cwd, stdio: 'pipe' })
+      const child = spawn(cmd, args, { cwd, stdio: 'pipe', windowsHide: true })
       let stdout = ''
       let stderr = ''
       child.stdout.on('data', (data: Buffer) => { stdout += data.toString() })

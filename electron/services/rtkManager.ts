@@ -69,6 +69,7 @@ function getBinaryVersion(binaryPath: string): string | null {
     const result = spawnSync(binaryPath, ['--version'], {
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
     })
     if (result.status === 0 && result.stdout) {
       const v = result.stdout.trim().split(/\s+/)[1]
@@ -179,7 +180,12 @@ const AGENT_CHECKS: AgentInfo[] = [
     cliFlag: '--opencode',
     installCheck: () => {
       const home = os.homedir()
-      return fs.existsSync(path.join(home, '.config', 'opencode', 'config.json'))
+      const configDir = path.join(home, '.config', 'opencode')
+      return (
+        fs.existsSync(path.join(configDir, 'opencode.jsonc')) ||
+        fs.existsSync(path.join(configDir, 'opencode.json')) ||
+        fs.existsSync(path.join(configDir, 'config.json'))
+      )
     },
   },
   {
@@ -224,6 +230,7 @@ function registerHooks(rtkBinaryPath: string): { registered: string[]; failed: s
       const result = spawnSync(rtkBinaryPath, args, {
         encoding: 'utf-8',
         timeout: 30000,
+        windowsHide: true,
       })
 
       if (result.status === 0) {

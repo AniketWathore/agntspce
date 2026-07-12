@@ -117,6 +117,7 @@ export function execCapture(cmd: string, args: string[], cwd?: string): Promise<
     const child = spawn(cmd, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     })
     let stdout = ''
     let stderr = ''
@@ -161,6 +162,7 @@ export function runStreaming(
       const child = spawn(cmd, args, {
         cwd,
         stdio: stdinMode === 'inherit' ? 'inherit' : ['ignore', 'inherit', 'inherit'],
+        windowsHide: true,
       })
       child.on('close', (code) => {
         resolve({
@@ -176,7 +178,7 @@ export function runStreaming(
     }
 
     const stdio: ('ignore' | 'pipe')[] = stdinMode === 'inherit' ? ['inherit', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe']
-    const child = spawn(cmd, args, { cwd, stdio: stdio as any })
+    const child = spawn(cmd, args, { cwd, stdio: stdio as any, windowsHide: true })
 
     let rawStdout = ''
     let rawStderr = ''

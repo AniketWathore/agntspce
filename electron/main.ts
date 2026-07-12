@@ -23,6 +23,11 @@ let mainWindow: BrowserWindow | null = null
 app.setName('AgntSpce')
 app.name = 'AgntSpce'
 
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+}
+
 function sendMenuAction(action: string, data?: any) {
   mainWindow?.webContents.send('menu-action', action, data)
 }
@@ -921,7 +926,7 @@ io.on('connection', (socket) => {
   async function getRepoRoot(wsPath: string): Promise<string> {
     try {
       const { spawnSync } = await import('child_process')
-      const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: wsPath, encoding: 'utf8', timeout: 5000 })
+      const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: wsPath, encoding: 'utf8', timeout: 5000, windowsHide: true })
       if (result.status === 0 && result.stdout) {
         return result.stdout.trim()
       }

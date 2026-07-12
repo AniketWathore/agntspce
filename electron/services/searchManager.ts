@@ -71,7 +71,18 @@ function getInstalledSearchDir(): string {
 }
 
 function getInstalledBinaryPath(): string {
-  return path.join(getInstalledSearchDir(), 'python', 'bin', 'agntspce-search')
+  const searchDir = getInstalledSearchDir()
+  if (process.platform === 'win32') {
+    return path.join(searchDir, 'python', 'Scripts', 'agntspce-search.exe')
+  }
+  return path.join(searchDir, 'python', 'bin', 'agntspce-search')
+}
+
+function findInstalledBinary(candidates: string[]): string | null {
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p
+  }
+  return null
 }
 
 function getBundledVersion(): string | null {
@@ -94,12 +105,23 @@ function getInstalledVersion(): string | null {
   }
 }
 
+function getInstalledBinaryCandidates(): string[] {
+  const searchDir = getInstalledSearchDir()
+  if (process.platform === 'win32') {
+    return [
+      path.join(searchDir, 'python', 'Scripts', 'agntspce-search.exe'),
+      path.join(searchDir, 'python', 'Scripts', 'agntspce-search'),
+      path.join(searchDir, 'python', 'bin', 'agntspce-search'),
+    ]
+  }
+  return [path.join(searchDir, 'python', 'bin', 'agntspce-search')]
+}
+
 function installSearch(): string | null {
   const bundled = getBundledSearchDir()
   if (!bundled) {
-    // Fall back to already-installed search in userData (from a previous install)
-    const installedBinary = getInstalledBinaryPath()
-    if (fs.existsSync(installedBinary)) {
+    const installedBinary = findInstalledBinary(getInstalledBinaryCandidates())
+    if (installedBinary) {
       const installedVersion = getInstalledVersion()
       console.log(`[agntspce] Search v${installedVersion || '?'} already installed (no bundle)`)
       return installedBinary
@@ -112,9 +134,10 @@ function installSearch(): string | null {
   const bundledVersion = getBundledVersion()
   const installedVersion = getInstalledVersion()
 
-  if (bundledVersion && installedVersion === bundledVersion && fs.existsSync(getInstalledBinaryPath())) {
+  const currentBinary = findInstalledBinary(getInstalledBinaryCandidates())
+  if (bundledVersion && installedVersion === bundledVersion && currentBinary) {
     console.log(`[agntspce] Search v${bundledVersion} already installed at ${installed}`)
-    return getInstalledBinaryPath()
+    return currentBinary
   }
 
   try {
@@ -126,9 +149,9 @@ function installSearch(): string | null {
 
     fs.cpSync(bundled, installed, { recursive: true })
 
-    const binPath = getInstalledBinaryPath()
-    if (fs.existsSync(binPath)) {
-      fs.chmodSync(binPath, 0o755)
+    const binPath = findInstalledBinary(getInstalledBinaryCandidates())
+    if (binPath) {
+      try { fs.chmodSync(binPath, 0o755) } catch {}
     }
 
     const backup = installed + '.prev'
