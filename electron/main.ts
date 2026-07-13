@@ -23,9 +23,11 @@ let mainWindow: BrowserWindow | null = null
 app.setName('AgntSpce')
 app.name = 'AgntSpce'
 
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) {
-  app.quit()
+if (isMac) {
+  const gotLock = app.requestSingleInstanceLock()
+  if (!gotLock) {
+    app.quit()
+  }
 }
 
 function sendMenuAction(action: string, data?: any) {
@@ -276,20 +278,23 @@ function rebuildMenu() {
             { label: 'Close Window', accelerator: 'CmdOrCtrl+W', role: 'close' as const },
           ],
         },
-        {
-          label: 'Edit',
-          submenu: [
-            { role: 'undo' as const },
-            { role: 'redo' as const },
-            { type: 'separator' as const },
-            { role: 'cut' as const },
-            { role: 'copy' as const },
-            { role: 'paste' as const },
-            { role: 'selectAll' as const },
-            { type: 'separator' as const },
-            { role: 'find' as const },
-          ],
-        },
+          {
+            label: 'Edit',
+            submenu: [
+              { role: 'undo' as const },
+              { role: 'redo' as const },
+              { type: 'separator' as const },
+              // No accelerators on clipboard items — the implicit accelerators
+              // from role would intercept Ctrl+C/V/A before xterm.js's textarea
+              // can handle them, breaking terminal copy/paste.
+              { label: 'Cut', click: (item, focusedWindow) => focusedWindow?.webContents.cut() },
+              { label: 'Copy', click: (item, focusedWindow) => focusedWindow?.webContents.copy() },
+              { label: 'Paste', click: (item, focusedWindow) => focusedWindow?.webContents.paste() },
+              { label: 'Select All', click: (item, focusedWindow) => focusedWindow?.webContents.selectAll() },
+              { type: 'separator' as const },
+              { role: 'find' as const },
+            ],
+          },
         {
           label: 'View',
           submenu: [

@@ -6,6 +6,7 @@ import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import StatusDot from './StatusDot'
 import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 import StartupUI from './StartupUI'
+import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
 
 interface Props {
   session: SessionState
@@ -107,6 +108,32 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
     termInstance.current = term
 
     term.focus()
+
+    // Windows: handle Ctrl+C/V manually since menu roles with accelerators
+    // would intercept the key events before xterm.js's textarea can handle them.
+    if (navigator.platform?.startsWith('Win')) {
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== 'keydown') return true
+        const ctrl = e.ctrlKey || e.metaKey
+        if (!ctrl) return true
+        const key = e.key.toLowerCase()
+        if (key === 'c') {
+          if (e.shiftKey || term.hasSelection()) {
+            e.preventDefault()
+            const sel = term.getSelection()
+            if (sel) copyToClipboard(sel)
+            return false
+          }
+          return true
+        }
+        if (key === 'v') {
+          e.preventDefault()
+          readFromClipboard().then(text => { if (text) term.paste(text) })
+          return false
+        }
+        return true
+      })
+    }
 
     if (writeData) term.write(writeData)
 

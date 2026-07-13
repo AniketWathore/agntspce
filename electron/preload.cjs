@@ -1,6 +1,8 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, clipboard } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  readClipboard: () => clipboard.readText(),
+  writeClipboard: (text) => clipboard.writeText(text),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   getDefaultPath: () => ipcRenderer.invoke('get-default-path'),
   getServerPort: () => ipcRenderer.invoke('get-server-port'),

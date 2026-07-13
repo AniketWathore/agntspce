@@ -20,12 +20,35 @@ const AGENT_COMMANDS: Record<string, string> = {
 }
 
 function getLoginShell(): string {
+  if (process.platform === 'win32') {
+    return process.env.SHELL || 'cmd.exe'
+  }
   const shell = process.env.SHELL || '/bin/bash'
   return fs.existsSync(shell) ? shell : '/bin/bash'
 }
 
 function resolveLoginShellPath(): string {
   if (_loginShellPath) return _loginShellPath
+
+  if (process.platform === 'win32') {
+    const dirs = new Set<string>()
+    if (process.env.PATH) {
+      process.env.PATH.split(path.delimiter).forEach(d => { if (d) dirs.add(d) })
+    }
+    const extra = [
+      path.join(os.homedir(), '.local', 'bin'),
+      path.join(os.homedir(), 'AppData', 'Roaming', 'npm'),
+      path.join(os.homedir(), 'AppData', 'Local', 'npm'),
+      'C:\\Program Files\\Git\\bin',
+      'C:\\Program Files\\Git\\cmd',
+      'C:\\Windows\\System32',
+    ]
+    extra.forEach(d => { if (fs.existsSync(d)) dirs.add(d) })
+    const result = Array.from(dirs).join(path.delimiter)
+    _loginShellPath = result
+    return result
+  }
+
   const shell = getLoginShell()
   for (const cmd of [
     `${shell} -l -c 'echo "$PATH"' 2>/dev/null`,
@@ -57,16 +80,22 @@ function resolveLoginShellPath(): string {
 }
 
 function findExecutable(name: string): string | null {
-  if (name.includes('/') && fs.existsSync(name)) return path.resolve(name)
+  if ((name.includes('/') || name.includes('\\')) && fs.existsSync(name)) return path.resolve(name)
   const pathStr = _loginShellPath || resolveLoginShellPath()
-  const dirs = pathStr.split(':')
+  const dirs = pathStr.split(path.delimiter)
+  const candidates = [name]
+  if (process.platform === 'win32' && !path.extname(name)) {
+    candidates.push(name + '.exe', name + '.cmd', name + '.bat', name + '.com')
+  }
   for (const dir of dirs) {
     if (!dir) continue
-    try {
-      const fullPath = path.resolve(dir, name)
-      fs.accessSync(fullPath, fs.constants.X_OK)
-      if (fs.statSync(fullPath).isFile()) return fullPath
-    } catch {}
+    for (const cand of candidates) {
+      try {
+        const fullPath = path.resolve(dir, cand)
+        fs.accessSync(fullPath, fs.constants.F_OK)
+        if (fs.statSync(fullPath).isFile()) return fullPath
+      } catch {}
+    }
   }
   return null
 }

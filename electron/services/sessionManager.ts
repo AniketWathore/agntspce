@@ -370,17 +370,17 @@ export class SessionManager extends EventEmitter {
       for (const d of agentDirs) {
         if (!pathParts.includes(d)) pathParts.push(d)
       }
+      const envPath = env.PATH || env.Path || ''
       if (loginPath) pathParts.push(loginPath)
-      if (env.PATH) pathParts.push(env.PATH)
+      if (envPath) pathParts.push(envPath)
 
-      env.AGNTSPCE_ORIGINAL_PATH = loginPath || env.PATH || ''
+      env.AGNTSPCE_ORIGINAL_PATH = loginPath || envPath
       env.PATH = pathParts.join(path.delimiter)
       env.AGNTSPCE_ENABLED = '1'
 
       // Inject the Electron-bundled Node.js path so the agntspce wrapper can
       // run agntspce.mjs without depending on a system-installed Node.js.
       env.AGNTSPCE_NODE_PATH = process.execPath
-      env.ELECTRON_RUN_AS_NODE = '1'
 
       // Inject RTK session token and binary path.
       // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
@@ -410,10 +410,6 @@ export class SessionManager extends EventEmitter {
         if (rtkWrapper) wrapperPath = rtkWrapper
       }
       if (wrapperPath) env.AGNTSPCE_WRAPPER_PATH = wrapperPath
-      const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
-      if (fs.existsSync(rtkDir) && !env.PATH?.startsWith(rtkDir + path.delimiter)) {
-        env.PATH = `${rtkDir}${path.delimiter}${env.PATH || ''}`
-      }
 
       // Inject search session token for MCP activation gate.
       const searchPath = getActiveSearchPath()
@@ -455,6 +451,18 @@ export class SessionManager extends EventEmitter {
         errno: (spawnErr as any).errno,
       })
       throw spawnErr
+    }
+
+    // Windows PATH sync: Node.js preserves the ORIGINAL casing of env var
+    // names (e.g. "Path" not "PATH") when spreading process.env. If we set
+    // env.PATH but env.Path still has the old value, child processes see the
+    // stale env.Path. Set both to be safe.
+    if (process.platform === 'win32') {
+      const winPath = env.PATH || env.Path
+      if (winPath) {
+        env.PATH = winPath
+        env.Path = winPath
+      }
     }
 
     const session: Session = {
@@ -801,7 +809,8 @@ export class SessionManager extends EventEmitter {
     }
 
     const command = this.agentManager.buildCommand(config.agentId, config.mode, config)
-    this.writeToSession(sessionId, command + '\n')
+    const newline = process.platform === 'win32' ? '\r\n' : '\n'
+    this.writeToSession(sessionId, command + newline)
 
     session.autoStarted = true
     session.claudeLaunchState = 'launched'

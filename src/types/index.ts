@@ -236,6 +236,8 @@ export interface CavemanAggregateStats {
 declare global {
   interface Window {
     electronAPI?: {
+      readClipboard: () => Promise<string>
+      writeClipboard: (text: string) => void
       selectDirectory: () => Promise<string | null>
       getDefaultPath: () => Promise<string>
       getServerPort: () => Promise<number>

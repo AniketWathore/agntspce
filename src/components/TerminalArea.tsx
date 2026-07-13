@@ -6,6 +6,7 @@ import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
 import AgentPicker from './AgentPicker'
 import { getAgentColorImage } from '../agentImages'
+import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
 
 export interface PageView {
   id: string
@@ -131,6 +132,30 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     termInstance.current = term
 
     term.focus()
+
+    if (navigator.platform?.startsWith('Win')) {
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== 'keydown') return true
+        const ctrl = e.ctrlKey || e.metaKey
+        if (!ctrl) return true
+        const key = e.key.toLowerCase()
+        if (key === 'c') {
+          if (e.shiftKey || term.hasSelection()) {
+            e.preventDefault()
+            const sel = term.getSelection()
+            if (sel) copyToClipboard(sel)
+            return false
+          }
+          return true
+        }
+        if (key === 'v') {
+          e.preventDefault()
+          readFromClipboard().then(text => { if (text) term.paste(text) })
+          return false
+        }
+        return true
+      })
+    }
 
     const themeObserver = new MutationObserver(() => { try { term.options.theme = buildTheme() } catch {} })
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
