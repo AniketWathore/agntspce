@@ -376,6 +376,9 @@ export class SessionManager extends EventEmitter {
 
       env.AGNTSPCE_ORIGINAL_PATH = loginPath || envPath
       env.PATH = pathParts.join(path.delimiter)
+      if (process.platform === 'win32') {
+        env.Path = env.PATH
+      }
       env.AGNTSPCE_ENABLED = '1'
 
       // Inject the Electron-bundled Node.js path so the agntspce wrapper can
@@ -394,13 +397,22 @@ export class SessionManager extends EventEmitter {
       }
 
       // AGNTSPCE_WRAPPER_PATH tells the RTK plugin where to find the agntspce
-      // wrapper. Prefer the .exe in binDir (Windows) or the script in binDir
-      // (macOS/Linux), then fall back to the RTK install directory.
-      const wrapperExt = process.platform === 'win32' ? '.exe' : ''
+      // wrapper. Prefer the .cmd shim (Windows) or the script (macOS/Linux),
+      // then fall back to the RTK install directory.
       let wrapperPath = ''
-      if (AGNTSPCE_BIN_DIR && fs.existsSync(path.join(AGNTSPCE_BIN_DIR, 'agntspce' + wrapperExt))) {
-        wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce' + wrapperExt)
-      } else {
+      if (AGNTSPCE_BIN_DIR) {
+        if (process.platform === 'win32') {
+          const cmdPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce.cmd')
+          if (fs.existsSync(cmdPath)) {
+            wrapperPath = cmdPath
+          } else {
+            wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
+          }
+        } else if (fs.existsSync(path.join(AGNTSPCE_BIN_DIR, 'agntspce'))) {
+          wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
+        }
+      }
+      if (!wrapperPath) {
         const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
         const rtkWrapper = fs.existsSync(path.join(rtkDir, 'agntspce.cmd'))
           ? path.join(rtkDir, 'agntspce.cmd')

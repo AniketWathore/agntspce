@@ -15,7 +15,7 @@ if (-not (Test-Path $source)) {
 
 Write-Host "Compiling wrapper.exe..." -ForegroundColor Cyan
 try {
-    Add-Type -TypeDefinition (Get-Content $source -Raw) -Language CSharp -OutputAssembly $wrapperExe -OutputType WindowsApplication -ErrorAction Stop
+    Add-Type -TypeDefinition (Get-Content $source -Raw) -Language CSharp -OutputAssembly $wrapperExe -OutputType Exe -ErrorAction Stop
     Write-Host "  wrapper.exe created" -ForegroundColor Green
 } catch {
     Write-Error "Compilation failed: $_"

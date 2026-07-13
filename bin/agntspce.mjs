@@ -283,21 +283,8 @@ function resolveBinary(name) {
 }
 
 function agntspceAvailable() {
-  if (process.platform !== 'win32') return true
-  const ourDir = path.dirname(fileURLToPath(import.meta.url))
-  try {
-    const self = path.join(ourDir, 'agntspce.cmd')
-    fs.accessSync(self, fs.constants.F_OK)
-    return true
-  } catch {
-    try {
-      const self2 = path.join(ourDir, 'agntspce.exe')
-      fs.accessSync(self2, fs.constants.F_OK)
-      return true
-    } catch {
-      return !!resolveBinary('agntspce')
-    }
-  }
+  const resolved = resolveBinary('agntspce')
+  return resolved !== 'agntspce'
 }
 
 // ── Subcommand: rewrite ────────────────────────────────────────
@@ -329,6 +316,24 @@ function cmdRun(args) {
     env: { ...process.env, AGNTSPCE_RUN: '1' },
     maxBuffer: 50 * 1024 * 1024,
   })
+
+  // Fallback: if the binary wasn't found, try running raw through the shell
+  if (result.error && result.error.code === 'ENOENT') {
+    const fallback = spawnSync(args[0], args.slice(1), {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: true,
+      cwd: process.cwd(),
+      env: { ...process.env, AGNTSPCE_RUN: '1' },
+      maxBuffer: 50 * 1024 * 1024,
+    })
+    const fbStdout = fallback.stdout ? fallback.stdout.toString() : ''
+    const fbStderr = fallback.stderr ? fallback.stderr.toString() : ''
+    if (fbStdout) process.stdout.write(fbStdout)
+    if (fbStderr) process.stderr.write(fbStderr)
+    const fbExit = fallback.error ? 1 : (fallback.status ?? 0)
+    process.exit(fbExit)
+  }
 
   const stdout = result.stdout ? result.stdout.toString() : ''
   const stderr = result.stderr ? result.stderr.toString() : ''

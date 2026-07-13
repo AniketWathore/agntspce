@@ -52,7 +52,11 @@ function postBuildPlugin(): Plugin {
         mkdirSync(rtkDir, { recursive: true })
         const isWin = process.platform === 'win32'
         const rtkFiles = isWin ? ['rtk.exe'] : ['rtk']
-        for (const file of [...rtkFiles, 'agntspce', 'agntspce.mjs']) {
+        const filesToCopy = [...rtkFiles, 'agntspce', 'agntspce.mjs']
+        if (isWin) {
+          filesToCopy.push('agntspce.cmd', 'git.cmd', 'ls.cmd')
+        }
+        for (const file of filesToCopy) {
           const srcFile = join(__dirname, 'bin', file)
           if (existsSync(srcFile)) {
             copyFileSync(srcFile, join(rtkDir, file))

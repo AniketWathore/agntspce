@@ -48,6 +48,12 @@ const BASE_URL = process.env.SEARCH_BASE_URL ||
 const ARCHIVE_NAME = `agntspce-search-${archSuffix}-${VERSION}.tar.gz`
 const FULL_URL = `${BASE_URL}/${ARCHIVE_NAME}`
 
+// On Windows, note that search may not be available yet
+if (process.platform === 'win32') {
+  console.log(`[agntspce] Note: Search MCP on Windows requires a published win32 release asset`)
+  console.log(`[agntspce] If download fails, search will be unavailable (this is expected on Windows)`)
+}
+
 // ── Main ─────────────────────────────────────────────────────────
 async function main() {
   if (existsSync(join(SEARCH_DIR, 'VERSION'))) {
@@ -69,7 +75,7 @@ async function main() {
 
     const response = await fetch(FULL_URL)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      throw new Error(`HTTP ${response.status}: ${response.statusText} (URL: ${FULL_URL})`)
     }
 
     const contentLength = response.headers.get('content-length')

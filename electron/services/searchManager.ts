@@ -259,6 +259,10 @@ function injectClaudeCodeConfig(projectPath: string): InjectResult {
   const mcpPath = path.resolve(projectPath, '.mcp.json')
   const binaryPath = getInstalledBinaryPath()
   if (!binaryPath) return { agent: 'claude', action: 'error' }
+  if (!fs.existsSync(binaryPath)) {
+    try { if (fs.existsSync(mcpPath)) fs.rmSync(mcpPath) } catch {}
+    return { agent: 'claude', action: 'error' }
+  }
 
   const entry = {
     mcpServers: {
@@ -317,6 +321,10 @@ function removeClaudeCodeConfig(projectPath: string): InjectResult {
 function injectOpenCodeConfig(): InjectResult {
   const binaryPath = getInstalledBinaryPath()
   if (!binaryPath) return { agent: 'opencode', action: 'error' }
+  if (!fs.existsSync(binaryPath)) {
+    removeOpenCodeConfig()
+    return { agent: 'opencode', action: 'error' }
+  }
 
   const configPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.jsonc')
   const mcpKey = 'agntspce-search'
