@@ -266,14 +266,14 @@ function resolveBinary(name) {
   const dirs = originalPath.split(path.delimiter)
   const candidates = [name]
   if (process.platform === 'win32' && !path.extname(name)) {
-    candidates.push(name + '.exe', name + '.cmd', name + '.bat')
+    candidates.push(name + '.cmd', name + '.bat', name + '.exe', name + '.com')
   }
   for (const dir of dirs) {
-    if (!dir || path.resolve(dir) === ourDir) continue
+    if (!dir) continue
     for (const cand of candidates) {
       try {
         const fullPath = path.resolve(dir, cand)
-        fs.accessSync(fullPath, fs.constants.X_OK)
+        fs.accessSync(fullPath, fs.constants.F_OK)
         const stat = fs.statSync(fullPath)
         if (stat.isFile()) return fullPath
       } catch {}
@@ -282,12 +282,30 @@ function resolveBinary(name) {
   return name
 }
 
+function agntspceAvailable() {
+  if (process.platform !== 'win32') return true
+  const ourDir = path.dirname(fileURLToPath(import.meta.url))
+  try {
+    const self = path.join(ourDir, 'agntspce.cmd')
+    fs.accessSync(self, fs.constants.F_OK)
+    return true
+  } catch {
+    try {
+      const self2 = path.join(ourDir, 'agntspce.exe')
+      fs.accessSync(self2, fs.constants.F_OK)
+      return true
+    } catch {
+      return !!resolveBinary('agntspce')
+    }
+  }
+}
+
 // ── Subcommand: rewrite ────────────────────────────────────────
 
 function cmdRewrite(command) {
   if (!command || !command.trim()) return command
   const filter = findFilter(command.trim())
-  if (filter) {
+  if (filter && agntspceAvailable()) {
     return `agntspce run ${command.trim()}`
   }
   return command.trim()

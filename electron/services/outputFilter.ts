@@ -57,7 +57,7 @@ export class OutputFilterService {
   // happen independently without altering the display data.
   processOutput(sessionId: string, data: string): string {
     // Detect wrapper markers: "agntspce $ <command>" — for command tracking only
-    const lines = data.split('\n')
+    const lines = data.split(/\r?\n/)
     for (const line of lines) {
       const tagMatch = line.match(AGNTSPCE_CMD_RE)
       if (tagMatch) {
@@ -82,7 +82,7 @@ export class OutputFilterService {
         const accum = this.outputAccum.get(sessionId) || []
         accum.push(line)
         this.outputAccum.set(sessionId, accum)
-        if (/^[$#%❯➜]\s*$/.test(line.trim()) || line.trim() === '') {
+        if (/^[$#%❯➜]\s*$/.test(line.trim()) || /^PS\s+.*>\s*$/.test(line.trim()) || /^[A-Z]:\\.*>/.test(line.trim()) || line.trim() === '') {
           this.scheduleFinalize(sessionId)
         }
       }

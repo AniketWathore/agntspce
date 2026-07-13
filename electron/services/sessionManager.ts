@@ -809,6 +809,11 @@ export class SessionManager extends EventEmitter {
     }
 
     const command = this.agentManager.buildCommand(config.agentId, config.mode, config)
+    const baseCmd = command.split(/\s+/)[0]
+    const resolvedPath = resolveAgent(baseCmd)
+    if (!resolvedPath) {
+      console.warn(`[agntspce] Agent "${baseCmd}" not resolved — PATH may not include it: ${command}`)
+    }
     const newline = process.platform === 'win32' ? '\r\n' : '\n'
     this.writeToSession(sessionId, command + newline)
 
