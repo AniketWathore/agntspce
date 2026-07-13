@@ -56,6 +56,24 @@ echo "[4/4] Stripping .pyc files..."
 find "$SCRATCH/python" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 find "$SCRATCH/python" -name '*.pyc' -delete 2>/dev/null || true
 
+# ── Create PYTHONHOME-aware wrapper ─────────────────────────────
+BIN_PATH="$SCRATCH/python/bin/agntspce-search"
+PYTHON_DIR="$SCRATCH/python"
+PYTHON_BIN="$PYTHON_DIR/bin/python3"
+if [ -f "$BIN_PATH" ] && [ -f "$PYTHON_BIN" ]; then
+  # Rename original script to .py
+  mv "$BIN_PATH" "${BIN_PATH}.py"
+  # Write shell wrapper with PYTHONHOME
+  cat > "$BIN_PATH" << WRAPPER
+#!/bin/sh
+SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+export PYTHONHOME="\$SCRIPT_DIR/.."
+exec "\$SCRIPT_DIR/python3" "${BIN_PATH}.py" "\$@"
+WRAPPER
+  chmod +x "$BIN_PATH"
+  echo "  Wrapper created: $BIN_PATH"
+fi
+
 # ── Write VERSION ────────────────────────────────────────────────
 echo "0.1.0" > "$SCRATCH/VERSION"
 

@@ -125,10 +125,41 @@ async function main() {
       ])
     )
 
-    // Fix permissions
+    // Fix permissions and create PYTHONHOME-aware wrapper
     const binPath = join(SEARCH_DIR, 'python', 'bin', 'agntspce-search')
-    if (existsSync(binPath)) {
-      await import('node:fs/promises').then(fs => fs.chmod(binPath, 0o755))
+    const pythonDir = join(SEARCH_DIR, 'python')
+    const pythonBin = join(pythonDir, 'bin', 'python3')
+    if (existsSync(binPath) && existsSync(pythonBin)) {
+      const fsPromises = await import('node:fs/promises')
+      await fsPromises.chmod(binPath, 0o755)
+      const pyPath = binPath + '.py'
+      try {
+        const content = await fsPromises.readFile(binPath, 'utf-8')
+        const shebang = content.split('\n')[0]
+        if (shebang.startsWith('#!')) {
+          const interpreterPath = shebang.slice(2).trim().split(' ')[0]
+          if (!interpreterPath || !existsSync(interpreterPath)) {
+            // Fix shebang to local python3 instead of build-machine path
+            const lines = content.split('\n')
+            lines[0] = `#!${pythonBin}`
+            await fsPromises.writeFile(pyPath, lines.join('\n'), 'utf-8')
+          } else if (content.startsWith('#!/bin/sh') && existsSync(pyPath)) {
+            // Already has a wrapper, skip
+          } else {
+            // Shebang already valid — still write .py copy for the wrapper
+            await fsPromises.copyFile(binPath, pyPath)
+          }
+          await fsPromises.chmod(pyPath, 0o755)
+        }
+      } catch {}
+      // Write shell wrapper that sets PYTHONHOME
+      const wrapper = `#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONHOME="$SCRIPT_DIR/.."
+exec "$SCRIPT_DIR/python3" "${pyPath}" "$@"
+`
+      await fsPromises.writeFile(binPath, wrapper, 'utf-8')
+      await fsPromises.chmod(binPath, 0o755)
     }
 
     console.log(`[agntspce] Search v${VERSION} installed → ${SEARCH_DIR}`)

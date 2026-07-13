@@ -117,6 +117,64 @@ function getInstalledBinaryCandidates(): string[] {
   return [path.join(searchDir, 'python', 'bin', 'agntspce-search')]
 }
 
+function fixSearchBinary(binPath: string, searchDir: string): void {
+  if (process.platform === 'win32') return
+  const pythonBin = path.join(searchDir, 'python', 'bin', 'python3')
+  if (!fs.existsSync(pythonBin)) return
+  try {
+    const content = fs.readFileSync(binPath, 'utf-8')
+    if (!content.startsWith('#!')) return
+    const shebang = content.split('\n')[0]
+    const interpreterPath = shebang.slice(2).trim().split(' ')[0]
+    const pyPath = binPath + '.py'
+    if (interpreterPath && fs.existsSync(interpreterPath)) {
+      if (content.startsWith('#!/bin/sh') && fs.existsSync(pyPath)) return
+      fs.writeFileSync(pyPath, content, 'utf-8')
+      fs.chmodSync(pyPath, 0o755)
+    } else {
+      const name = path.basename(binPath)
+      const lines = content.split('\n')
+      lines[0] = `#!${pythonBin}`
+      fs.writeFileSync(pyPath, lines.join('\n'), 'utf-8')
+      fs.chmodSync(pyPath, 0o755)
+    }
+    const wrapper = `#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONHOME="$SCRIPT_DIR/.."
+exec "$SCRIPT_DIR/python3" "${pyPath}" "$@"
+`
+    fs.writeFileSync(binPath, wrapper, 'utf-8')
+    fs.chmodSync(binPath, 0o755)
+  } catch (e) {
+    console.warn('[agntspce] Failed to fix search binary:', e)
+  }
+}
+
+function cleanupStaleSitePackages(searchDir: string): void {
+  const sitePkgs = path.join(searchDir, 'python', 'lib', 'python3.13', 'site-packages')
+  if (!fs.existsSync(sitePkgs)) return
+  try {
+    for (const entry of fs.readdirSync(sitePkgs)) {
+      if (!entry.endsWith('.pth')) continue
+      const pthPath = path.join(sitePkgs, entry)
+      const content = fs.readFileSync(pthPath, 'utf-8').trim()
+      if (!content) continue
+      if (content.startsWith('/') || content.startsWith('file://')) {
+        const dirToCheck = content.startsWith('file://') ? content.slice(7) : content
+        if (!fs.existsSync(decodeURIComponent(dirToCheck))) {
+          fs.rmSync(pthPath)
+          console.log(`[agntspce] Removed stale .pth: ${entry} → ${content}`)
+        }
+      }
+    }
+  } catch {}
+}
+
+function isPackageBroken(searchDir: string): boolean {
+  const sitePkgs = path.join(searchDir, 'python', 'lib', 'python3.13', 'site-packages')
+  return !fs.existsSync(path.join(sitePkgs, 'agntspce_search'))
+}
+
 function installSearch(): string | null {
   const bundled = getBundledSearchDir()
   if (!bundled) {
@@ -124,6 +182,7 @@ function installSearch(): string | null {
     if (installedBinary) {
       const installedVersion = getInstalledVersion()
       console.log(`[agntspce] Search v${installedVersion || '?'} already installed (no bundle)`)
+      fixSearchBinary(installedBinary, getInstalledSearchDir())
       return installedBinary
     }
     console.warn('[agntspce] Search bundle not found — skipping install')
@@ -136,8 +195,13 @@ function installSearch(): string | null {
 
   const currentBinary = findInstalledBinary(getInstalledBinaryCandidates())
   if (bundledVersion && installedVersion === bundledVersion && currentBinary) {
-    console.log(`[agntspce] Search v${bundledVersion} already installed at ${installed}`)
-    return currentBinary
+    cleanupStaleSitePackages(installed)
+    if (!isPackageBroken(installed)) {
+      console.log(`[agntspce] Search v${bundledVersion} already installed at ${installed}`)
+      fixSearchBinary(currentBinary, installed)
+      return currentBinary
+    }
+    console.warn(`[agntspce] Search v${bundledVersion} is broken — reinstalling`)
   }
 
   try {
@@ -152,6 +216,7 @@ function installSearch(): string | null {
     const binPath = findInstalledBinary(getInstalledBinaryCandidates())
     if (binPath) {
       try { fs.chmodSync(binPath, 0o755) } catch {}
+      fixSearchBinary(binPath, installed)
     }
 
     const backup = installed + '.prev'

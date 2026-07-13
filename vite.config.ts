@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
-import { copyFileSync, mkdirSync, existsSync, readdirSync, chmodSync, cpSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readdirSync, chmodSync, cpSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -66,6 +66,26 @@ function postBuildPlugin(): Plugin {
         if (existsSync(searchDir)) {
           rmSync(searchDest, { recursive: true, force: true })
           cpSync(searchDir, searchDest, { recursive: true })
+          // Create PYTHONHOME-aware wrapper in the built copy
+          const binPath = join(searchDest, 'python', 'bin', 'agntspce-search')
+          const pythonBin = join(searchDest, 'python', 'bin', 'python3')
+          if (existsSync(binPath) && existsSync(pythonBin) && process.platform !== 'win32') {
+            const pyPath = binPath + '.py'
+            try {
+              const content = readFileSync(binPath, 'utf-8')
+              if (content.startsWith('#!')) {
+                writeFileSync(pyPath, content, 'utf-8')
+                chmodSync(pyPath, 0o755)
+              }
+            } catch {}
+            const wrapper = `#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export PYTHONHOME="$SCRIPT_DIR/.."
+exec "$SCRIPT_DIR/python3" "${pyPath}" "$@"
+`
+            writeFileSync(binPath, wrapper, 'utf-8')
+            chmodSync(binPath, 0o755)
+          }
           console.log('[post-build] Copied search/ → dist-electron/search/')
         } else {
           console.warn('[post-build] search/ not found — skipping copy')
