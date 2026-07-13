@@ -358,6 +358,21 @@ export class SessionManager extends EventEmitter {
     if (!pty) throw new Error('node-pty unavailable')
     const env: any = { ...process.env, TERM: 'xterm-color' }
 
+    // Windows: normalize PATH casing — env blocks are case-insensitive with unique keys.
+    // Spreading process.env gives us "Path" (Windows canonical), then setting "PATH" later
+    // creates duplicate keys. node-pty / ConPTY silently drops one — likely the prepended value.
+    if (process.platform === 'win32') {
+      // Find the existing PATH-like key in process.env
+      const existingPathKey = Object.keys(process.env).find(k => /^path$/i.test(k)) || 'Path'
+      const existingPath = env[existingPathKey] || ''
+      // Delete any other casing variant to prevent duplicates
+      for (const k of Object.keys(env)) {
+        if (/^path$/i.test(k) && k !== existingPathKey) delete env[k]
+      }
+      // Build PATH fresh below — just preserve the original value
+      env.__WIN32_ORIGINAL_PATH = existingPath
+    }
+
     const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
     if (AGENT_TYPES.includes(config.type)) {
       const binDir = AGNTSPCE_BIN_DIR
@@ -370,15 +385,18 @@ export class SessionManager extends EventEmitter {
       for (const d of agentDirs) {
         if (!pathParts.includes(d)) pathParts.push(d)
       }
-      const envPath = env.PATH || env.Path || ''
+      const envPath = process.platform === 'win32'
+        ? (env.__WIN32_ORIGINAL_PATH || '')
+        : (env.PATH || env.Path || '')
       if (loginPath) pathParts.push(loginPath)
       if (envPath) pathParts.push(envPath)
 
+      // Set the canonical key
+      const pathKey = process.platform === 'win32'
+        ? (Object.keys(process.env).find(k => /^path$/i.test(k)) || 'Path')
+        : 'PATH'
       env.AGNTSPCE_ORIGINAL_PATH = loginPath || envPath
-      env.PATH = pathParts.join(path.delimiter)
-      if (process.platform === 'win32') {
-        env.Path = env.PATH
-      }
+      env[pathKey] = pathParts.join(path.delimiter)
       env.AGNTSPCE_ENABLED = '1'
 
       // Inject the Electron-bundled Node.js path so the agntspce wrapper can
@@ -399,6 +417,8 @@ export class SessionManager extends EventEmitter {
       // AGNTSPCE_WRAPPER_PATH tells the RTK plugin where to find the agntspce
       // wrapper. Prefer the .cmd shim (Windows) or the script (macOS/Linux),
       // then fall back to the RTK install directory.
+      // On Windows, also set AGNTSPCE_JS so PowerShell hook functions can
+      // resolve agntspce.mjs without PATH lookup.
       let wrapperPath = ''
       if (AGNTSPCE_BIN_DIR) {
         if (process.platform === 'win32') {
@@ -423,11 +443,53 @@ export class SessionManager extends EventEmitter {
       }
       if (wrapperPath) env.AGNTSPCE_WRAPPER_PATH = wrapperPath
 
+      // On Windows, set AGNTSPCE_JS so hook scripts can find agntspce.mjs
+      // without relying on PATH, PATHEXT, or stale exe files.
+      if (process.platform === 'win32') {
+        const jsPath = wrapperPath
+          ? path.resolve(path.dirname(wrapperPath), 'agntspce.mjs')
+          : path.join(binDir, 'agntspce.mjs')
+        if (fs.existsSync(jsPath)) env.AGNTSPCE_JS = jsPath
+      }
+
       // Inject search session token for MCP activation gate.
       const searchPath = getActiveSearchPath()
       if (searchPath) {
         env.AGNTSPCE_SEARCH_SESSION = generateSessionToken()
         env.AGNTSPCE_SEARCH_BINARY = searchPath
+      }
+
+      // TEMPORARY DIAGNOSTIC: log the exact env passed to the Windows PTY
+      if (process.platform === 'win32') {
+        const diagPathKey = Object.keys(env).find(k => /^path$/i.test(k)) || 'PATH'
+        console.log(`[sessionManager][win32] PTY env PATH key="${diagPathKey}" value="${(env[diagPathKey] || '').slice(0, 500)}"`)
+        console.log(`[sessionManager][win32] PTY env AGNTSPCE_NODE_PATH="${env.AGNTSPCE_NODE_PATH}"`)
+        console.log(`[sessionManager][win32] PTY env AGNTSPCE_JS="${env.AGNTSPCE_JS}"`)
+        console.log(`[sessionManager][win32] PTY env AGNTSPCE_WRAPPER_PATH="${env.AGNTSPCE_WRAPPER_PATH}"`)
+        console.log(`[sessionManager][win32] PTY shell="${config.command}" args="${JSON.stringify(config.args)}"`)
+      }
+
+      // Schedule a diagnostic echo into the PTY after spawn
+      const diagnosticCmds = process.platform === 'win32'
+        ? [
+            'echo [agntspce-diag] BEGIN',
+            `echo [agntspce-diag] PATH=$env:PATH`,
+            `echo [agntspce-diag] AGNTSPCE_JS=$env:AGNTSPCE_JS`,
+            `echo [agntspce-diag] AGNTSPCE_NODE_PATH=$env:AGNTSPCE_NODE_PATH`,
+            `echo [agntspce-diag] AGNTSPCE_WRAPPER_PATH=$env:AGNTSPCE_WRAPPER_PATH`,
+            'echo [agntspce-diag] END',
+          ]
+        : []
+      if (diagnosticCmds.length > 0) {
+        const sid = sessionId
+        setImmediate(() => {
+          const s = this.sessions.get(sid)
+          if (s?.pty) {
+            for (const cmd of diagnosticCmds) {
+              s.pty.write(cmd + '\r\n')
+            }
+          }
+        })
       }
     }
 
