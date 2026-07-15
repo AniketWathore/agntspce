@@ -340,9 +340,6 @@ function cmdRun(args) {
   const raw = (stdout + stderr).trim()
   const exitCode = result.status ?? 0
 
-  // Always emit tag line for the output filter to detect
-  process.stdout.write('agntspce $ ' + commandStr + '\n')
-
   if (!filter) {
     if (stdout) process.stdout.write(stdout)
     if (stderr) process.stderr.write(stderr)
