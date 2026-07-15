@@ -123,6 +123,22 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: 'electron/services/orchestration/proxy/index.ts',
+        vite: {
+          build: {
+            outDir: 'dist-electron',
+            lib: {
+              entry: 'electron/services/orchestration/proxy/index.ts',
+              formats: ['es'],
+              fileName: () => 'proxy.js',
+            },
+            rollupOptions: {
+              external: ['better-sqlite3', '@modelcontextprotocol/sdk'],
+            } as any,
+          },
+        },
+      },
     ]),
     renderer(),
   ],

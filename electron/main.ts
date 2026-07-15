@@ -16,6 +16,8 @@ import { AgentOrchestrator } from './services/agentOrchestrator'
 import { ChatManager } from './services/chatManager'
 import { initialize as initRtk } from './services/rtkManager'
 import { initialize as initSearch, injectClaudeCodeConfig, injectOpenCodeConfig } from './services/searchManager'
+import { ensureCoordinator, getWorkspaceRoot } from './services/orchestration/bootstrap'
+import type { Coordinator } from './services/orchestration'
 
 const isMac = process.platform === 'darwin'
 const isDev = process.env.VITE_DEV_SERVER_URL
@@ -87,6 +89,8 @@ sessionManager.setGitHelper(gitHelper)
 sessionManager.orchestrator = agentOrchestrator
 
 const chatManager = new ChatManager()
+
+let orchestrationCoordinator: Coordinator | null = null
 
 async function autoSaveSessions() {
   const ws = sessionManager.getWorkspace()
@@ -1261,11 +1265,30 @@ app.whenReady().then(async () => {
   initSearch()
   injectOpenCodeConfig()
 
+  // Initialize orchestration coordinator (zero-config bootstrap)
+  if (!getWorkspaceRoot()) {
+    console.warn('[orchestration] No workspace root found — skipping coordinator')
+  } else {
+    const result = await ensureCoordinator()
+    if (result.status === 'started') {
+      orchestrationCoordinator = result.coordinator
+      console.log('[orchestration] Coordinator started')
+    } else if (result.status === 'already_running') {
+      console.log('[orchestration] Coordinator already running for', result.workspaceRoot)
+    } else if (result.status === 'error') {
+      console.error('[orchestration] Coordinator error:', result.error)
+    }
+  }
+
   createWindow()
   await startServer()
 })
 
 app.on('will-quit', () => {
+  if (orchestrationCoordinator) {
+    orchestrationCoordinator.close()
+    orchestrationCoordinator = null
+  }
   agentOrchestrator.shutdownAll()
   const ws = sessionManager.getWorkspace()
   if (ws?.id) {
