@@ -118,7 +118,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['node-pty'],
+              external: ['node-pty', 'better-sqlite3'],
             } as any,
           },
         },
