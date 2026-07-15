@@ -13,7 +13,6 @@ import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
 import GitReviewPanel from './components/GitReviewPanel'
 import GitDiffViewer from './components/GitDiffViewer'
-import RtkDashboard from './components/RtkDashboard'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import { EditorTabs } from './components/EditorTabs'
@@ -116,7 +115,7 @@ function App() {
     onTerminalOutput, sendTerminalInput, sendTerminalResize,
     restartSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
-    closeTab, startAgent, fetchAgentConfigs, createRawSession, createAgentSession,
+    closeTab, startAgent, fetchAgentConfigs, fetchInstalledAgents, createRawSession, createAgentSession,
     createWorkspaceFromGit,
     getSessionHistory, getGitFileDiff, getGitLog, getGitBranches, getGitCommitFiles,
     getGitFullStatus, gitStageFile, gitUnstageFile, gitCommit, gitPull, gitPush, gitFetch,
@@ -124,8 +123,13 @@ function App() {
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
     emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
     onChatStreamChunk, onChatResponse, onChatError,
-    executionHistory, sessionStartedAt,
+    executionHistory,
   } = useSocket()
+  const tokensSaved = useMemo(() => {
+    const orig = executionHistory.reduce((s: number, e: any) => s + (e.totalOriginalTokens || 0), 0)
+    const filt = executionHistory.reduce((s: number, e: any) => s + (e.totalFilteredTokens || 0), 0)
+    return orig - filt
+  }, [executionHistory])
   const writeBuffersRef = useRef<Record<string, string>>({})
   const MAX_BUFFER_BYTES = 65536
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
@@ -157,7 +161,7 @@ function App() {
 
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [, setSessionHistory] = useState<any[]>([])
-  const [, setHistoryPanelOpen] = useState(false)
+
   const [fontSize, setFontSize] = useState(() => {
     try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
   })
@@ -207,11 +211,16 @@ function App() {
     try { localStorage.setItem('agent-workspace-terminal-height', String(terminalHeight)) } catch {}
   }, [terminalHeight])
 
+  const [installedAgents, setInstalledAgents] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     fetchAgentConfigs().then(configs => {
       if (configs.length > 0) setAgentConfigs(configs)
       else setAgentConfigs(FALLBACK_AGENTS)
     }).catch(() => setAgentConfigs(FALLBACK_AGENTS))
+    fetchInstalledAgents().then(data => {
+      setInstalledAgents(new Set(Object.keys(data).filter(k => data[k])))
+    }).catch(() => {})
   }, [])
 
   const refreshDeleted = useCallback(() => {
@@ -935,20 +944,6 @@ function App() {
                 <i className="codicon codicon-dashboard" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className="activity-bar-btn"
-                onClick={() => { getSessionHistory().then(h => { setSessionHistory(h); setHistoryPanelOpen(true) }) }}
-                title="Session History"
-              >
-                <i className="codicon codicon-history" style={{ fontSize: 24 }}></i>
-              </button>
-              <button
-                className={`activity-bar-btn ${activeView === 'rtk' ? 'active' : ''}`}
-                onClick={() => setActiveView(prev => prev === 'rtk' ? null : 'rtk')}
-                title="AgntSpce Filter Debug"
-              >
-                <i className="codicon codicon-rocket" style={{ fontSize: 24 }}></i>
-              </button>
-              <button
                 className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
                 onClick={() => setView('profile')}
                 title="Profile"
@@ -962,6 +957,12 @@ function App() {
               >
                 <i className="codicon codicon-settings-gear" style={{ fontSize: 24 }}></i>
               </button>
+              {tokensSaved > 0 && (
+                <div className="activity-bar-tokens" title={`${tokensSaved.toLocaleString()} tokens saved`}>
+                  <i className="codicon codicon-organization" style={{ fontSize: 14 }}></i>
+                  <span>{tokensSaved >= 1000 ? `${(tokensSaved / 1000).toFixed(1)}k` : tokensSaved}</span>
+                </div>
+              )}
             </div>
           </div>
         <div className={`panel-left${closingLeft.current ? ' closing' : ''}`} style={{ width: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0, minWidth: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0 }}>
@@ -1081,7 +1082,7 @@ function App() {
             writeBuffersRef={writeBuffersRef}
             agentConfigs={agentConfigs}
             focusMode={focusMode}
-            agentsList={AGENTS_LIST}
+            agentsList={AGENTS_LIST.filter(a => installedAgents.has(a.id))}
             bottomShellOpen={bottomShellOpen}
             onToggleShell={handleToggleBottomShell}
             chatSidebarOpen={chatSidebarOpen}
@@ -1102,13 +1103,6 @@ function App() {
                   onRestore={handleRestoreWorkspace}
                   onPermanentDelete={handlePermanentDelete}
                   onNewWorkspace={handleCreateWorkspace}
-                  onClose={() => setActiveView(null)}
-                />
-              )},
-              { id: 'rtk', label: 'Filter', icon: '🚀', render: () => (
-                <RtkDashboard
-                  executionHistory={executionHistory}
-                  sessionStartedAt={sessionStartedAt}
                   onClose={() => setActiveView(null)}
                 />
               )},

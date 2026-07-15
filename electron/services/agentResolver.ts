@@ -138,6 +138,22 @@ export function getLoginPath(): string {
   return _loginShellPath || resolveLoginShellPath()
 }
 
+export function checkAgentsInstalled(agentIds: string[]): Record<string, boolean> {
+  const result: Record<string, boolean> = {}
+  for (const id of agentIds) {
+    const cmdName = AGENT_COMMANDS[id]
+    if (!cmdName) {
+      result[id] = false
+      continue
+    }
+    if (!RESOLVED_PATHS.has(cmdName)) {
+      RESOLVED_PATHS.set(cmdName, findExecutable(cmdName))
+    }
+    result[id] = RESOLVED_PATHS.get(cmdName) !== null
+  }
+  return result
+}
+
 export function resetCache(): void {
   RESOLVED_PATHS.clear()
   _loginShellPath = null

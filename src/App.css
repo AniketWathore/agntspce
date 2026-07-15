@@ -571,6 +571,30 @@
   border-left-color: #22C55E;
 }
 
+.activity-bar-tokens {
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 0;
+  color: #6e7681;
+  cursor: default;
+  font-size: 9px;
+  line-height: 1;
+  user-select: none;
+}
+
+.activity-bar-tokens i {
+  opacity: 0.6;
+}
+
+.activity-bar-tokens span {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .activity-bar-badge {
   position: absolute;
   top: 2px;
@@ -2597,6 +2621,58 @@
 
 .dashboard-overview-change.neutral {
   color: var(--text-muted);
+}
+
+/* Token Savings Chart */
+.dashboard-chart {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-top: 16px;
+}
+
+.dashboard-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dashboard-chart-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dashboard-chart-legend {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+.legend-dot.filtered {
+  background: #22C55E;
+}
+
+.legend-dot.removed {
+  background: #f85149;
+}
+
+.dashboard-chart-footer {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* Dashboard Cards Grid */

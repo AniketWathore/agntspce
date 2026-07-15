@@ -429,6 +429,12 @@ app_.get('/api/agents', (_req, res) => {
   res.json(agents)
 })
 
+app_.get('/api/agents/installed', (_req, res) => {
+  const { checkAgentsInstalled } = require('./services/agentResolver')
+  const ids = agentManager.getAllAgents().map(a => a.id)
+  res.json(checkAgentsInstalled(ids))
+})
+
 app_.get('/api/chat/models', (_req, res) => {
   res.json(chatManager.getModels())
 })

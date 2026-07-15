@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
 import { useSocket } from '../hooks/useSocket'
 import ActivityFeed from './ActivityFeed'
@@ -33,11 +33,58 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
 }
 
 const TOKEN_COST_PER_1K = 0.015
+const CHART_WIDTH = 360
+const CHART_HEIGHT = 120
+const BAR_WIDTH = 16
+const BAR_GAP = 4
+
+function TokenSavingsChart({ commands }: { commands: { orig: number; filt: number }[] }) {
+  if (commands.length === 0) return null
+  const maxVal = Math.max(...commands.map(c => c.orig), 1)
+  const cols = 18
+  const visible = commands.slice(-cols)
+  const bars = visible.map((c, i) => {
+    const saved = c.orig - c.filt
+    const origH = (c.orig / maxVal) * CHART_HEIGHT
+    const filtH = (c.filt / maxVal) * CHART_HEIGHT
+    const x = i * (BAR_WIDTH + BAR_GAP)
+    return { x, origH, filtH, saved }
+  })
+
+  return (
+    <div className="dashboard-chart">
+      <div className="dashboard-chart-header">
+        <span className="dashboard-chart-label">Token Savings (per command)</span>
+        <span className="dashboard-chart-legend">
+          <span className="legend-dot filtered" /> filtered
+          <span className="legend-dot removed" /> removed
+        </span>
+      </div>
+      <svg width={CHART_WIDTH} height={CHART_HEIGHT + 20} style={{ display: 'block' }}>
+        {bars.map((b, i) => (
+          <g key={i}>
+            <rect x={b.x} y={CHART_HEIGHT - b.origH} width={BAR_WIDTH} height={b.origH} fill="#2d333b" rx={2} />
+            <rect x={b.x} y={CHART_HEIGHT - b.filtH} width={BAR_WIDTH} height={b.filtH} fill="#22C55E" rx={2} />
+            {b.saved > 0 && (
+              <rect x={b.x} y={CHART_HEIGHT - b.origH} width={BAR_WIDTH} height={b.origH - b.filtH} fill="#f85149" rx={2} />
+            )}
+          </g>
+        ))}
+        <line x1={0} y1={CHART_HEIGHT} x2={CHART_WIDTH} y2={CHART_HEIGHT} stroke="#3C3C3C" strokeWidth={1} />
+      </svg>
+      <div className="dashboard-chart-footer">
+        {commands.length > 0 && (
+          <span>Total: {commands.reduce((s, c) => s + (c.orig - c.filt), 0).toLocaleString()} tokens removed from {commands.length} commands</span>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace, onClose }: Props) {
   const totalSessions = Object.keys(sessions).length
   const activeCount = getActiveCount(sessions)
-  const { filterStats } = useSocket()
+  const { filterStats, commandHistory } = useSocket()
   const [showDeleted, setShowDeleted] = useState(false)
 
   const tokensSaved = filterStats.totalOriginalTokens - filterStats.totalFilteredTokens
@@ -45,6 +92,10 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
     ? Math.round((tokensSaved / filterStats.totalOriginalTokens) * 100 * 10) / 10
     : 0
   const costSaved = tokensSaved > 0 ? ((tokensSaved / 1000) * TOKEN_COST_PER_1K).toFixed(4) : '0'
+  const chartCommands = useMemo(() =>
+    commandHistory.map(c => ({ orig: c.originalTokens, filt: c.filteredTokens })),
+    [commandHistory]
+  )
 
   return (
     <div className="dashboard">
@@ -97,6 +148,9 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
             <span className="dashboard-overview-change neutral">{totalSessions - activeCount} idle</span>
           </div>
         </div>
+
+        {/* Token Savings Chart */}
+        <TokenSavingsChart commands={chartCommands} />
 
         {/* Activity Feed */}
         <ActivityFeed sessions={sessions} maxEvents={30} />

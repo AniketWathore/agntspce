@@ -33,6 +33,7 @@ interface UseSocketReturn {
   closeTab: (sessionIds: string[]) => void
   startAgent: (sessionId: string, config: AgentStartConfig) => void
   fetchAgentConfigs: () => Promise<AgentConfig[]>
+  fetchInstalledAgents: () => Promise<Record<string, boolean>>
   createRawSession: (type?: string, workspacePath?: string) => void
   createAgentSession: (type: string, config: any, workspacePath?: string) => void
   emit: (event: string, ...args: any[]) => void
@@ -226,6 +227,13 @@ export function useSocket(): UseSocketReturn {
 
   socket.on('command-filter-event', (event: CommandEvent) => {
     setCommandHistory(prev => [event, ...prev].slice(0, 200))
+    setFilterStats(prev => ({
+      totalOriginalBytes: prev.totalOriginalBytes + (event as any).originalBytes || 0,
+      totalFilteredBytes: prev.totalFilteredBytes + (event as any).filteredBytes || 0,
+      totalOriginalTokens: prev.totalOriginalTokens + event.originalTokens,
+      totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
+      eventsProcessed: prev.eventsProcessed + 1,
+    }))
   })
 
   socket.on('execution-event', (event: ExecutionEvent) => {
@@ -342,6 +350,16 @@ export function useSocket(): UseSocketReturn {
       return await res.json()
     } catch {
       return []
+    }
+  }, [])
+
+  const fetchInstalledAgents = useCallback(async (): Promise<Record<string, boolean>> => {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/agents/installed`)
+      if (!res.ok) throw new Error('Failed to fetch installed agents')
+      return await res.json()
+    } catch {
+      return {}
     }
   }, [])
 
@@ -718,6 +736,7 @@ export function useSocket(): UseSocketReturn {
     closeTab,
     startAgent,
     fetchAgentConfigs,
+    fetchInstalledAgents,
     createRawSession,
     createAgentSession,
     createWorkspaceFromGit,
