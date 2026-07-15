@@ -1,0 +1,79 @@
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pane-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pane-cwd {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.pane-header-spacer {
+  flex: 1;
+}
+
+.pane-terminal {
+  flex: 1;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.pane-terminal .xterm {
+  height: 100%;
+  padding: 4px;
+}
+
+.pane-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pane-prompt {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.pane-input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 4px 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-bright);
+}
+
+.pane-input::placeholder {
+  color: var(--text-dim);
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agntspce": {
+      "command": "npx",
+      "args": [
+        "tsx",
+        "electron/services/orchestration/proxy/index.ts"
+      ],
+      "env": {}
+    }
+  }
+}
