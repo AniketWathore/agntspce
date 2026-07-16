@@ -25,11 +25,9 @@ let mainWindow: BrowserWindow | null = null
 app.setName('AgntSpce')
 app.name = 'AgntSpce'
 
-if (isMac) {
-  const gotLock = app.requestSingleInstanceLock()
-  if (!gotLock) {
-    app.quit()
-  }
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
 }
 
 function sendMenuAction(action: string, data?: any) {
@@ -439,6 +437,22 @@ app_.get('/api/chat/models', (_req, res) => {
   res.json(chatManager.getModels())
 })
 
+app_.post('/api/report-token-savings', (req, res) => {
+  try {
+    const { originalTokens, filteredTokens, toolName } = req.body
+    if (typeof originalTokens !== 'number' || typeof filteredTokens !== 'number') {
+      res.status(400).json({ error: 'originalTokens and filteredTokens are required' })
+      return
+    }
+    const event = sessionManager.outputFilter.reportTokenSavings(originalTokens, filteredTokens, toolName || 'tool')
+    if (event) io.emit('command-filter-event', event)
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('/api/report-token-savings error:', e)
+    res.status(500).json({ error: String(e) })
+  }
+})
+
 // Socket.IO
 io.on('connection', (socket) => {
   const activeWs = workspaceManager.getActiveWorkspace()
@@ -469,18 +483,31 @@ io.on('connection', (socket) => {
   })
 
   socket.on('get-filter-stats', () => {
-    const allSessions = sessionManager.outputFilter.getAllStats()
-    const allCommandHistory = sessionManager.outputFilter.getAllCommandHistory()
-    const aggregated = {
-      totalOriginalBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalBytes, 0),
-      totalFilteredBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredBytes, 0),
-      totalOriginalTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalTokens, 0),
-      totalFilteredTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredTokens, 0),
-      eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
-      commandsProcessed: allCommandHistory.length,
+    try {
+      const allSessions = sessionManager.outputFilter.getAllStats()
+      const allCommandHistory = sessionManager.outputFilter.getAllCommandHistory()
+      const aggregated = {
+        totalOriginalBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalBytes, 0),
+        totalFilteredBytes: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredBytes, 0),
+        totalOriginalTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalOriginalTokens, 0),
+        totalFilteredTokens: allSessions.reduce((s: number, x: any) => s + x.stats.totalFilteredTokens, 0),
+        eventsProcessed: allSessions.reduce((s: number, x: any) => s + x.stats.eventsProcessed, 0),
+        commandsProcessed: allCommandHistory.length,
+      }
+      const allHistory = sessionManager.outputFilter.getAllHistory()
+      socket.emit('filter-stats', { stats: aggregated, history: allHistory, commandHistory: allCommandHistory })
+    } catch (e) {
+      console.error('get-filter-stats error:', e)
     }
-    const allHistory = sessionManager.outputFilter.getAllHistory()
-    socket.emit('filter-stats', { stats: aggregated, history: allHistory, commandHistory: allCommandHistory })
+  })
+
+  socket.on('report-token-savings', (data: { originalTokens: number; filteredTokens: number; toolName?: string }) => {
+    try {
+      const event = sessionManager.outputFilter.reportTokenSavings(data.originalTokens, data.filteredTokens, data.toolName)
+      if (event) io.emit('command-filter-event', event)
+    } catch (e) {
+      console.error('report-token-savings error:', e)
+    }
   })
 
   socket.on('reset-filter-stats', () => {
@@ -1143,9 +1170,25 @@ async function startServer() {
   }
 
   rebuildMenu()
-  httpServer.listen(SERVER_PORT, '127.0.0.1', () => {
-    console.log(`Server running on http://127.0.0.1:${SERVER_PORT}`)
-  })
+  const MAX_PORT_RETRIES = 5
+
+  function listenWithRetry(attempt: number) {
+    const server = httpServer.listen(SERVER_PORT, '127.0.0.1')
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && attempt < MAX_PORT_RETRIES) {
+        console.log(`[server] Port ${SERVER_PORT} in use, retrying in 500ms (attempt ${attempt + 1}/${MAX_PORT_RETRIES})`)
+        server.close()
+        setTimeout(() => listenWithRetry(attempt + 1), 500)
+      } else {
+        console.error(`[server] Failed to bind to port ${SERVER_PORT}:`, err.message)
+      }
+    })
+    server.on('listening', () => {
+      console.log(`Server running on http://127.0.0.1:${SERVER_PORT}`)
+    })
+  }
+
+  listenWithRetry(0)
 }
 
 // Electron window

@@ -4,6 +4,7 @@ import { spawnSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
+import { request as httpRequest } from 'http'
 
 // ── Filter Definitions ─────────────────────────────────────────
 
@@ -298,6 +299,34 @@ function cmdRewrite(command) {
   return command.trim()
 }
 
+// ── HTTP Stats Reporting ───────────────────────────────────────
+
+function reportStats(rawTokens, filteredTokens, commandStr, exitCode) {
+  const port = parseInt(process.env.AGNTSPCE_PORT || '9460', 10)
+  const body = JSON.stringify({ originalTokens: rawTokens, filteredTokens, toolName: commandStr })
+  process.stderr.write(`[agntspce] reporting stats raw=${rawTokens} filtered=${filteredTokens} port=${port}\n`)
+  const done = () => process.exit(exitCode)
+  try {
+    const req = httpRequest({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/report-token-savings',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, (res) => {
+      process.stderr.write(`[agntspce] POST response status=${res.statusCode}\n`)
+      done()
+    })
+    req.setTimeout(2000, () => { process.stderr.write('[agntspce] POST timeout\n'); req.destroy(); done() })
+    req.on('error', (err) => { process.stderr.write(`[agntspce] POST error: ${err.message}\n`); done() })
+    req.write(body)
+    req.end()
+  } catch (e) {
+    process.stderr.write(`[agntspce] POST exception: ${e.message}\n`)
+    done()
+  }
+}
+
 // ── Subcommand: run ────────────────────────────────────────────
 
 function cmdRun(args) {
@@ -308,6 +337,10 @@ function cmdRun(args) {
   const commandStr = args.join(' ')
   const filter = findFilter(commandStr)
   const binary = resolveBinary(args[0])
+
+  // Emit command marker so OutputFilterService can detect and track this command.
+  // Using process.stderr so it doesn't pollute the filtered stdout output.
+  process.stderr.write(`agntspce $ ${commandStr}\n`)
 
   const result = spawnSync(binary, args.slice(1), {
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -343,14 +376,25 @@ function cmdRun(args) {
   if (!filter) {
     if (stdout) process.stdout.write(stdout)
     if (stderr) process.stderr.write(stderr)
-    process.exit(exitCode)
+    const rt = estimateTokens(raw)
+    reportStats(rt, rt, commandStr, exitCode)
+    return
   }
 
   const filtered = applyFilter(filter, raw)
+  // Emit token stats so the RTK system can track real savings.
+  // The raw output was captured by spawnSync; the filtered output
+  // is what gets written to the PTY. This line is detected by
+  // OutputFilterService.processOutput() and NOT included in
+  // the accumulated output or terminal display.
+  const rawTokens = estimateTokens(raw)
+  const filteredTokens = estimateTokens(filtered)
+  process.stdout.write(`\x1b[2K\rAGNTSPCE_STATS raw=${rawTokens} filtered=${filteredTokens}\n`)
   if (filtered) {
     process.stdout.write(filtered + '\n')
   }
-  process.exit(exitCode)
+  // Report token savings to backend via HTTP (bypasses PTY output parsing)
+  reportStats(rawTokens, filteredTokens, commandStr, exitCode)
 }
 
 // ── Entry Point ────────────────────────────────────────────────
@@ -362,6 +406,9 @@ if (subcommand === 'rewrite') {
   process.stdout.write(cmdRewrite(command))
 } else if (subcommand === 'run') {
   cmdRun(process.argv.slice(3))
+} else if (subcommand && subcommand !== 'rewrite' && subcommand !== 'run') {
+  // Bare invocation: agntspce git status → treat entire argv as command
+  cmdRun(process.argv.slice(2))
 } else {
   process.exit(1)
 }

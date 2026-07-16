@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
 import { useSocket } from '../hooks/useSocket'
 import ActivityFeed from './ActivityFeed'
@@ -33,69 +33,35 @@ function getActiveCount(sessions: Record<string, SessionState>): number {
 }
 
 const TOKEN_COST_PER_1K = 0.015
-const CHART_WIDTH = 360
-const CHART_HEIGHT = 120
-const BAR_WIDTH = 16
-const BAR_GAP = 4
+const BAR_CHARS = 24
 
-function TokenSavingsChart({ commands }: { commands: { orig: number; filt: number }[] }) {
-  if (commands.length === 0) return null
-  const maxVal = Math.max(...commands.map(c => c.orig), 1)
-  const cols = 18
-  const visible = commands.slice(-cols)
-  const bars = visible.map((c, i) => {
-    const saved = c.orig - c.filt
-    const origH = (c.orig / maxVal) * CHART_HEIGHT
-    const filtH = (c.filt / maxVal) * CHART_HEIGHT
-    const x = i * (BAR_WIDTH + BAR_GAP)
-    return { x, origH, filtH, saved }
-  })
-
+function EfficiencyBar({ pct, color = '#22C55E' }: { pct: number; color?: string }) {
+  const filled = Math.round((pct / 100) * BAR_CHARS)
   return (
-    <div className="dashboard-chart">
-      <div className="dashboard-chart-header">
-        <span className="dashboard-chart-label">Token Savings (per command)</span>
-        <span className="dashboard-chart-legend">
-          <span className="legend-dot filtered" /> filtered
-          <span className="legend-dot removed" /> removed
-        </span>
-      </div>
-      <svg width={CHART_WIDTH} height={CHART_HEIGHT + 20} style={{ display: 'block' }}>
-        {bars.map((b, i) => (
-          <g key={i}>
-            <rect x={b.x} y={CHART_HEIGHT - b.origH} width={BAR_WIDTH} height={b.origH} fill="#2d333b" rx={2} />
-            <rect x={b.x} y={CHART_HEIGHT - b.filtH} width={BAR_WIDTH} height={b.filtH} fill="#22C55E" rx={2} />
-            {b.saved > 0 && (
-              <rect x={b.x} y={CHART_HEIGHT - b.origH} width={BAR_WIDTH} height={b.origH - b.filtH} fill="#f85149" rx={2} />
-            )}
-          </g>
-        ))}
-        <line x1={0} y1={CHART_HEIGHT} x2={CHART_WIDTH} y2={CHART_HEIGHT} stroke="#3C3C3C" strokeWidth={1} />
-      </svg>
-      <div className="dashboard-chart-footer">
-        {commands.length > 0 && (
-          <span>Total: {commands.reduce((s, c) => s + (c.orig - c.filt), 0).toLocaleString()} tokens removed from {commands.length} commands</span>
-        )}
-      </div>
-    </div>
+    <span style={{ fontFamily: 'monospace', fontSize: 13, color, letterSpacing: 0 }}>
+      {'█'.repeat(Math.max(0, filled))}{'░'.repeat(Math.max(0, BAR_CHARS - filled))} {pct}%
+    </span>
   )
 }
 
 export default function Dashboard({ workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace, onClose }: Props) {
   const totalSessions = Object.keys(sessions).length
   const activeCount = getActiveCount(sessions)
-  const { filterStats, commandHistory } = useSocket()
+  const { filterStats, searchEvents, commandHistory } = useSocket()
   const [showDeleted, setShowDeleted] = useState(false)
 
   const tokensSaved = filterStats.totalOriginalTokens - filterStats.totalFilteredTokens
+  const totalOriginal = filterStats.totalOriginalTokens
   const pctReduction = filterStats.totalOriginalTokens > 0
-    ? Math.round((tokensSaved / filterStats.totalOriginalTokens) * 100 * 10) / 10
+    ? Math.round((tokensSaved / filterStats.totalOriginalTokens) * 100)
     : 0
   const costSaved = tokensSaved > 0 ? ((tokensSaved / 1000) * TOKEN_COST_PER_1K).toFixed(4) : '0'
-  const chartCommands = useMemo(() =>
-    commandHistory.map(c => ({ orig: c.originalTokens, filt: c.filteredTokens })),
-    [commandHistory]
-  )
+  const totalCalls = filterStats.eventsProcessed
+
+  const searchTotalOrig = searchEvents.reduce((s, e) => s + e.originalTokens, 0)
+  const searchTotalFilt = searchEvents.reduce((s, e) => s + e.filteredTokens, 0)
+  const searchSaved = searchTotalOrig - searchTotalFilt
+  const searchPct = searchTotalOrig > 0 ? Math.round((searchSaved / searchTotalOrig) * 100) : 0
 
   return (
     <div className="dashboard">
@@ -149,8 +115,100 @@ export default function Dashboard({ workspaces, sessions, activeWorkspace, delet
           </div>
         </div>
 
-        {/* Token Savings Chart */}
-        <TokenSavingsChart commands={chartCommands} />
+        {/* Command Filter Savings — real: raw output vs filtered output comparison */}
+        {totalCalls > 0 && (
+          <div className="dashboard-chart">
+            <div className="dashboard-chart-header">
+              <span className="dashboard-chart-label">Command Output Filters</span>
+              <span className="dashboard-chart-legend">exact token reduction in LLM context</span>
+            </div>
+            <div className="dashboard-savings-table">
+              <div className="savings-row">
+                <span>Saved from LLM context:</span>
+                <span className="savings-value">{tokensSaved.toLocaleString()} tokens ({pctReduction}% reduction)</span>
+              </div>
+              <div className="savings-row">
+                <span>Efficiency:</span>
+                <EfficiencyBar pct={pctReduction} />
+              </div>
+              <div className="savings-row">
+                <span>Commands filtered:</span>
+                <span className="savings-value">{totalCalls} commands &mdash; {totalOriginal.toLocaleString()} raw tokens</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Code Search Savings — estimated: full files vs returned snippets */}
+        {searchEvents.length > 0 && (
+          <div className="dashboard-chart" style={{ borderLeftColor: '#8b5cf6' }}>
+            <div className="dashboard-chart-header">
+              <span className="dashboard-chart-label">Code Search (agntspce-search)</span>
+              <span className="dashboard-chart-legend">estimated tokens avoided vs reading full files</span>
+            </div>
+            <div className="dashboard-savings-table">
+              <div className="savings-row">
+                <span>Estimated tokens avoided:</span>
+                <span className="savings-value">{searchSaved.toLocaleString()} tokens ({searchPct}% reduction)</span>
+              </div>
+              <div className="savings-row">
+                <span>Efficiency:</span>
+                <EfficiencyBar pct={searchPct} color="#8b5cf6" />
+              </div>
+              <div className="savings-row">
+                <span>Searches run:</span>
+                <span className="savings-value">{searchEvents.length} searches &mdash; {searchTotalOrig.toLocaleString()} chars of source code</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Per-Session Breakdown — only marker-detected commands */}
+        {commandHistory.length > 0 && (
+          <div className="dashboard-chart" style={{ borderLeftColor: '#f59e0b' }}>
+            <div className="dashboard-chart-header">
+              <span className="dashboard-chart-label">Per-Session Breakdown</span>
+              <span className="dashboard-chart-legend">tokens tracked via agntspce wrapper</span>
+            </div>
+            <div className="dashboard-savings-table">
+              {(() => {
+                const bySession = new Map<string, { commands: number; orig: number; filt: number }>()
+                for (const e of commandHistory) {
+                  if (e.command.startsWith('agntspce-search')) continue
+                  const s = bySession.get(e.sessionId) || { commands: 0, orig: 0, filt: 0 }
+                  s.commands++
+                  s.orig += e.originalTokens
+                  s.filt += e.filteredTokens
+                  bySession.set(e.sessionId, s)
+                }
+                const sorted = [...bySession.entries()].sort((a, b) => b[1].orig - a[1].orig)
+                return sorted.map(([sid, stats]) => {
+                  const saved = stats.orig - stats.filt
+                  const pct = stats.orig > 0 ? Math.round((saved / stats.orig) * 100) : 0
+                  return (
+                    <div key={sid} className="savings-row" style={{ fontSize: 12, padding: '4px 0' }}>
+                      <span style={{ color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 11 }}>
+                        {sid.slice(0, 8)}
+                      </span>
+                      <span style={{ marginLeft: 8 }}>
+                        {stats.commands} cmd{stats.commands !== 1 ? 's' : ''} &mdash;
+                        {' '}{stats.orig.toLocaleString()} raw &rarr; {stats.filt.toLocaleString()} filtered
+                        <span style={{ color: pct > 0 ? '#22C55E' : 'var(--text-dim)', marginLeft: 8 }}>
+                          ({pct}% saved)
+                        </span>
+                      </span>
+                    </div>
+                  )
+                })
+              })()}
+            </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-dim)' }}>
+              Raw token counts come from the <code>agntspce</code> wrapper's <code>spawnSync</code> capture; filtered counts come from the wrapper's <code>applyFilter</code> output.
+              Commands not run through the wrapper (e.g. <code>git status</code> without <code>agntspce</code>) are detected via shell prompt patterns
+              and use the RTK filter pipeline. Fallback events capture terminal output when no shell command can be identified.
+            </div>
+          </div>
+        )}
 
         {/* Activity Feed */}
         <ActivityFeed sessions={sessions} maxEvents={30} />

@@ -41,6 +41,7 @@ interface UseSocketReturn {
   filterStats: FilterStats
   filterHistory: FilterEvent[]
   commandHistory: CommandEvent[]
+  searchEvents: CommandEvent[]
   executionHistory: ExecutionEvent[]
   sessionStartedAt: number
   requestFilterStats: () => void
@@ -108,6 +109,7 @@ export function useSocket(): UseSocketReturn {
   })
   const [filterHistory, setFilterHistory] = useState<FilterEvent[]>([])
   const [commandHistory, setCommandHistory] = useState<CommandEvent[]>([])
+  const [searchEvents, setSearchEvents] = useState<CommandEvent[]>([])
   const [executionHistory, setExecutionHistory] = useState<ExecutionEvent[]>([])
   const [sessionStartedAt, setSessionStartedAt] = useState<number>(Date.now())
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
@@ -128,7 +130,9 @@ export function useSocket(): UseSocketReturn {
       setFilterStats({ totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 })
       setFilterHistory([])
       setCommandHistory([])
+      setSearchEvents([])
       setExecutionHistory([])
+      socket.emit('get-filter-stats', {})
     })
     socket.on('disconnect', () => setConnected(false))
 
@@ -226,14 +230,19 @@ export function useSocket(): UseSocketReturn {
   })
 
   socket.on('command-filter-event', (event: CommandEvent) => {
+    const isSearch = event.command.startsWith('agntspce-search')
     setCommandHistory(prev => [event, ...prev].slice(0, 200))
-    setFilterStats(prev => ({
-      totalOriginalBytes: prev.totalOriginalBytes + (event as any).originalBytes || 0,
-      totalFilteredBytes: prev.totalFilteredBytes + (event as any).filteredBytes || 0,
-      totalOriginalTokens: prev.totalOriginalTokens + event.originalTokens,
-      totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
-      eventsProcessed: prev.eventsProcessed + 1,
-    }))
+    if (isSearch) {
+      setSearchEvents(prev => [event, ...prev].slice(0, 100))
+    } else {
+      setFilterStats(prev => ({
+        totalOriginalBytes: prev.totalOriginalBytes + (event as any).originalBytes || 0,
+        totalFilteredBytes: prev.totalFilteredBytes + (event as any).filteredBytes || 0,
+        totalOriginalTokens: prev.totalOriginalTokens + event.originalTokens,
+        totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
+        eventsProcessed: prev.eventsProcessed + 1,
+      }))
+    }
   })
 
   socket.on('execution-event', (event: ExecutionEvent) => {
@@ -243,7 +252,10 @@ export function useSocket(): UseSocketReturn {
   socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[], commandHistory: CommandEvent[] }) => {
     setFilterStats(data.stats)
     if (data.history) setFilterHistory(data.history)
-    if (data.commandHistory) setCommandHistory(data.commandHistory)
+    if (data.commandHistory) {
+      setCommandHistory(data.commandHistory)
+      setSearchEvents(data.commandHistory.filter(e => e.command.startsWith('agntspce-search')))
+    }
   })
 
   return () => {
@@ -750,6 +762,7 @@ export function useSocket(): UseSocketReturn {
     filterStats,
     filterHistory,
     commandHistory,
+    searchEvents,
     requestFilterStats,
     executionHistory,
     sessionStartedAt,

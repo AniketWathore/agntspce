@@ -2627,6 +2627,7 @@
 .dashboard-chart {
   background: var(--bg-surface);
   border: 1px solid var(--border);
+  border-left: 3px solid #22C55E;
   border-radius: 12px;
   padding: 16px 20px;
   margin-top: 16px;
@@ -2673,6 +2674,41 @@
   margin-top: 8px;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+.dashboard-savings-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.savings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.savings-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e6edf3;
+}
+
+.dashboard-savings-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.savings-breakdown-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
 }
 
 /* Dashboard Cards Grid */

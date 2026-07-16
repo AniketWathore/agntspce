@@ -374,9 +374,10 @@ export class SessionManager extends EventEmitter {
     }
 
     const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
-    if (AGENT_TYPES.includes(config.type)) {
-      const binDir = AGNTSPCE_BIN_DIR
+    const isAgent = AGENT_TYPES.includes(config.type)
+    const binDir = AGNTSPCE_BIN_DIR
 
+    if (isAgent) {
       // Build PATH: bundled wrappers → resolved agent binary dirs → login shell PATH → inherited PATH
       const loginPath = getLoginPath()
       const agentDirs = getAllAgentBinaryDirs()
@@ -397,100 +398,110 @@ export class SessionManager extends EventEmitter {
         : 'PATH'
       env.AGNTSPCE_ORIGINAL_PATH = loginPath || envPath
       env[pathKey] = pathParts.join(path.delimiter)
-      env.AGNTSPCE_ENABLED = '1'
-
-      // Inject the Electron-bundled Node.js path so the agntspce wrapper can
-      // run agntspce.mjs without depending on a system-installed Node.js.
-      env.AGNTSPCE_NODE_PATH = process.execPath
-
-      // Inject RTK session token and binary path.
-      // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
-      // AGNTSPCE_RTK_BINARY tells hook scripts where to find the binary.
-      env.AGNTSPCE_RTK_SESSION = rtkManager.generateRtkToken()
-      const activeRtkPath = rtkManager.getActiveRtkPath()
-      if (activeRtkPath) {
-        env.AGNTSPCE_RTK_BINARY = activeRtkPath
-      } else {
-        env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', process.platform === 'win32' ? 'rtk.exe' : 'rtk')
+    } else {
+      // For shell terminals, prepend the bin dir to PATH so wrapper
+      // commands (bin/git, bin/ls, etc.) resolve before system bins.
+      if (fs.existsSync(binDir)) {
+        const pathKey = process.platform === 'win32'
+          ? (Object.keys(process.env).find(k => /^path$/i.test(k)) || 'Path')
+          : 'PATH'
+        // Save the ORIGINAL PATH (without binDir) so bin/agntspce.mjs's
+        // resolveBinary() can find the real system binary (e.g. real git)
+        // instead of the hook script (bin/git), which would cause recursion.
+        const currentPath = env[pathKey] || ''
+        env.AGNTSPCE_ORIGINAL_PATH = currentPath
+        env[pathKey] = binDir + path.delimiter + currentPath
       }
+    }
 
-      // AGNTSPCE_WRAPPER_PATH tells the RTK plugin where to find the agntspce
-      // wrapper. Prefer the .cmd shim (Windows) or the script (macOS/Linux),
-      // then fall back to the RTK install directory.
-      // On Windows, also set AGNTSPCE_JS so PowerShell hook functions can
-      // resolve agntspce.mjs without PATH lookup.
-      let wrapperPath = ''
-      if (AGNTSPCE_BIN_DIR) {
-        if (process.platform === 'win32') {
-          const cmdPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce.cmd')
-          if (fs.existsSync(cmdPath)) {
-            wrapperPath = cmdPath
-          } else {
-            wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
-          }
-        } else if (fs.existsSync(path.join(AGNTSPCE_BIN_DIR, 'agntspce'))) {
+    env.AGNTSPCE_ENABLED = '1'
+    env.AGNTSPCE_NODE_PATH = process.execPath
+
+    // Inject RTK session token and binary path.
+    // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
+    // AGNTSPCE_RTK_BINARY tells hook scripts where to find the binary.
+    env.AGNTSPCE_RTK_SESSION = rtkManager.generateRtkToken()
+    const activeRtkPath = rtkManager.getActiveRtkPath()
+    if (activeRtkPath) {
+      env.AGNTSPCE_RTK_BINARY = activeRtkPath
+    } else {
+      env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', process.platform === 'win32' ? 'rtk.exe' : 'rtk')
+    }
+
+    // AGNTSPCE_WRAPPER_PATH tells the RTK plugin where to find the agntspce
+    // wrapper. Prefer the .cmd shim (Windows) or the script (macOS/Linux),
+    // then fall back to the RTK install directory.
+    // On Windows, also set AGNTSPCE_JS so PowerShell hook functions can
+    // resolve agntspce.mjs without PATH lookup.
+    let wrapperPath = ''
+    if (AGNTSPCE_BIN_DIR) {
+      if (process.platform === 'win32') {
+        const cmdPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce.cmd')
+        if (fs.existsSync(cmdPath)) {
+          wrapperPath = cmdPath
+        } else {
           wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
         }
+      } else if (fs.existsSync(path.join(AGNTSPCE_BIN_DIR, 'agntspce'))) {
+        wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
       }
-      if (!wrapperPath) {
-        const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
-        const rtkWrapper = fs.existsSync(path.join(rtkDir, 'agntspce.cmd'))
-          ? path.join(rtkDir, 'agntspce.cmd')
-          : fs.existsSync(path.join(rtkDir, 'agntspce'))
-            ? path.join(rtkDir, 'agntspce')
-            : ''
-        if (rtkWrapper) wrapperPath = rtkWrapper
-      }
-      if (wrapperPath) env.AGNTSPCE_WRAPPER_PATH = wrapperPath
+    }
+    if (!wrapperPath) {
+      const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
+      const rtkWrapper = fs.existsSync(path.join(rtkDir, 'agntspce.cmd'))
+        ? path.join(rtkDir, 'agntspce.cmd')
+        : fs.existsSync(path.join(rtkDir, 'agntspce'))
+          ? path.join(rtkDir, 'agntspce')
+          : ''
+      if (rtkWrapper) wrapperPath = rtkWrapper
+    }
+    if (wrapperPath) env.AGNTSPCE_WRAPPER_PATH = wrapperPath
 
-      // On Windows, set AGNTSPCE_JS so hook scripts can find agntspce.mjs
-      // without relying on PATH, PATHEXT, or stale exe files.
-      if (process.platform === 'win32') {
-        const jsPath = wrapperPath
-          ? path.resolve(path.dirname(wrapperPath), 'agntspce.mjs')
-          : path.join(binDir, 'agntspce.mjs')
-        if (fs.existsSync(jsPath)) env.AGNTSPCE_JS = jsPath
-      }
+    // On Windows, set AGNTSPCE_JS so hook scripts can find agntspce.mjs
+    // without relying on PATH, PATHEXT, or stale exe files.
+    if (process.platform === 'win32') {
+      const jsPath = wrapperPath
+        ? path.resolve(path.dirname(wrapperPath), 'agntspce.mjs')
+        : path.join(binDir, 'agntspce.mjs')
+      if (fs.existsSync(jsPath)) env.AGNTSPCE_JS = jsPath
+    }
+    const searchPath = getActiveSearchPath()
+    if (searchPath) {
+      env.AGNTSPCE_SEARCH_SESSION = generateSessionToken()
+      env.AGNTSPCE_SEARCH_BINARY = searchPath
+    }
 
-      // Inject search session token for MCP activation gate.
-      const searchPath = getActiveSearchPath()
-      if (searchPath) {
-        env.AGNTSPCE_SEARCH_SESSION = generateSessionToken()
-        env.AGNTSPCE_SEARCH_BINARY = searchPath
-      }
+    // TEMPORARY DIAGNOSTIC: log the exact env passed to the Windows PTY
+    if (process.platform === 'win32') {
+      const diagPathKey = Object.keys(env).find(k => /^path$/i.test(k)) || 'PATH'
+      console.log(`[sessionManager][win32] PTY env PATH key="${diagPathKey}" value="${(env[diagPathKey] || '').slice(0, 500)}"`)
+      console.log(`[sessionManager][win32] PTY env AGNTSPCE_NODE_PATH="${env.AGNTSPCE_NODE_PATH}"`)
+      console.log(`[sessionManager][win32] PTY env AGNTSPCE_JS="${env.AGNTSPCE_JS}"`)
+      console.log(`[sessionManager][win32] PTY env AGNTSPCE_WRAPPER_PATH="${env.AGNTSPCE_WRAPPER_PATH}"`)
+      console.log(`[sessionManager][win32] PTY shell="${config.command}" args="${JSON.stringify(config.args)}"`)
+    }
 
-      // TEMPORARY DIAGNOSTIC: log the exact env passed to the Windows PTY
-      if (process.platform === 'win32') {
-        const diagPathKey = Object.keys(env).find(k => /^path$/i.test(k)) || 'PATH'
-        console.log(`[sessionManager][win32] PTY env PATH key="${diagPathKey}" value="${(env[diagPathKey] || '').slice(0, 500)}"`)
-        console.log(`[sessionManager][win32] PTY env AGNTSPCE_NODE_PATH="${env.AGNTSPCE_NODE_PATH}"`)
-        console.log(`[sessionManager][win32] PTY env AGNTSPCE_JS="${env.AGNTSPCE_JS}"`)
-        console.log(`[sessionManager][win32] PTY env AGNTSPCE_WRAPPER_PATH="${env.AGNTSPCE_WRAPPER_PATH}"`)
-        console.log(`[sessionManager][win32] PTY shell="${config.command}" args="${JSON.stringify(config.args)}"`)
-      }
-
-      // Schedule a diagnostic echo into the PTY after spawn
-      const diagnosticCmds = process.platform === 'win32'
-        ? [
-            'echo [agntspce-diag] BEGIN',
-            `echo [agntspce-diag] PATH=$env:PATH`,
-            `echo [agntspce-diag] AGNTSPCE_JS=$env:AGNTSPCE_JS`,
-            `echo [agntspce-diag] AGNTSPCE_NODE_PATH=$env:AGNTSPCE_NODE_PATH`,
-            `echo [agntspce-diag] AGNTSPCE_WRAPPER_PATH=$env:AGNTSPCE_WRAPPER_PATH`,
-            'echo [agntspce-diag] END',
-          ]
-        : []
-      if (diagnosticCmds.length > 0) {
-        const sid = sessionId
-        setImmediate(() => {
-          const s = this.sessions.get(sid)
-          if (s?.pty) {
-            for (const cmd of diagnosticCmds) {
-              s.pty.write(cmd + '\r\n')
-            }
+    // Schedule a diagnostic echo into the PTY after spawn
+    const diagnosticCmds = process.platform === 'win32'
+      ? [
+          'echo [agntspce-diag] BEGIN',
+          `echo [agntspce-diag] PATH=$env:PATH`,
+          `echo [agntspce-diag] AGNTSPCE_JS=$env:AGNTSPCE_JS`,
+          `echo [agntspce-diag] AGNTSPCE_NODE_PATH=$env:AGNTSPCE_NODE_PATH`,
+          `echo [agntspce-diag] AGNTSPCE_WRAPPER_PATH=$env:AGNTSPCE_WRAPPER_PATH`,
+          'echo [agntspce-diag] END',
+        ]
+      : []
+    if (diagnosticCmds.length > 0) {
+      const sid = sessionId
+      setImmediate(() => {
+        const s = this.sessions.get(sid)
+        if (s?.pty) {
+          for (const cmd of diagnosticCmds) {
+            s.pty.write(cmd + '\r\n')
           }
-        })
-      }
+        }
+      })
     }
 
     if (this.workspace?.envVars) {
@@ -749,7 +760,10 @@ export class SessionManager extends EventEmitter {
     const saved = await WorkspaceManager.getInstance().loadSessionBuffer(this.workspace.id, sessionId)
     if (saved) {
       session.buffer.write(saved)
-      session.deliveredBufferLength = 0
+      // Mark ALL restored buffer content as delivered so it isn't replayed
+      // to the terminal as raw ANSI garbage. The buffer stays in memory for
+      // status detection; the agent starts fresh via startAgentWithConfig.
+      session.deliveredBufferLength = session.buffer.totalBytes
     }
   }
 
@@ -998,7 +1012,12 @@ export class SessionManager extends EventEmitter {
     if (status !== oldStatus) {
       if ((oldStatus === 'busy' || oldStatus === 'waiting') && (status === 'idle' || status === 'exited')) {
         this.cavemanService.endRun(sessionId)
-        this.outputFilter.finalizeCommand(sessionId)
+        // Don't finalize if a safety net timer is pending — it will fire
+        // when data stops arriving, preventing output fragmentation across
+        // rapid status transitions (e.g. detectStatus → idle for small buffers).
+        if (!this.outputFilter.hasPendingTimer(sessionId)) {
+          this.outputFilter.finalizeCommand(sessionId)
+        }
       } else if (oldStatus === 'idle' && status === 'busy') {
         this.cavemanService.startRun(sessionId)
       }
