@@ -142,6 +142,9 @@ function App() {
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
   const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'rtk' | null>(null)
+  const [leftDrag, setLeftDrag] = useState(false)
+  const [rightDrag, setRightDrag] = useState(false)
+  const [terminalDrag, setTerminalDrag] = useState(false)
   const [gitChangeCount, setGitChangeCount] = useState(0)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('agent-workspace-theme') as 'dark' | 'light') || 'dark'
@@ -194,7 +197,6 @@ function App() {
     return 40
   })
   const dragging = useRef<'left' | 'right' | 'terminal' | null>(null)
-  const closingLeft = useRef(false)
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { leftWidthRef.current = leftWidth }, [leftWidth])
@@ -612,6 +614,8 @@ function App() {
       e.preventDefault()
       e.stopPropagation()
       dragging.current = side
+      if (side === 'left') setLeftDrag(true)
+      if (side === 'right') setRightDrag(true)
       const startX = e.clientX
       const startLeft = leftWidth
       const startChat = chatWidth
@@ -635,19 +639,15 @@ function App() {
             newW = Math.min(newW, leftMax)
           }
 
-          const collapseThreshold = Math.round(totalW * 0.04)
+          const collapseThreshold = Math.round(totalW * 0.05)
 
           if (newW < collapseThreshold) {
             newW = Math.max(newW, collapseThreshold)
             if (!collapseTimerRef.current) {
               collapseTimerRef.current = setTimeout(() => {
                 collapseTimerRef.current = null
-                closingLeft.current = true
                 setLeftWidth(0)
-                setTimeout(() => {
-                  closingLeft.current = false
-                  setWorkspaceSidebarOpen(false)
-                }, 80)
+                setWorkspaceSidebarOpen(false)
               }, 250)
             }
           } else {
@@ -668,6 +668,8 @@ function App() {
       }
 
       function onUp() {
+        setLeftDrag(false)
+        setRightDrag(false)
         dragging.current = null
         if (collapseTimerRef.current) {
           clearTimeout(collapseTimerRef.current)
@@ -690,6 +692,7 @@ function App() {
     e.preventDefault()
     e.stopPropagation()
     dragging.current = 'terminal'
+    setTerminalDrag(true)
     const startY = e.clientY
     const startHeight = terminalHeight
     const mainContent = e.currentTarget.closest('.main-content')
@@ -705,6 +708,7 @@ function App() {
     }
 
     function onUp() {
+      setTerminalDrag(false)
       dragging.current = null
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
@@ -912,14 +916,28 @@ function App() {
               </div>
               <button
                 className="activity-bar-btn active"
-                onClick={() => { handleToggleWorkspaceSidebar(); setActiveView(null) }}
+                onClick={() => {
+                  if (activeView === 'git-review' || !workspaceSidebarOpen) {
+                    setWorkspaceSidebarOpen(true)
+                    setActiveView(null)
+                  } else {
+                    setWorkspaceSidebarOpen(false)
+                  }
+                }}
                 title="Explorer (Workspaces)"
               >
                 <i className="codicon codicon-files" style={{ fontSize: 24 }}></i>
               </button>
               <button
                 className={`activity-bar-btn ${activeView === 'git-review' ? 'active' : ''}`}
-                onClick={() => setActiveView(activeView === 'git-review' ? null : 'git-review')}
+                onClick={() => {
+                  if (activeView === 'git-review') {
+                    setActiveView(null)
+                  } else {
+                    setWorkspaceSidebarOpen(false)
+                    setActiveView('git-review')
+                  }
+                }}
                 title="Source Control"
               >
                 <i className="codicon codicon-source-control" style={{ fontSize: 24 }}></i>
@@ -965,7 +983,7 @@ function App() {
               )}
             </div>
           </div>
-        <div className={`panel-left${closingLeft.current ? ' closing' : ''}`} style={{ width: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0, minWidth: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0 }}>
+        <div className={`panel-left${leftDrag ? ' no-transition' : ''}`} style={{ width: (workspaceSidebarOpen || activeView === 'git-review') ? leftWidth : 0 }}>
           {workspaceSidebarOpen && activeView !== 'git-review' && (
             <WorkspaceSidebar
               workspaces={workspaces}
@@ -1091,6 +1109,7 @@ function App() {
             onTerminalOutput={onTerminalOutput}
             onTerminalResizerMouseDown={onTerminalResizerMouseDown}
             terminalHeight={terminalHeight}
+            terminalDrag={terminalDrag}
             pageViews={[
               { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
                 <Dashboard
@@ -1117,28 +1136,24 @@ function App() {
             onViewChange={(view) => setActiveView(view as typeof activeView)}
           />
         </main>
-        {chatSidebarOpen && (
-          <>
-            <div className="resizer" onMouseDown={onResizerMouseDown('right')} />
-            <div className="panel-right" style={{ width: chatWidth, minWidth: chatWidth }}>
-              <ChatSidebar
-                onClose={() => setChatSidebarOpen(false)}
-                onNavigateToSettings={() => setActiveView('settings')}
-                socket={{
-                  chatGetModels,
-                  chatSendStream,
-                  chatStopStream,
-                  chatGetHistory,
-                  chatUpdateApiKey,
-                  chatDeleteThread,
-                  onChatStreamChunk,
-                  onChatResponse,
-                  onChatError,
-                }}
-              />
-            </div>
-          </>
-        )}
+        <div className="resizer" style={{ opacity: chatSidebarOpen ? 1 : 0, pointerEvents: chatSidebarOpen ? 'auto' : 'none' }} onMouseDown={onResizerMouseDown('right')} />
+        <div className={`panel-right${rightDrag ? ' no-transition' : ''}`} style={{ width: chatSidebarOpen ? chatWidth : 0 }}>
+          <ChatSidebar
+            onClose={() => setChatSidebarOpen(false)}
+            onNavigateToSettings={() => setActiveView('settings')}
+            socket={{
+              chatGetModels,
+              chatSendStream,
+              chatStopStream,
+              chatGetHistory,
+              chatUpdateApiKey,
+              chatDeleteThread,
+              onChatStreamChunk,
+              onChatResponse,
+              onChatError,
+            }}
+          />
+        </div>
       </div>
       <CreateWorkspaceModal
         open={createWorkspaceModalOpen}

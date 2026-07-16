@@ -21,9 +21,11 @@ interface Props {
   style?: React.CSSProperties
   dimmed?: boolean
   onTerminalOutput?: (cb: (event: { sessionId: string, data: string }) => void) => () => void
+  layoutMode?: 'grid' | 'focus' | 'side-left' | 'side-right'
+  onLayoutChange?: (mode: 'grid' | 'focus' | 'side-left' | 'side-right') => void
 }
 
-export default function TerminalPane({ session, onInput, onResize, onRestart, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -184,8 +186,23 @@ export default function TerminalPane({ session, onInput, onResize, onRestart, on
           <span className="terminal-branch">{session.branch}</span>
         )}
 
-        <span className="terminal-session-id">{session.id}</span>
-        <button className="terminal-restart-btn" onClick={() => onRestart(session.id)} title="Restart">↻</button>
+        <span className="terminal-layout-btns">
+          <button
+            className={`terminal-layout-btn ${layoutMode === 'focus' ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onLayoutChange?.(layoutMode === 'focus' ? 'grid' : 'focus') }}
+            title="Full screen"
+          >⊞</button>
+          <button
+            className={`terminal-layout-btn ${layoutMode === 'side-left' ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onLayoutChange?.(layoutMode === 'side-left' ? 'grid' : 'side-left') }}
+            title="Left side"
+          >◧</button>
+          <button
+            className={`terminal-layout-btn ${layoutMode === 'side-right' ? 'active' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onLayoutChange?.(layoutMode === 'side-right' ? 'grid' : 'side-right') }}
+            title="Right side"
+          >◨</button>
+        </span>
         {onClose && (
           <button className="terminal-close-btn" onClick={() => onClose(session.id)} title="Close">✕</button>
         )}
