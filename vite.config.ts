@@ -21,10 +21,21 @@ function copyPreload(): void {
 }
 
 function postBuildPlugin(): Plugin {
+  const isDev = () => !!process.env.VITE_DEV_SERVER_URL
   return {
     name: 'post-build-copy',
     closeBundle() {
       try {
+        if (isDev()) {
+          // Dev mode: only copy the essential preload script.
+          // Heavy copies (search/, node-pty prebuilds, RTK binaries) are
+          // skipped because they're already resolved from their source
+          // directories. Copying them to dist-electron/ triggers Vite's
+          // file watcher, causing unnecessary rebuilds and double init.
+          copyPreload()
+          return
+        }
+        // Production build: copy everything for packaging
         // Copy node-pty native prebuilds to dist-electron/
         const src = join(__dirname, 'node_modules', 'node-pty', 'prebuilds')
         const dest = join(__dirname, 'dist-electron', 'prebuilds')
