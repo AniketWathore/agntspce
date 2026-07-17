@@ -1,5 +1,5 @@
-import { spawn, ChildProcess } from 'child_process'
-import { stream, execCapture, runStreaming as _runStreaming, type CaptureResult, type StreamResult, type StreamFilter, type FilterMode } from './stream'
+
+import { execCapture, runStreaming as _runStreaming, type StreamFilter } from './stream'
 import { TimedExecution, Tracker } from './tracking'
 import { neverWorse } from './guard'
 import { teeAndHint } from './tee'

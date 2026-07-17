@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { AgentConfig, AgentStartConfig } from '../types'
+import { getAgentColorImage } from '../agentImages'
 
 interface StartupUIProps {
   sessionId: string
@@ -32,15 +33,18 @@ export default function StartupUI({ sessionId, agentConfigs, onStart, onAdvanced
         <button className="startup-dismiss" onClick={onDismiss} title="Dismiss">✕</button>
       </div>
       <div className="startup-body">
-        <select
-          className="startup-agent-select"
-          value={selectedAgent}
-          onChange={e => setSelectedAgent(e.target.value)}
-        >
-          {agentConfigs.map(a => (
-            <option key={a.id} value={a.id}>{a.icon} {a.name}</option>
-          ))}
-        </select>
+        <div className="startup-agent-row">
+          <img className="startup-agent-img" src={getAgentColorImage(selectedAgent)} alt={selectedAgent} />
+          <select
+            className="startup-agent-select"
+            value={selectedAgent}
+            onChange={e => setSelectedAgent(e.target.value)}
+          >
+            {agentConfigs.map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        </div>
         <div className="startup-modes">
           <button className="startup-mode-btn" onClick={() => handleMode('fresh')}>Fresh</button>
           <button className="startup-mode-btn" onClick={() => handleMode('continue')}>Continue</button>

@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process'
 import type Database from 'better-sqlite3'
 
 export interface TaskSummary {
@@ -29,22 +28,6 @@ interface TaskRow {
   created_at: number
   completed_at: number | null
   branch_point: string | null
-}
-
-interface StatusUpdateRow {
-  id: string
-  task_id: string
-  agent_id: string
-  text: string
-  created_at: number
-}
-
-interface SummaryRow {
-  task_id: string
-  summary: string
-  key_files: string
-  status_line: string
-  updated_at: number
 }
 
 const MAX_SUMMARY_LENGTH = 500

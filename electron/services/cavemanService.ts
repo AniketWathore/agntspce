@@ -297,8 +297,6 @@ export class CavemanService {
       return
     }
 
-    this.endRun(sessionId)
-
     const actualPrompt = prompt || this.consumePrompt(sessionId) || '(pending)'
     this.runCounter++
     state.currentRun = {

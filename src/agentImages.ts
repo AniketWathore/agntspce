@@ -10,7 +10,9 @@ const AGENT_IMAGE_MAP: Record<string, { text: string; color: string }> = {
   mastra: { text: 'mastra-text.svg', color: 'mastra-color.svg' },
   droid: { text: 'droid-text.svg', color: 'droid-color.svg' },
   amp: { text: 'amp-text.svg', color: 'amp-color.svg' },
-  pi: { text: 'pi-text.svg', color: 'pi-color.svg' },
+  pi: { text: 'pi-text.svg', color: 'pi-color.png' },
+  kilocode: { text: 'kilocode-color.png', color: 'kilocode-color.png' },
+  windsurf: { text: 'windsurf-color.png', color: 'windsurf-color.png' },
 }
 
 export function getAgentTextImage(type: string): string {

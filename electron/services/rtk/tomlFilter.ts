@@ -99,6 +99,8 @@ export function compileFilter(name: string, def: FilterDefinition): CompiledFilt
     tailLines: def.tailLines,
     maxLines: def.maxLines,
     onEmpty: def.onEmpty,
+    stripEmpty: def.stripEmpty,
+    collapseEmpty: def.collapseEmpty,
   }
 }
 
@@ -137,6 +139,18 @@ export function applyFilter(filter: CompiledFilter, stdout: string): string {
     lines = lines.filter(line => !filter.lineFilter!.patterns.some(p => p.test(line)))
   } else if (filter.lineFilter.type === 'keep') {
     lines = lines.filter(line => filter.lineFilter!.patterns.some(p => p.test(line)))
+  }
+
+  if (filter.stripEmpty) {
+    lines = lines.filter(l => l.trim() !== '')
+  }
+  if (filter.collapseEmpty) {
+    lines = lines.reduce((acc: string[], line: string) => {
+      const isBlank = line.trim() === ''
+      if (isBlank && acc.length > 0 && acc[acc.length - 1] === '') return acc
+      acc.push(isBlank ? '' : line)
+      return acc
+    }, [])
   }
 
   if (filter.truncateLinesAt !== undefined) {

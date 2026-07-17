@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeClipboard: (text) => clipboard.writeText(text),
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   getDefaultPath: () => ipcRenderer.invoke('get-default-path'),
+  getDropPath: () => ipcRenderer.invoke('get-drop-path'),
   getServerPort: () => ipcRenderer.invoke('get-server-port'),
   exportWorkspace: () => ipcRenderer.invoke('export-workspace'),
   importWorkspace: () => ipcRenderer.invoke('import-workspace'),

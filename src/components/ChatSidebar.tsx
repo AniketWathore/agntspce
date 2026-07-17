@@ -116,11 +116,13 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   }, [socket, threadId])
 
   useEffect(() => {
+    let cancelled = false
     const loadHistory = async () => {
       const data = await socket.chatGetHistory(threadId)
-      setMessages(data.messages)
+      if (!cancelled) setMessages(data.messages || [])
     }
     loadHistory()
+    return () => { cancelled = true }
   }, [socket, threadId])
 
   const handleSend = useCallback(() => {

@@ -264,7 +264,7 @@ function resolveBinary(name) {
   if (name.includes('/') || name.includes('\\')) return name
   const originalPath = process.env.AGNTSPCE_ORIGINAL_PATH || process.env.PATH || ''
   const ourDir = path.dirname(fileURLToPath(import.meta.url))
-  const dirs = originalPath.split(path.delimiter)
+  const dirs = originalPath.split(path.delimiter).filter(d => d && path.resolve(d) !== ourDir)
   const candidates = [name]
   if (process.platform === 'win32' && !path.extname(name)) {
     candidates.push(name + '.cmd', name + '.bat', name + '.exe', name + '.com')

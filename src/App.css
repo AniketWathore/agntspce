@@ -178,25 +178,6 @@
   50% { opacity: 0.6; }
 }
 
-/* ── Global Button Animation ────────────── */
-.btn-animate {
-  transition:
-    background var(--anim-duration) var(--anim-ease),
-    color var(--anim-duration) var(--anim-ease),
-    border-color var(--anim-duration) var(--anim-ease),
-    box-shadow var(--anim-duration) var(--anim-ease),
-    transform var(--anim-duration-fast) var(--anim-ease);
-}
-
-.btn-animate:hover {
-  transform: scale(var(--anim-scale-hover));
-}
-
-.btn-animate:active {
-  transform: scale(var(--anim-scale-press));
-  transition-duration: 50ms;
-}
-
 /* ── App Layout ─────────────────────────── */
 .app {
   width: 100vw;
@@ -3319,6 +3300,9 @@
 .agent-icon {
   font-size: 22px;
   line-height: 1;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
 }
 
 .agent-info {
@@ -3960,7 +3944,21 @@
   gap: 10px;
 }
 
+.startup-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.startup-agent-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .startup-agent-select {
+  flex: 1;
   padding: 8px 10px;
   background: var(--bg-surface);
   border: 1px solid var(--border);

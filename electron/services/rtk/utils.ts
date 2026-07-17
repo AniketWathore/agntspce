@@ -1,3 +1,6 @@
+import fs from 'fs'
+import { execSync } from 'child_process'
+
 let ansiRegex: RegExp | null = null
 function getAnsiRegex(): RegExp {
   if (!ansiRegex) {
@@ -84,7 +87,6 @@ export function shortenArn(arn: string): string {
 }
 
 export function detectPackageManager(): string {
-  const fs = require('fs')
   if (fs.existsSync('pnpm-lock.yaml')) return 'pnpm'
   if (fs.existsSync('yarn.lock')) return 'yarn'
   return 'npm'
@@ -92,7 +94,6 @@ export function detectPackageManager(): string {
 
 export function toolExists(name: string): boolean {
   try {
-    const { execSync } = require('child_process')
     if (process.platform === 'win32') {
       execSync(`where ${name}`, { stdio: 'ignore' })
     } else {

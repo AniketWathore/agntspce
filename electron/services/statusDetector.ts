@@ -121,7 +121,7 @@ export class StatusDetector {
   }): string | null {
     const agentStr = this.normalizeAgent(agent)
     if (!agentStr || agentStr === 'claude') return null
-    const { recentOutput, recentAll, trimmedLastNonEmptyLine, hasRecentOutput } = context
+    const { recentOutput, trimmedLastNonEmptyLine, hasRecentOutput } = context
 
     if (agentStr === 'codex') {
       if (trimmedLastNonEmptyLine === '>' || /^codex>\s*$/i.test(trimmedLastNonEmptyLine) ||

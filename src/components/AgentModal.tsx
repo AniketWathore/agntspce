@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { AgentConfig, AgentStartConfig } from '../types'
+import { getAgentColorImage } from '../agentImages'
 
 interface AgentModalProps {
   open: boolean
@@ -120,7 +121,7 @@ export default function AgentModal({ open, sessionId, agentConfigs, onStart, onC
                   checked={selectedAgent === agent.id}
                   onChange={() => setSelectedAgent(agent.id)}
                 />
-                <span className="agent-icon">{agent.icon}</span>
+                <img className="agent-icon" src={getAgentColorImage(agent.id)} alt={agent.name} />
                 <div className="agent-info">
                   <span className="agent-name">{agent.name}</span>
                   <span className="agent-desc">{agent.description}</span>

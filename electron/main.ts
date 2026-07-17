@@ -13,6 +13,7 @@ import { GitHelper } from './services/gitHelper'
 import { WorktreeHelper } from './services/worktreeHelper'
 import { AgentManager } from './services/agentManager'
 import { AgentOrchestrator } from './services/agentOrchestrator'
+import { checkAgentsInstalled } from './services/agentResolver'
 import { ChatManager } from './services/chatManager'
 import { initialize as initRtk } from './services/rtkManager'
 import { initialize as initSearch, injectClaudeCodeConfig, injectOpenCodeConfig } from './services/searchManager'
@@ -52,7 +53,7 @@ function createNewWindow() {
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL!)
   } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
+    win.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
   }
 }
 
@@ -428,7 +429,6 @@ app_.get('/api/agents', (_req, res) => {
 })
 
 app_.get('/api/agents/installed', (_req, res) => {
-  const { checkAgentsInstalled } = require('./services/agentResolver')
   const ids = agentManager.getAllAgents().map(a => a.id)
   res.json(checkAgentsInstalled(ids))
 })
@@ -614,31 +614,39 @@ io.on('connection', (socket) => {
   })
 
   socket.on('create-raw-session', async ({ type, workspacePath }) => {
-    const t = String(type || '').trim().toLowerCase() || 'shell'
-    const result = sessionManager.createRawSession(t, workspacePath)
-    if (result) {
-      const states = sessionManager.getSessionStates()
-      socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
-      await autoSaveSessions()
-    } else {
-      socket.emit('error', { message: 'Failed to create session - check main process console for details' })
+    try {
+      const t = String(type || '').trim().toLowerCase() || 'shell'
+      const result = sessionManager.createRawSession(t, workspacePath)
+      if (result) {
+        const states = sessionManager.getSessionStates()
+        socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
+        await autoSaveSessions()
+      } else {
+        socket.emit('error', { message: 'Failed to create session - check main process console for details' })
+      }
+    } catch (error: any) {
+      socket.emit('error', { message: 'Failed to create session', error: error.message })
     }
   })
 
   socket.on('create-agent-session', async ({ type, workspacePath, config }) => {
-    const t = String(type || '').trim().toLowerCase() || 'shell'
-    const result = sessionManager.createRawSession(t, workspacePath)
-    if (result) {
-      try {
-        sessionManager.startAgentWithConfig(result.sessionId, config)
-      } catch (e: any) {
-        socket.emit('error', { message: 'Agent start failed', error: e.message })
+    try {
+      const t = String(type || '').trim().toLowerCase() || 'shell'
+      const result = sessionManager.createRawSession(t, workspacePath)
+      if (result) {
+        try {
+          sessionManager.startAgentWithConfig(result.sessionId, config)
+        } catch (e: any) {
+          socket.emit('error', { message: 'Agent start failed', error: e.message })
+        }
+        const states = sessionManager.getSessionStates()
+        socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
+        await autoSaveSessions()
+      } else {
+        socket.emit('error', { message: 'Failed to create session' })
       }
-      const states = sessionManager.getSessionStates()
-      socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
-      await autoSaveSessions()
-    } else {
-      socket.emit('error', { message: 'Failed to create session' })
+    } catch (error: any) {
+      socket.emit('error', { message: 'Failed to create agent session', error: error.message })
     }
   })
 
@@ -653,12 +661,16 @@ io.on('connection', (socket) => {
   })
 
   socket.on('close-tab', async ({ sessionIds }) => {
-    const ids = Array.isArray(sessionIds) ? sessionIds : []
-    for (const id of ids) {
-      sessionManager.closeSession(id)
-      io.emit('session-closed', { sessionId: id })
+    try {
+      const ids = Array.isArray(sessionIds) ? sessionIds : []
+      for (const id of ids) {
+        sessionManager.closeSession(id)
+        io.emit('session-closed', { sessionId: id })
+      }
+      await autoSaveSessions()
+    } catch (error: any) {
+      socket.emit('error', { message: 'Failed to close tabs', error: error.message })
     }
-    await autoSaveSessions()
   })
 
   socket.on('start-parallel-task', async (data: any, callback?: Function) => {
@@ -1081,27 +1093,27 @@ io.on('connection', (socket) => {
   })
 
   // Chat events
-  socket.on('chat-get-models', () => {
-    socket.emit('chat-models', chatManager.getModels())
+  socket.on('chat-get-models', ({ _reqId } = {}) => {
+    socket.emit('chat-models', { _reqId, models: chatManager.getModels() })
   })
 
-  socket.on('chat-send', async ({ threadId, providerId, content }) => {
+  socket.on('chat-send', async ({ _reqId, threadId, providerId, content }) => {
     try {
       const provider = chatManager.getProvider(providerId)
       if (!provider.isConfigured()) {
-        socket.emit('chat-error', { threadId, error: `${provider.name} API key is not configured.` })
+        socket.emit('chat-error', { _reqId, threadId, error: `${provider.name} API key is not configured.` })
         return
       }
     } catch (err: any) {
-      socket.emit('chat-error', { threadId, error: err.message })
+      socket.emit('chat-error', { _reqId, threadId, error: err.message })
       return
     }
 
     const msg = await chatManager.sendMessage(threadId, providerId, content)
     if (msg.error) {
-      socket.emit('chat-error', { threadId, error: msg.content })
+      socket.emit('chat-error', { _reqId, threadId, error: msg.content })
     } else {
-      socket.emit('chat-response', { threadId, message: msg })
+      socket.emit('chat-response', { _reqId, threadId, message: msg })
     }
   })
 
@@ -1130,9 +1142,9 @@ io.on('connection', (socket) => {
     chatManager.stopStreaming(threadId)
   })
 
-  socket.on('chat-get-history', ({ threadId }) => {
+  socket.on('chat-get-history', ({ _reqId, threadId }) => {
     const messages = chatManager.getThreadMessages(threadId)
-    socket.emit('chat-history', { threadId, messages })
+    socket.emit('chat-history', { _reqId, threadId, messages })
   })
 
   socket.on('chat-update-api-key', ({ providerId, apiKey }) => {
@@ -1262,6 +1274,8 @@ ipcMain.handle('select-directory', async () => {
 ipcMain.handle('get-default-path', () => os.homedir())
 
 ipcMain.handle('get-server-port', () => SERVER_PORT)
+
+ipcMain.handle('get-drop-path', () => null)
 
 ipcMain.handle('export-workspace', async () => {
   const activeId = workspaceManager.getActiveWorkspace()?.id

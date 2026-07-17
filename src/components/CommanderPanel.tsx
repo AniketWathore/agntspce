@@ -81,7 +81,8 @@ export default function CommanderPanel({ commands, onClose }: Props) {
 
   useEffect(() => {
     if (listRef.current) {
-      const el = listRef.current.children[activeIdx] as HTMLElement
+      const items = listRef.current.querySelectorAll('.commander-item')
+      const el = items[activeIdx] as HTMLElement
       el?.scrollIntoView({ block: 'nearest' })
     }
   }, [activeIdx])

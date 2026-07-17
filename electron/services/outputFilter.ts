@@ -1,4 +1,4 @@
-import { getRegistry, filterCommandOutput, hasSpecificFilter, estimateTokens, stripAllControl } from './rtk'
+import { filterCommandOutput, hasSpecificFilter, estimateTokens, stripAllControl } from './rtk'
 import { formatCommand } from './rtk/formatter'
 import fs from 'fs'
 import path from 'path'
@@ -9,6 +9,14 @@ function debugLog(msg: string) {
   try {
     fs.appendFileSync(LOG_FILE, line)
   } catch {}
+}
+
+interface CumulativeStats {
+  totalOriginalBytes: number
+  totalFilteredBytes: number
+  totalOriginalTokens: number
+  totalFilteredTokens: number
+  eventsProcessed: number
 }
 
 export interface CommandEvent {
@@ -24,14 +32,13 @@ export interface CommandEvent {
   exitCode: number | null
   duration: number
   timestamp: number
+  filterName?: string
 }
 
 const AGNTSPCE_CMD_RE = /^agntspce\s+\$\s+(.+)$/
 const AGNTSPCE_STATS_RE = /^AGNTSPCE_STATS raw=(\d+) filtered=(\d+)$/
 const SHELL_CMD_RE = /[$#%❯➜]\s+(.+)$/
 const SHELL_ECHO_RE = /^\$\s+agntspce\s+run\s+/
-const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
-
 export class OutputFilterService {
   private commandBuffers = new Map<string, {
     command: string
@@ -48,6 +55,38 @@ export class OutputFilterService {
   private _commandHistory = new Map<string, CommandEvent[]>()
   private _pendingStats = new Map<string, { rawTokens: number; filteredTokens: number }>()
   private _recentTokenReports = new Map<string, number>() // key: "raw-filtered" → timestamp
+  private _cumulativeStats: CumulativeStats = { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 }
+  private _statsFilePath: string = ''
+
+  constructor(dataDir?: string) {
+    if (dataDir) {
+      this._statsFilePath = path.join(dataDir, 'filter-stats.json')
+      this._loadCumulativeStats()
+    }
+  }
+
+  private _loadCumulativeStats() {
+    if (!this._statsFilePath) return
+    try {
+      const data = fs.readFileSync(this._statsFilePath, 'utf-8')
+      const parsed = JSON.parse(data)
+      this._cumulativeStats = {
+        totalOriginalBytes: parsed.totalOriginalBytes || 0,
+        totalFilteredBytes: parsed.totalFilteredBytes || 0,
+        totalOriginalTokens: parsed.totalOriginalTokens || 0,
+        totalFilteredTokens: parsed.totalFilteredTokens || 0,
+        eventsProcessed: parsed.eventsProcessed || 0,
+      }
+    } catch {}
+  }
+
+  private _saveCumulativeStats() {
+    if (!this._statsFilePath) return
+    try {
+      fs.mkdirSync(path.dirname(this._statsFilePath), { recursive: true })
+      fs.writeFileSync(this._statsFilePath, JSON.stringify(this._cumulativeStats), 'utf-8')
+    } catch {}
+  }
 
   setOnCommandEvent(cb: (event: CommandEvent) => void) {
     this.onCommandEvent = cb
@@ -63,6 +102,12 @@ export class OutputFilterService {
     hist.push(event)
     if (hist.length > 200) hist.shift()
     this._commandHistory.set(event.sessionId, hist)
+    this._cumulativeStats.totalOriginalBytes += new TextEncoder().encode(event.rawOutput).length
+    this._cumulativeStats.totalFilteredBytes += new TextEncoder().encode(event.filteredOutput).length
+    this._cumulativeStats.totalOriginalTokens += event.originalTokens
+    this._cumulativeStats.totalFilteredTokens += event.filteredTokens
+    this._cumulativeStats.eventsProcessed++
+    this._saveCumulativeStats()
   }
 
   private clearTimer(sessionId: string) {
@@ -299,6 +344,7 @@ export class OutputFilterService {
     let filteredTokens: number
     let reduction: number
     let filtered: string
+    let filterName: string | undefined
     if (pending) {
       debugLog(`USING PENDING STATS session=${sessionId.slice(0,8)} raw=${pending.rawTokens} filtered=${pending.filteredTokens}`)
       originalTokens = pending.rawTokens
@@ -315,6 +361,7 @@ export class OutputFilterService {
       // via shell prompt). The filter strips matching lines and truncates.
       const rtkResult = filterCommandOutput(cmdStr, cleanedOutput)
       filtered = rtkResult.filtered
+      filterName = rtkResult.filterName || undefined
 
       // If no specific filter matched or command is 'output' (no command
       // detected, e.g. agent session output), apply general-purpose
@@ -326,12 +373,14 @@ export class OutputFilterService {
           debugLog(`COMPRESS: applied general compression cmd="${cmdBuf.command}" before=${filtered.length} after=${compressed.length}`)
           filtered = compressed
         }
+        filterName = undefined
       }
 
       // neverWorse: if filtered is larger than raw, use raw instead
       if (estimateTokens(filtered) > estimateTokens(cleanedOutput)) {
         debugLog(`NEVER WORSE: filtered larger than raw cmd="${cmdBuf.command}"`)
         filtered = cleanedOutput
+        filterName = undefined
       }
 
       originalTokens = estimateTokens(cleanedOutput)
@@ -355,6 +404,7 @@ export class OutputFilterService {
       exitCode: cmdBuf.exitCode,
       duration: Date.now() - cmdBuf.startTime,
       timestamp: Date.now(),
+      filterName,
     }
 
     debugLog(`EMIT EVENT session=${sessionId.slice(0,8)} cmd="${brandedCmd}" reduction=${reduction}% orig=${originalTokens} filt=${filteredTokens}`)
@@ -363,13 +413,6 @@ export class OutputFilterService {
     this.outputAccum.delete(sessionId)
     this.emit(event)
     return event
-  }
-
-  // Track that an agent has started in a session
-  trackAgentStart(sessionId: string, agentType: string) {
-    if (AGENT_TYPES.includes(agentType)) {
-      // Just mark the session as active - nothing more needed
-    }
   }
 
   getCommandHistory(sessionId: string): CommandEvent[] {
@@ -383,13 +426,20 @@ export class OutputFilterService {
   }
 
   getAllStats(): { stats: { totalOriginalBytes: number; totalFilteredBytes: number; totalOriginalTokens: number; totalFilteredTokens: number; eventsProcessed: number } }[] {
-    const allEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
+    const sessionEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
+    const sessionStats = {
+      totalOriginalBytes: sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0),
+      totalFilteredBytes: sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0),
+      totalOriginalTokens: sessionEvents.reduce((s, e) => s + e.originalTokens, 0),
+      totalFilteredTokens: sessionEvents.reduce((s, e) => s + e.filteredTokens, 0),
+      eventsProcessed: sessionEvents.length,
+    }
     const stats = {
-      totalOriginalBytes: 0,
-      totalFilteredBytes: 0,
-      totalOriginalTokens: allEvents.reduce((s, e) => s + e.originalTokens, 0),
-      totalFilteredTokens: allEvents.reduce((s, e) => s + e.filteredTokens, 0),
-      eventsProcessed: allEvents.length,
+      totalOriginalBytes: this._cumulativeStats.totalOriginalBytes + sessionStats.totalOriginalBytes,
+      totalFilteredBytes: this._cumulativeStats.totalFilteredBytes + sessionStats.totalFilteredBytes,
+      totalOriginalTokens: this._cumulativeStats.totalOriginalTokens + sessionStats.totalOriginalTokens,
+      totalFilteredTokens: this._cumulativeStats.totalFilteredTokens + sessionStats.totalFilteredTokens,
+      eventsProcessed: this._cumulativeStats.eventsProcessed + sessionStats.eventsProcessed,
     }
     return [{ stats }]
   }
@@ -470,5 +520,10 @@ export class OutputFilterService {
     this._pendingStats.clear()
     for (const [, t] of this.finalizeTimers) clearTimeout(t)
     this.finalizeTimers.clear()
+  }
+
+  resetCumulativeStats() {
+    this._cumulativeStats = { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 }
+    this._saveCumulativeStats()
   }
 }

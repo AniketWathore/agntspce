@@ -37,6 +37,8 @@ const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'droid', name: 'Droid', icon: '🤖' },
   { id: 'amp', name: 'Amp', icon: '⚡' },
   { id: 'pi', name: 'Pi', icon: '🥧' },
+  { id: 'kilocode', name: 'Kilocode', icon: 'k' },
+  { id: 'windsurf', name: 'Windsurf', icon: 'w' },
 ]
 
 const FALLBACK_AGENTS: AgentConfig[] = [
@@ -100,6 +102,18 @@ const FALLBACK_AGENTS: AgentConfig[] = [
     flags: [],
     defaultMode: 'fresh',
   },
+  {
+    id: 'kilocode', name: 'Kilocode', icon: 'k', description: 'Kilocode AI coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
+  {
+    id: 'windsurf', name: 'Windsurf', icon: 'w', description: 'Windsurf AI coding agent',
+    modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    flags: [],
+    defaultMode: 'fresh',
+  },
 ]
 
 interface ModalState {
@@ -124,6 +138,7 @@ function App() {
     emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
     onChatStreamChunk, onChatResponse, onChatError,
     executionHistory,
+    filterStats, commandHistory, searchEvents,
   } = useSocket()
   const tokensSaved = useMemo(() => {
     const orig = executionHistory.reduce((s: number, e: any) => s + (e.totalOriginalTokens || 0), 0)
@@ -255,10 +270,6 @@ function App() {
   }, [sessions])
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-  }, [])
-
-  useEffect(() => {
     if (appBodyRef.current) {
       const totalW = appBodyRef.current.getBoundingClientRect().width
       setLeftWidth(Math.round(totalW * 0.12))
@@ -346,6 +357,10 @@ function App() {
     }
   }, [activeWorkspace])
 
+  function editWorkspace(id: string, name: string, _path: string) {
+    updateWorkspaceConfig(id, { name }).then(() => refreshWorkspaces())
+  }
+
   function addWorkspace(name: string, path: string) {
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     createWorkspace({
@@ -359,10 +374,6 @@ function App() {
         switchWorkspace(id)
       }
     })
-  }
-
-  function editWorkspace(id: string, name: string, _path: string) {
-    updateWorkspaceConfig(id, { name }).then(() => refreshWorkspaces())
   }
 
   function removeWorkspace(id: string) {
@@ -523,13 +534,21 @@ function App() {
     setBottomShellOpen(o => !o)
   }
 
+  const menuActionRef = useRef<Record<string, (...args: any[]) => void>>({})
+  menuActionRef.current = {
+    handleNewTerminal, handleNewShell, handleCreateWorkspace, emit,
+    handleSelectWorkspace, handleToggleChatSidebar, handleToggleWorkspaceSidebar,
+    setFocusMode,
+  }
+
   useEffect(() => {
     const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
+      const ref = menuActionRef.current
       switch (action) {
-        case 'new-agent': handleNewTerminal('claude'); break
-        case 'new-shell': handleNewShell(); break
-        case 'new-workspace': handleCreateWorkspace(); break
-        case 'save-workspace': emit('save-workspace'); break
+        case 'new-agent': ref.handleNewTerminal('claude'); break
+        case 'new-shell': ref.handleNewShell(); break
+        case 'new-workspace': ref.handleCreateWorkspace(); break
+        case 'save-workspace': ref.emit('save-workspace'); break
         case 'save-workspace-as': {
           window.electronAPI?.exportWorkspace().then(path => {
             if (path) alert(`Workspace exported to ${path}`)
@@ -539,7 +558,7 @@ function App() {
         case 'load-workspace': {
           window.electronAPI?.importWorkspace().then(result => {
             if (result?.workspace) {
-              handleSelectWorkspace(result.workspace.id)
+              ref.handleSelectWorkspace(result.workspace.id)
             }
           })
           break
@@ -548,15 +567,15 @@ function App() {
           const name = prompt('New workspace name:')
           if (name?.trim()) {
             window.electronAPI?.duplicateWorkspace(name.trim()).then(dup => {
-              if (dup) handleSelectWorkspace(dup.id)
+              if (dup) ref.handleSelectWorkspace(dup.id)
             })
           }
           break
         }
-        case 'switch-workspace': handleSelectWorkspace(data); break
-        case 'toggle-shell-sidebar': handleToggleChatSidebar(); break
-        case 'toggle-workspace-sidebar': handleToggleWorkspaceSidebar(); break
-        case 'toggle-focus': setFocusMode(o => !o); break
+        case 'switch-workspace': ref.handleSelectWorkspace(data); break
+        case 'toggle-shell-sidebar': ref.handleToggleChatSidebar(); break
+        case 'toggle-workspace-sidebar': ref.handleToggleWorkspaceSidebar(); break
+        case 'toggle-focus': ref.setFocusMode((o: boolean) => !o); break
         case 'show-shortcuts': alert(
           '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
           '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
@@ -1123,6 +1142,9 @@ function App() {
                   onPermanentDelete={handlePermanentDelete}
                   onNewWorkspace={handleCreateWorkspace}
                   onClose={() => setActiveView(null)}
+                  filterStats={filterStats}
+                  searchEvents={searchEvents}
+                  commandHistory={commandHistory}
                 />
               )},
               { id: 'profile', label: 'Profile', icon: '◎', render: () => (

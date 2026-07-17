@@ -2,7 +2,7 @@ import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { execSync, spawn } from 'child_process'
+import { spawn } from 'child_process'
 import type { Workspace, SavedSessionData, WorkspaceExport } from './types'
 
 const CONFIG_DIR = path.join(os.homedir(), '.agent-workspace')

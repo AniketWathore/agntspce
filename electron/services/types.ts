@@ -80,18 +80,6 @@ export interface Worktree {
   repositoryPath?: string
 }
 
-export interface GitBranchInfo {
-  branch: string
-  status?: {
-    clean: boolean
-    modified: number
-    added: number
-    deleted: number
-    untracked: number
-    total: number
-  }
-}
-
 export interface SavedSessionData {
   id: string
   type: string
@@ -113,25 +101,4 @@ export interface WorkspaceExport {
   sessions: SavedSessionData[]
 }
 
-export interface TerminalConfig {
-  sessionId: string
-  type: string
-  worktreeId: string
-  cwd: string
-  repositoryName?: string
-  repositoryType?: string
-}
 
-export interface UserSettings {
-  autoScroll?: boolean
-  hideBranchPrefixes?: boolean
-  colorizeBranches?: boolean
-  skipPermissions?: boolean
-  autoStart?: boolean
-  autoStartMode?: string
-  autoStartDelay?: number
-  sessionRecovery?: boolean
-  recoveryMode?: string
-  theme?: string
-  skin?: string
-}

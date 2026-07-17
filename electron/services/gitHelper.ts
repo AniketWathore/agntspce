@@ -272,7 +272,7 @@ export class GitHelper {
         const content = await fs.promises.readFile(fullPath, 'utf-8')
         const lines = content.split('\n')
         const header = `--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${lines.length} @@\n`
-        const body = lines.map((l, i) => `+${l}`).join('\n')
+        const body = lines.map((l) => `+${l}`).join('\n')
         return header + body + '\n'
       }
       const args = base ? ['diff', base] : ['diff']
@@ -469,27 +469,6 @@ export class GitHelper {
       await this.execGit(['clean', '-fd'], { cwd: state.normalized, timeout: 30000 }).catch(() => {})
       return true
     } catch { return false }
-  }
-
-  async getDiffWithWordHighlight(worktreePath: string, filePath: string, base?: string, head?: string): Promise<string | null> {
-    const state = this.getPathState(worktreePath)
-    if (!state.ok) return null
-    try {
-      if (base === 'EMPTY') {
-        const fullPath = path.resolve(state.normalized, filePath)
-        if (!fs.existsSync(fullPath)) return null
-        const content = await fs.promises.readFile(fullPath, 'utf-8')
-        const lines = content.split('\n')
-        const header = `--- /dev/null\n+++ b/${filePath}\n@@ -0,0 +1,${lines.length} @@\n`
-        const body = lines.map((l, i) => `+${l}`).join('\n')
-        return header + body + '\n'
-      }
-      const args = base ? ['diff', '--word-diff=color', base] : ['diff', '--word-diff=color']
-      if (head) args.push(head)
-      args.push('--', filePath)
-      const { stdout } = await this.execGit(args, { cwd: state.normalized, timeout: 15000 })
-      return stdout
-    } catch { return null }
   }
 
   clearCacheForPath(p: string): void {

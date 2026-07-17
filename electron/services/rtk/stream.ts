@@ -1,5 +1,4 @@
-import { spawn, ChildProcess, execSync } from 'child_process'
-import { EventEmitter } from 'events'
+import { spawn, execSync } from 'child_process'
 import { RAW_CAP } from './constants'
 
 export interface StreamFilter {
@@ -121,14 +120,14 @@ export function execCapture(cmd: string, args: string[], cwd?: string): Promise<
     })
     let stdout = ''
     let stderr = ''
-    let capped = false
+    let _capped = false
 
     child.stdout!.on('data', (data: Buffer) => {
       if (stdout.length < RAW_CAP) {
         stdout += data.toString('utf-8')
         if (stdout.length > RAW_CAP) {
           stdout = stdout.slice(0, RAW_CAP)
-          capped = true
+          _capped = true
         }
       }
     })
@@ -277,7 +276,7 @@ export function runCommandSync(cmd: string, args: string[], cwd?: string): Captu
       maxBuffer: RAW_CAP,
       windowsHide: true,
     })
-    return { stdout: result.stdout || '', stderr: result.stderr || '', exitCode: 0 }
+    return { stdout: String(result), stderr: '', exitCode: 0 }
   } catch (e: any) {
     return {
       stdout: e.stdout || '',

@@ -1,4 +1,3 @@
-import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import * as fs from 'node:fs'

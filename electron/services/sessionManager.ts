@@ -3,11 +3,14 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+
+const _require = createRequire(import.meta.url)
 import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
-import { OutputFilterService, type CommandEvent } from './outputFilter'
+import { OutputFilterService } from './outputFilter'
 import { WorkspaceManager } from './workspaceManager'
 import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
@@ -15,7 +18,7 @@ import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
 import * as rtkManager from './rtkManager'
 import { getActiveSearchPath, generateSessionToken } from './searchManager'
-import { resolveAgent, getLoginPath, getAllAgentBinaryDirs, resetCache as resetAgentCache } from './agentResolver'
+import { resolveAgent, getLoginPath, getAllAgentBinaryDirs } from './agentResolver'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -35,7 +38,7 @@ for (const dir of [
 
 // Ensure spawn-helper has execute permission (npm install can produce 644)
 try {
-  const ptyPkgPath = path.resolve(require.resolve('node-pty/package.json'), '..')
+  const ptyPkgPath = path.resolve(_require.resolve('node-pty/package.json'), '..')
   const helperPath = path.join(ptyPkgPath, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')
   if (fs.existsSync(helperPath)) {
     const stat = fs.statSync(helperPath)
@@ -48,7 +51,7 @@ try {
 
 let pty: any = null
 try {
-  pty = require('node-pty')
+  pty = _require('node-pty')
   // Quick smoke-test to confirm node-pty actually works in this environment.
   // The native module can load but still fail at spawn time due to macOS
   // sandbox/permissions or Electron version ABI mismatches with the prebuild.
@@ -148,12 +151,13 @@ export class SessionManager extends EventEmitter {
   orchestrator: AgentOrchestrator | null = null
   sessionHistory: { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] = []
   tokenUsageTracker = new TokenUsageTracker()
-  outputFilter = new OutputFilterService()
+  outputFilter: OutputFilterService
   cavemanService = new CavemanService()
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
     this.io = io
+    this.outputFilter = new OutputFilterService(dataDir)
     if (agentManager) this.agentManager = agentManager
     if (dataDir) this.cavemanService.setDataDir(dataDir)
     this.outputFilter.setOnCommandEvent((event) => {
@@ -701,7 +705,7 @@ export class SessionManager extends EventEmitter {
         repositoryType: '',
       })
       const session = this.sessions.get(sessionId)
-      if (session && (type === 'claude' || type === 'codex' || type === 'opencode' || type === 'gemini' || type === 'cursor-agent' || type === 'copilot' || type === 'mastracode' || type === 'droid' || type === 'amp' || type === 'pi')) {
+      if (session && (type === 'claude' || type === 'codex' || type === 'opencode' || type === 'gemini' || type === 'cursor-agent' || type === 'copilot' || type === 'mastracode' || type === 'droid' || type === 'amp' || type === 'pi' || type === 'kilocode' || type === 'windsurf')) {
         session.status = 'waiting'
         this.io?.emit('status-change', { sessionId, status: 'waiting' })
       }

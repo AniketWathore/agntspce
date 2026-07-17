@@ -538,11 +538,4 @@ export const BUILTIN_FILTERS: Record<string, FilterDefinition> = {
   },
 }
 
-export const RUST_HANDLED_COMMANDS = new Set([
-  'ls', 'tree', 'read', 'smart', 'git', 'gh', 'aws', 'psql', 'pnpm',
-  'err', 'test', 'json', 'deps', 'env', 'find', 'diff', 'log',
-  'docker', 'kubectl', 'summary', 'grep', 'wget', 'wc', 'gain',
-  'config', 'vitest', 'prisma', 'tsc', 'next', 'lint', 'prettier',
-  'format', 'playwright', 'cargo', 'npm', 'npx', 'curl', 'ruff',
-  'pytest', 'mypy', 'pip', 'go', 'golangci-lint', 'make',
-])
+

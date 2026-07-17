@@ -38,28 +38,9 @@ function getBundledRtkPath(): string | null {
   return null
 }
 
-function getBundledWrapperPath(): string | null {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url))
-  const candidates = [
-    path.join(process.resourcesPath || '', 'rtk', 'agntspce'),
-    path.join(__dirname, 'rtk', 'agntspce'),
-    path.resolve(__dirname, '..', '..', 'bin', 'agntspce'),
-    path.join(os.homedir(), '.local', 'bin', 'agntspce'),
-    path.join(os.homedir(), '.local', 'share', 'agntspce', 'rtk', 'agntspce'),
-  ]
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c
-  }
-  return null
-}
-
 function getInstalledRtkPath(): string {
   const binName = process.platform === 'win32' ? 'rtk.exe' : 'rtk'
   return path.join(app.getPath('userData'), 'rtk', binName)
-}
-
-function getRtkInstallDir(): string {
-  return path.join(app.getPath('userData'), 'rtk')
 }
 
 // ── Version Management ───────────────────────────────────────────

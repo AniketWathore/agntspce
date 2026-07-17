@@ -9,7 +9,7 @@ export * from './tomlFilter'
 export * from './codeFilter'
 export * from './filters'
 
-import { FilterRegistry, compileFilter } from './tomlFilter'
+import { FilterRegistry } from './tomlFilter'
 import { BUILTIN_FILTERS } from './filters'
 import { Tracker } from './tracking'
 

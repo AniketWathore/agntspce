@@ -238,141 +238,6 @@ export class AgentManager {
       id: 'cursor-agent',
       name: 'Cursor Agent',
       icon: '🖥️',
-      description: 'Cursor AI coding agent',
-      baseCommand: 'cursor-agent',
-      modes: {
-        fresh: { command: 'cursor-agent', description: 'Start new session' },
-        continue: { command: 'cursor-agent --continue', description: 'Continue last session' },
-      },
-      models: ['claude-sonnet-4', 'claude-3.5-sonnet', 'gpt-4', 'gpt-5'],
-      defaultModel: 'claude-sonnet-4',
-      flags: {},
-      defaultMode: 'fresh',
-      defaultFlags: [],
-      availableFlags: [],
-      flagCategories: {},
-      capabilities: {
-        supportsWorktree: true,
-        requiresGitRepo: true,
-        supportsParallel: true,
-      },
-    })
-
-    this.agentConfigs.set('copilot', {
-      id: 'copilot',
-      name: 'Copilot',
-      icon: '🐙',
-      description: 'GitHub Copilot CLI',
-      baseCommand: 'gh copilot',
-      modes: {
-        fresh: { command: 'gh copilot', description: 'Start new session' },
-        explain: { command: 'gh copilot explain', description: 'Explain code' },
-        suggest: { command: 'gh copilot suggest', description: 'Suggest code' },
-      },
-      flags: {},
-      defaultMode: 'fresh',
-      defaultFlags: [],
-      availableFlags: [],
-      flagCategories: {},
-      capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
-      },
-    })
-
-    this.agentConfigs.set('mastracode', {
-      id: 'mastracode',
-      name: 'Mastra Code',
-      icon: '🔷',
-      description: 'Mastra Code AI agent',
-      baseCommand: 'mastra',
-      modes: {
-        fresh: { command: 'mastra', description: 'Start new session' },
-        continue: { command: 'mastra --continue', description: 'Continue last session' },
-      },
-      flags: {},
-      defaultMode: 'fresh',
-      defaultFlags: [],
-      availableFlags: [],
-      flagCategories: {},
-      capabilities: {
-        supportsWorktree: true,
-        requiresGitRepo: true,
-        supportsParallel: true,
-      },
-    })
-
-    this.agentConfigs.set('droid', {
-      id: 'droid',
-      name: 'Droid',
-      icon: '🤖',
-      description: 'Factory AI Droid coding agent',
-      baseCommand: 'droid',
-      modes: {
-        fresh: { command: 'droid', description: 'Start new session' },
-        continue: { command: 'droid --continue', description: 'Continue last session' },
-      },
-      flags: {},
-      defaultMode: 'fresh',
-      defaultFlags: [],
-      availableFlags: [],
-      flagCategories: {},
-      capabilities: {
-        supportsWorktree: true,
-        requiresGitRepo: true,
-        supportsParallel: true,
-      },
-    })
-
-    this.agentConfigs.set('amp', {
-      id: 'amp',
-      name: 'Amp',
-      icon: '⚡',
-      description: 'Amplified Amp coding agent',
-      baseCommand: 'amp',
-      modes: {
-        fresh: { command: 'amp', description: 'Start new session' },
-        agent: { command: 'amp agent', description: 'Run in agent mode' },
-      },
-      flags: {},
-      defaultMode: 'fresh',
-      defaultFlags: [],
-      availableFlags: [],
-      flagCategories: {},
-      capabilities: {
-        supportsWorktree: true,
-        requiresGitRepo: true,
-        supportsParallel: true,
-      },
-    })
-
-    this.agentConfigs.set('pi', {
-      id: 'pi',
-      name: 'Pi',
-      icon: '🥧',
-      description: 'Pi coding agent',
-      baseCommand: 'pi',
-      modes: {
-        fresh: { command: 'pi', description: 'Start new session' },
-        continue: { command: 'pi --continue', description: 'Continue last session' },
-      },
-      flags: {},
-      defaultMode: 'fresh',
-      defaultFlags: [],
-      availableFlags: [],
-      flagCategories: {},
-      capabilities: {
-        supportsWorktree: true,
-        requiresGitRepo: true,
-        supportsParallel: true,
-      },
-    })
-
-    this.agentConfigs.set('cursor-agent', {
-      id: 'cursor-agent',
-      name: 'Cursor Agent',
-      icon: '🖥️',
       description: 'Cursor AI Agent (VS Code fork)',
       baseCommand: 'cursor',
       modes: {
@@ -404,6 +269,11 @@ export class AgentManager {
         permissions: { name: 'Permissions', mutuallyExclusive: false },
         output: { name: 'Output Options', mutuallyExclusive: false },
       },
+      capabilities: {
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
+      },
     })
 
     this.agentConfigs.set('copilot', {
@@ -422,6 +292,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
 
     this.agentConfigs.set('mastracode', {
@@ -449,6 +324,11 @@ export class AgentManager {
       availableFlags: ['verbose'],
       flagCategories: {
         output: { name: 'Output Options', mutuallyExclusive: false },
+      },
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
       },
     })
 
@@ -478,6 +358,11 @@ export class AgentManager {
       flagCategories: {
         permissions: { name: 'Permissions', mutuallyExclusive: false },
       },
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
 
     this.agentConfigs.set('amp', {
@@ -495,6 +380,11 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
 
     this.agentConfigs.set('pi', {
@@ -513,6 +403,53 @@ export class AgentManager {
       defaultFlags: [],
       availableFlags: [],
       flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
+    })
+
+    this.agentConfigs.set('kilocode', {
+      id: 'kilocode',
+      name: 'Kilocode',
+      icon: 'k',
+      description: 'Kilocode AI coding agent',
+      baseCommand: 'kilocode',
+      modes: {
+        fresh: { command: 'kilocode', description: 'Start new session' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
+    })
+
+    this.agentConfigs.set('windsurf', {
+      id: 'windsurf',
+      name: 'Windsurf',
+      icon: 'w',
+      description: 'Windsurf AI coding agent',
+      baseCommand: 'windsurf',
+      modes: {
+        fresh: { command: 'windsurf', description: 'Start new session' },
+      },
+      flags: {},
+      defaultMode: 'fresh',
+      defaultFlags: [],
+      availableFlags: [],
+      flagCategories: {},
+      capabilities: {
+        supportsWorktree: false,
+        requiresGitRepo: false,
+        supportsParallel: false,
+      },
     })
   }
 
@@ -643,7 +580,7 @@ export class AgentManager {
           return flag && flag.category === categoryId
         })
         if (categoryFlags.length > 1) {
-          const lastFlag = categoryFlags[categoryFlags.length - 1]
+          const _lastFlag = categoryFlags[categoryFlags.length - 1]
           categoryFlags.slice(0, -1).forEach(flagId => {
             const index = adjusted.indexOf(flagId)
             if (index > -1) adjusted.splice(index, 1)

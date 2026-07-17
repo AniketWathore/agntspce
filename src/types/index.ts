@@ -26,7 +26,7 @@ export interface WorkspaceInfo {
 
 export interface SessionState {
   id: string
-  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor-agent' | 'copilot' | 'mastracode' | 'droid' | 'amp' | 'pi' | 'server' | 'shell'
+  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor-agent' | 'copilot' | 'mastracode' | 'droid' | 'amp' | 'pi' | 'kilocode' | 'windsurf' | 'server' | 'shell'
   worktreeId: string
   repositoryName?: string
   repositoryType?: string
@@ -154,15 +154,6 @@ export interface ExecutionEvent {
   totalDuration: number
   success: boolean
   commandCount: number
-}
-
-export interface RtkStats {
-  totalOriginalBytes: number
-  totalFilteredBytes: number
-  totalOriginalTokens: number
-  totalFilteredTokens: number
-  eventsProcessed: number
-  commandsProcessed: number
 }
 
 export interface FileTreeNode {

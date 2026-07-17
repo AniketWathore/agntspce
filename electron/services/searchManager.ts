@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import crypto from 'node:crypto'
-import { spawnSync } from 'child_process'
+
 import { fileURLToPath } from 'node:url'
 
 const HMAC_SECRET = 'agntspce-search-integration-v1-do-not-rely-on-this-for-security'
@@ -31,7 +31,7 @@ function writeWithBackup(filePath: string, content: string): boolean {
   }
 }
 
-const AGNENT_CHECKS = [
+const AGENT_CHECKS = [
   {
     id: 'claude',
     configDir: () => path.join(os.homedir(), '.claude'),
@@ -44,7 +44,7 @@ const AGNENT_CHECKS = [
   },
 ]
 
-type AgentCheck = (typeof AGNENT_CHECKS)[number]
+type AgentCheck = (typeof AGENT_CHECKS)[number]
 
 function getBundledSearchDir(): string | null {
   const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -132,7 +132,7 @@ function fixSearchBinary(binPath: string, searchDir: string): void {
       fs.writeFileSync(pyPath, content, 'utf-8')
       fs.chmodSync(pyPath, 0o755)
     } else {
-      const name = path.basename(binPath)
+      const _name = path.basename(binPath)
       const lines = content.split('\n')
       lines[0] = `#!${pythonBin}`
       fs.writeFileSync(pyPath, lines.join('\n'), 'utf-8')
@@ -239,7 +239,7 @@ function installSearch(): string | null {
 }
 
 function detectInstalledAgents(): AgentCheck[] {
-  return AGNENT_CHECKS.filter((a) => a.check())
+  return AGENT_CHECKS.filter((a) => a.check())
 }
 
 function generateSessionToken(pid?: number): string {
@@ -284,38 +284,6 @@ function injectClaudeCodeConfig(projectPath: string): InjectResult {
     return { agent: 'claude', action: 'created' }
   }
   return { agent: 'claude', action: 'error' }
-}
-
-function removeClaudeCodeConfig(projectPath: string): InjectResult {
-  const mcpPath = path.resolve(projectPath, '.mcp.json')
-  if (!fs.existsSync(mcpPath)) return { agent: 'claude', action: 'unchanged' }
-
-  try {
-    const content = fs.readFileSync(mcpPath, 'utf-8')
-    let parsed: any
-    try {
-      parsed = JSON.parse(content)
-    } catch {
-      return { agent: 'claude', action: 'error' }
-    }
-
-    if (parsed?.mcpServers?.['agntspce-search']) {
-      delete parsed.mcpServers['agntspce-search']
-      if (Object.keys(parsed.mcpServers).length === 0) {
-        if (fs.existsSync(mcpPath)) {
-          try { fs.rmSync(mcpPath) } catch { return { agent: 'claude', action: 'error' } }
-        }
-      } else if (!writeWithBackup(mcpPath, JSON.stringify(parsed, null, 2) + '\n')) {
-        return { agent: 'claude', action: 'error' }
-      }
-      return { agent: 'claude', action: 'updated' }
-    }
-
-    return { agent: 'claude', action: 'unchanged' }
-  } catch (e) {
-    console.error('[agntspce] Failed to remove Claude Code .mcp.json:', e)
-    return { agent: 'claude', action: 'error' }
-  }
 }
 
 function injectOpenCodeConfig(): InjectResult {
@@ -535,7 +503,6 @@ export {
   getActiveSearchDir,
   generateSessionToken,
   injectClaudeCodeConfig,
-  removeClaudeCodeConfig,
   injectOpenCodeConfig,
   removeOpenCodeConfig,
   detectInstalledAgents,

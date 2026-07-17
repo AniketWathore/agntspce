@@ -664,17 +664,32 @@ export function useSocket(): UseSocketReturn {
   }, [])
 
   // Chat functions
+  const chatReqId = useRef(0)
   const chatGetModels = useCallback((): Promise<any[]> => {
     return new Promise((resolve) => {
-      socketRef.current?.emit('chat-get-models')
-      socketRef.current?.once('chat-models', (models: any[]) => resolve(models))
+      const id = ++chatReqId.current
+      const handler = (data: any) => {
+        if (data._reqId === id) {
+          socketRef.current?.off('chat-models', handler)
+          resolve(data.models)
+        }
+      }
+      socketRef.current?.emit('chat-get-models', { _reqId: id })
+      socketRef.current?.on('chat-models', handler)
     })
   }, [])
 
   const chatSend = useCallback((threadId: string, providerId: string, content: string): Promise<any> => {
     return new Promise((resolve) => {
-      socketRef.current?.emit('chat-send', { threadId, providerId, content })
-      socketRef.current?.once('chat-response', (data: any) => resolve(data))
+      const id = ++chatReqId.current
+      const handler = (data: any) => {
+        if (data._reqId === id) {
+          socketRef.current?.off('chat-response', handler)
+          resolve(data)
+        }
+      }
+      socketRef.current?.emit('chat-send', { _reqId: id, threadId, providerId, content })
+      socketRef.current?.on('chat-response', handler)
     })
   }, [])
 
@@ -688,8 +703,15 @@ export function useSocket(): UseSocketReturn {
 
   const chatGetHistory = useCallback((threadId: string): Promise<any> => {
     return new Promise((resolve) => {
-      socketRef.current?.emit('chat-get-history', { threadId })
-      socketRef.current?.once('chat-history', (data: any) => resolve(data))
+      const id = ++chatReqId.current
+      const handler = (data: any) => {
+        if (data._reqId === id) {
+          socketRef.current?.off('chat-history', handler)
+          resolve(data)
+        }
+      }
+      socketRef.current?.emit('chat-get-history', { _reqId: id, threadId })
+      socketRef.current?.on('chat-history', handler)
     })
   }, [])
 
