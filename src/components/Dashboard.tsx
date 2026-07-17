@@ -48,15 +48,16 @@ function EfficiencyBar({ pct, color = '#22C55E' }: { pct: number; color?: string
 
 export default function Dashboard(props: Props) {
   const { workspaces, sessions, activeWorkspace, deletedWorkspaces, onSelect, onDelete, onRestore, onPermanentDelete, onNewWorkspace, onClose } = props
+  const filterStats = props.filterStats || { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 }
   const searchEvents = props.searchEvents || []
   const commandHistory = props.commandHistory || []
   const totalSessions = Object.keys(sessions).length
   const activeCount = getActiveCount(sessions)
   const [showDeleted, setShowDeleted] = useState(false)
 
-  const totalOriginal = commandHistory.reduce((s, e) => s + (e.command.startsWith('agntspce-search') ? 0 : e.originalTokens), 0)
-  const totalFiltered = commandHistory.reduce((s, e) => s + (e.command.startsWith('agntspce-search') ? 0 : e.filteredTokens), 0)
-  const totalCalls = commandHistory.filter(e => !e.command.startsWith('agntspce-search')).length
+  const totalOriginal = filterStats.totalOriginalTokens
+  const totalFiltered = filterStats.totalFilteredTokens
+  const totalCalls = filterStats.eventsProcessed
   const tokensSaved = totalOriginal - totalFiltered
   const pctReduction = totalOriginal > 0
     ? Math.round((tokensSaved / totalOriginal) * 100)

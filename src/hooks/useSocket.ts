@@ -132,7 +132,7 @@ export function useSocket(): UseSocketReturn {
       setCommandHistory([])
       setSearchEvents([])
       setExecutionHistory([])
-      socket.emit('get-filter-stats', {})
+      socket.emit('get-cumulative-stats', {})
     })
     socket.on('disconnect', () => setConnected(false))
 
@@ -234,28 +234,16 @@ export function useSocket(): UseSocketReturn {
     setCommandHistory(prev => [event, ...prev].slice(0, 200))
     if (isSearch) {
       setSearchEvents(prev => [event, ...prev].slice(0, 100))
-    } else {
-      setFilterStats(prev => ({
-        totalOriginalBytes: prev.totalOriginalBytes + (event as any).originalBytes || 0,
-        totalFilteredBytes: prev.totalFilteredBytes + (event as any).filteredBytes || 0,
-        totalOriginalTokens: prev.totalOriginalTokens + event.originalTokens,
-        totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
-        eventsProcessed: prev.eventsProcessed + 1,
-      }))
     }
+    socket.emit('get-cumulative-stats', {})
   })
 
   socket.on('execution-event', (event: ExecutionEvent) => {
     setExecutionHistory(prev => [event, ...prev].slice(0, 100))
   })
 
-  socket.on('filter-stats', (data: { stats: FilterStats, history: FilterEvent[], commandHistory: CommandEvent[] }) => {
+  socket.on('cumulative-stats', (data: { stats: FilterStats }) => {
     setFilterStats(data.stats)
-    if (data.history) setFilterHistory(data.history)
-    if (data.commandHistory) {
-      setCommandHistory(data.commandHistory)
-      setSearchEvents(data.commandHistory.filter(e => e.command.startsWith('agntspce-search')))
-    }
   })
 
   return () => {

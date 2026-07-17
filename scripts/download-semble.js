@@ -206,8 +206,12 @@ exec "$SCRIPT_DIR/python3" "${pyPath}" "$@"
 
     console.log(`[agntspce] Search v${VERSION} installed → ${SEARCH_DIR}`)
   } catch (err) {
-    console.warn(`[agntspce] Search download failed: ${err.message}`)
-    console.warn(`[agntspce] Run "bash scripts/build-semble.sh" to build from source`)
+      if (err.message.includes('HTTP 404')) {
+        console.log('[agntspce] No prebuilt search binary for this platform — skipping download')
+      } else {
+        console.warn(`[agntspce] Search download failed: ${err.message}`)
+      }
+    console.log('[agntspce] Run "bash scripts/build-semble.sh" to build search from source')
   } finally {
     await import('node:fs/promises').then(fs =>
       fs.rm(scratch, { recursive: true, force: true }).catch(() => {})

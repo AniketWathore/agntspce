@@ -97,17 +97,11 @@ export class OutputFilterService {
   }
 
   private emit(event: CommandEvent) {
-    this.onCommandEvent?.(event)
     const hist = this._commandHistory.get(event.sessionId) || []
     hist.push(event)
     if (hist.length > 200) hist.shift()
     this._commandHistory.set(event.sessionId, hist)
-    this._cumulativeStats.totalOriginalBytes += new TextEncoder().encode(event.rawOutput).length
-    this._cumulativeStats.totalFilteredBytes += new TextEncoder().encode(event.filteredOutput).length
-    this._cumulativeStats.totalOriginalTokens += event.originalTokens
-    this._cumulativeStats.totalFilteredTokens += event.filteredTokens
-    this._cumulativeStats.eventsProcessed++
-    this._saveCumulativeStats()
+    this.onCommandEvent?.(event)
   }
 
   private clearTimer(sessionId: string) {
@@ -444,6 +438,10 @@ export class OutputFilterService {
     return [{ stats }]
   }
 
+  getCumulativeStats(): CumulativeStats {
+    return { ...this._cumulativeStats }
+  }
+
   getAllHistory(): any[] {
     const allEvents = this.getAllCommandHistory()
     return allEvents.map(e => ({
@@ -502,6 +500,15 @@ export class OutputFilterService {
   }
 
   cleanup(sessionId: string) {
+    const events = (this._commandHistory.get(sessionId) || []).filter(e => !e.command.startsWith('agntspce-search'))
+    if (events.length > 0) {
+      this._cumulativeStats.totalOriginalBytes += events.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0)
+      this._cumulativeStats.totalFilteredBytes += events.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0)
+      this._cumulativeStats.totalOriginalTokens += events.reduce((s, e) => s + e.originalTokens, 0)
+      this._cumulativeStats.totalFilteredTokens += events.reduce((s, e) => s + e.filteredTokens, 0)
+      this._cumulativeStats.eventsProcessed += events.length
+      this._saveCumulativeStats()
+    }
     this.commandBuffers.delete(sessionId)
     this.outputAccum.delete(sessionId)
     this.lineBuffer.delete(sessionId)
@@ -524,6 +531,16 @@ export class OutputFilterService {
 
   resetCumulativeStats() {
     this._cumulativeStats = { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 }
+    this._saveCumulativeStats()
+  }
+
+  persistCumulativeStats() {
+    const sessionEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
+    this._cumulativeStats.totalOriginalBytes += sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0)
+    this._cumulativeStats.totalFilteredBytes += sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0)
+    this._cumulativeStats.totalOriginalTokens += sessionEvents.reduce((s, e) => s + e.originalTokens, 0)
+    this._cumulativeStats.totalFilteredTokens += sessionEvents.reduce((s, e) => s + e.filteredTokens, 0)
+    this._cumulativeStats.eventsProcessed += sessionEvents.length
     this._saveCumulativeStats()
   }
 }

@@ -444,8 +444,7 @@ app_.post('/api/report-token-savings', (req, res) => {
       res.status(400).json({ error: 'originalTokens and filteredTokens are required' })
       return
     }
-    const event = sessionManager.outputFilter.reportTokenSavings(originalTokens, filteredTokens, toolName || 'tool')
-    if (event) io.emit('command-filter-event', event)
+    sessionManager.outputFilter.reportTokenSavings(originalTokens, filteredTokens, toolName || 'tool')
     res.json({ ok: true })
   } catch (e) {
     console.error('/api/report-token-savings error:', e)
@@ -482,6 +481,15 @@ io.on('connection', (socket) => {
     sessionManager.restartSession(sessionId)
   })
 
+  socket.on('get-cumulative-stats', () => {
+    try {
+      const result = sessionManager.outputFilter.getAllStats()
+      socket.emit('cumulative-stats', { stats: result[0]?.stats || { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 } })
+    } catch (e) {
+      console.error('get-cumulative-stats error:', e)
+    }
+  })
+
   socket.on('get-filter-stats', () => {
     try {
       const allSessions = sessionManager.outputFilter.getAllStats()
@@ -503,8 +511,7 @@ io.on('connection', (socket) => {
 
   socket.on('report-token-savings', (data: { originalTokens: number; filteredTokens: number; toolName?: string }) => {
     try {
-      const event = sessionManager.outputFilter.reportTokenSavings(data.originalTokens, data.filteredTokens, data.toolName)
-      if (event) io.emit('command-filter-event', event)
+      sessionManager.outputFilter.reportTokenSavings(data.originalTokens, data.filteredTokens, data.toolName)
     } catch (e) {
       console.error('report-token-savings error:', e)
     }
@@ -1358,6 +1365,7 @@ app.on('will-quit', () => {
     const sessions = sessionManager.getSessionSaveData()
     workspaceManager.saveSessionStateSync(ws.id, sessions)
     sessionManager.saveAllSessionBuffersSync()
+    sessionManager.outputFilter.persistCumulativeStats()
   }
 })
 
