@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# agntspce - Token-aware command wrapper
+# Rewrites commands via the Rust rtk binary or the built-in Node.js filter.
+# Bare invocations (e.g. "agntspce git status") are treated as "run" calls.
+#
+# Uses AGNTSPCE_NODE_PATH (set by the Electron host process) to find the
+# Node.js runtime — does NOT rely on a globally-installed node.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Use Electron-bundled Node.js when available, fall back to system node
+NODE="${AGNTSPCE_NODE_PATH:-node}"
+
+case "${1:-}" in
+  rewrite)
+    shift
+    exec "$NODE" "$SCRIPT_DIR/agntspce.mjs" rewrite "$@"
+    ;;
+  run)
+    shift
+    exec "$NODE" "$SCRIPT_DIR/agntspce.mjs" run "$@"
+    ;;
+  *)
+    # Bare commands like "agntspce git status" — treat as "run git status".
+    exec "$NODE" "$SCRIPT_DIR/agntspce.mjs" run "$@"
+    ;;
+esac
