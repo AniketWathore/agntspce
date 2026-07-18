@@ -82,7 +82,7 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
-      fontSize: 13,
+      fontSize: 16,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       theme: buildTheme(),
       allowTransparency: false,

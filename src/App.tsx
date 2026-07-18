@@ -7,7 +7,6 @@ import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
 import CreateWorkspaceModal from './components/CreateWorkspaceModal'
 import Dashboard from './components/Dashboard'
-import Profile from './components/Profile'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
@@ -156,7 +155,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [focusMode, setFocusMode] = useState(false)
   const [deletedWorkspaces, setDeletedWorkspaces] = useState<{ id: string; name: string; deletedAt: string }[]>([])
-  const [activeView, setActiveView] = useState<'dashboard' | 'profile' | 'settings' | 'git-review' | 'rtk' | null>(null)
+  const [activeView, setActiveView] = useState<'dashboard' | 'settings' | 'git-review' | 'rtk' | null>(null)
   const [leftDrag, setLeftDrag] = useState(false)
   const [rightDrag, setRightDrag] = useState(false)
   const [terminalDrag, setTerminalDrag] = useState(false)
@@ -181,7 +180,7 @@ function App() {
   const [, setSessionHistory] = useState<any[]>([])
 
   const [fontSize, setFontSize] = useState(() => {
-    try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '13') } catch { return 13 }
+    try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '16') } catch { return 16 }
   })
   const [fontFamily, setFontFamily] = useState(() => {
     try { return localStorage.getItem('agent-workspace-font-family') || "'JetBrains Mono', 'Fira Code', Menlo, monospace'" } catch { return "'JetBrains Mono', 'Fira Code', Menlo, monospace'" }
@@ -253,12 +252,10 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('agent-workspace-font-size', String(fontSize))
-    document.documentElement.style.setProperty('--terminal-font-size', `${fontSize}px`)
   }, [fontSize])
 
   useEffect(() => {
     localStorage.setItem('agent-workspace-font-family', fontFamily)
-    document.documentElement.style.setProperty('--terminal-font-family', fontFamily)
   }, [fontFamily])
 
   useEffect(() => {
@@ -582,7 +579,7 @@ function App() {
           '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
           '⌘B — Chat Sidebar\n⌘⇧B — Workspace Sidebar'
         ); break
-        case 'show-about': alert('AgntSpce v1.0\nElectron + React + TypeScript'); break
+        case 'show-about': alert('AgntSpce — Currently in Beta'); break
       }
     })
     return () => unsub?.()
@@ -741,7 +738,7 @@ function App() {
     document.body.style.userSelect = 'none'
   }, [terminalHeight])
 
-  function setView(view: 'dashboard' | 'profile' | 'settings' | null) {
+  function setView(view: 'dashboard' | 'settings' | null) {
     setActiveView(activeView === view ? null : view)
   }
 
@@ -981,13 +978,6 @@ function App() {
                 <i className="codicon codicon-dashboard" style={{ fontSize: 24 }}></i>
               </button>
               <button
-                className={`activity-bar-btn ${activeView === 'profile' ? 'active' : ''}`}
-                onClick={() => setView('profile')}
-                title="Profile"
-              >
-                <i className="codicon codicon-account" style={{ fontSize: 24 }}></i>
-              </button>
-              <button
                 className={`activity-bar-btn ${activeView === 'settings' ? 'active' : ''}`}
                 onClick={() => setView('settings')}
                 title="Settings"
@@ -1146,9 +1136,6 @@ function App() {
                   searchEvents={searchEvents}
                   commandHistory={commandHistory}
                 />
-              )},
-              { id: 'profile', label: 'Profile', icon: '◎', render: () => (
-                <Profile onClose={() => setActiveView(null)} />
               )},
               { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
                 <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} chatGetModels={chatGetModels} chatUpdateApiKey={chatUpdateApiKey} />

@@ -117,7 +117,7 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
-      fontSize: 13,
+      fontSize: 16,
       fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, monospace",
       theme: buildTheme(),
       allowTransparency: false,

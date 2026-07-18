@@ -25,7 +25,7 @@ function savePrefs(prefs: UserPrefs) {
 }
 
 const defaultPrefs: UserPrefs = {
-  fontSize: 13,
+  fontSize: 16,
   fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, monospace",
   autoSave: true,
   tokenCompression: true,

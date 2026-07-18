@@ -6758,18 +6758,6 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
-/* ── CSS Variables for Terminal Font Override ── */
-:root {
-  --terminal-font-size: 13px;
-  --terminal-font-family: 'JetBrains Mono', 'Fira Code', Menlo, monospace;
-}
-
-/* Override xterm font sizing */
-.xterm {
-  font-size: var(--terminal-font-size) !important;
-  font-family: var(--terminal-font-family) !important;
-}
-
 /* ── Status Bar (VS Code Style) ─────────── */
 .status-bar {
   display: flex;

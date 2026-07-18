@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import { existsSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import 'dotenv/config'
 import express from 'express'
@@ -1233,6 +1234,29 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
   }
+
+  let feedbackShown = false
+  mainWindow.on('close', (e) => {
+    if (feedbackShown) return
+    const feedbackFlag = path.join(app.getPath('userData'), '.feedback-shown')
+    if (existsSync(feedbackFlag)) return
+    feedbackShown = true
+    writeFileSync(feedbackFlag, '1', 'utf-8')
+    e.preventDefault()
+    const result = dialog.showMessageBoxSync(mainWindow!, {
+      type: 'info',
+      title: 'Help us improve',
+      message: 'Help us improve AgntSpce!',
+      detail: 'https://forms.gle/bnfov2CitpWQTpoJ6',
+      buttons: ['Open Form', 'Close'],
+      defaultId: 0,
+      cancelId: 1,
+    })
+    if (result === 0) {
+      shell.openExternal('https://forms.gle/bnfov2CitpWQTpoJ6')
+    }
+    mainWindow?.close()
+  })
 }
 
 // IPC handlers
@@ -1367,6 +1391,7 @@ app.on('will-quit', () => {
     sessionManager.saveAllSessionBuffersSync()
     sessionManager.outputFilter.persistCumulativeStats()
   }
+
 })
 
 app.on('window-all-closed', () => {
