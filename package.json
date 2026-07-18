@@ -45,7 +45,7 @@
   },
   "build": {
     "appId": "com.agentworkspace.app",
-    "productName": "Agent Workspace",
+    "productName": "AgntSpce",
     "directories": {
       "output": "release"
     },
