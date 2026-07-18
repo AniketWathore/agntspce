@@ -67,14 +67,21 @@ function resolveLoginShellPath(): string {
       }
     } catch {}
   }
+  let npmGlobalBin = ''
+  try {
+    const npmResult = execSync('npm root -g 2>/dev/null', { encoding: 'utf-8', timeout: 3000 })
+    if (npmResult.trim()) npmGlobalBin = path.join(npmResult.trim(), '..', 'bin')
+  } catch {}
   const fallback = [
     path.join(os.homedir(), '.local', 'bin'),
+    path.join(os.homedir(), '.npm-global', 'bin'),
+    npmGlobalBin,
     '/usr/local/bin',
     '/opt/homebrew/bin',
     '/opt/local/bin',
     '/usr/bin',
     '/bin',
-  ].filter(d => fs.existsSync(d)).join(':')
+  ].filter(d => d && fs.existsSync(d)).join(':')
   _loginShellPath = fallback
   return fallback
 }
@@ -94,6 +101,19 @@ function findExecutable(name: string): string | null {
         const fullPath = path.resolve(dir, cand)
         fs.accessSync(fullPath, fs.constants.F_OK)
         if (fs.statSync(fullPath).isFile()) return fullPath
+      } catch {}
+    }
+  }
+  // Direct shell fallback — uses login shell's actual PATH resolution
+  if (process.platform !== 'win32') {
+    for (const shell of [getLoginShell(), '/bin/bash']) {
+      try {
+        const result = execSync(`${shell} -l -c 'command -v ${name}' 2>/dev/null`, {
+          encoding: 'utf-8',
+          timeout: 5000,
+        })
+        const trimmed = result.trim()
+        if (trimmed && fs.existsSync(trimmed)) return trimmed
       } catch {}
     }
   }

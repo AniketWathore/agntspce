@@ -23,16 +23,22 @@ import { resolveAgent, getLoginPath, getAllAgentBinaryDirs } from './agentResolv
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 let AGNTSPCE_BIN_DIR = ''
+// Check unpacked paths FIRST — they work with shell exec (not inside asar)
 for (const dir of [
-  path.resolve(__dirname, '..', '..', 'bin'),
-  // Production: asarUnpack puts wrappers at app.asar.unpacked/bin/
   path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bin'),
-  // Production fallback: direct resourcesPath/bin (for some electron-builder configs)
   path.resolve(process.resourcesPath || '', 'bin'),
+  path.resolve(__dirname, '..', '..', 'bin'),
 ]) {
-  if (fs.existsSync(dir)) {
+  if (fs.existsSync(dir) && fs.existsSync(path.join(dir, 'agntspce'))) {
     AGNTSPCE_BIN_DIR = dir
     break
+  }
+}
+// Fallback: try asar path if no unpacked path found
+if (!AGNTSPCE_BIN_DIR) {
+  const asarPath = path.resolve(__dirname, '..', '..', 'bin')
+  if (fs.existsSync(asarPath)) {
+    AGNTSPCE_BIN_DIR = asarPath
   }
 }
 
