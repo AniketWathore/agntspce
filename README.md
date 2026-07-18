@@ -1,162 +1,231 @@
-# AgntSpce
+<h1 align="center">
+  <a href="https://agntspce.dev"><img src="img/logo.png" alt="AgntSpce" width="64" valign="middle" /></a> AgntSpce
+</h1>
 
-AgntSpce is an Electron + React + TypeScript desktop workspace for running and monitoring AI coding agents inside PTY-backed terminals. It combines workspace management, agent launches, live terminal output, git-aware status tracking, and token-compression metrics in one app.
+<p align="center">
+  Only Multi Agent Workspace IDE focused on<br/>
+  <strong>cost efficiency, productivity & power!</strong>
+</p>
 
-## What’s New In This Build
+<p align="center">
+  Harness multiple coding agents all in single workspace<br/>
+  with built in token reduction tools on each layer!
+</p>
 
-This codebase now includes:
+<p align="center">
+  <a href="https://agntspce.dev"><img src="https://img.shields.io/badge/Website-4493F8?style=flat-square&logo=google-chrome&logoColor=white" alt="Website" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-4493F8?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/agntspce/agntspce/releases"><img src="https://img.shields.io/github/v/release/agntspce/agntspce?style=flat-square&logo=github" alt="Release" /></a>
+  <a href="https://discord.gg/hcwQvggVR"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://www.linkedin.com/company/agntspce"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn" /></a>
+</p>
 
-- A local Electron main process with Express and Socket.IO serving the renderer.
-- PTY-backed terminal sessions for agent and shell workflows.
-- Workspace CRUD, including create, select, delete, trash restore, and permanent delete flows.
-- Agent launch flows for Claude, Opencode, Codex, and Gemini.
-- A startup UI for configuring fresh, continue, resume, and advanced agent sessions.
-- A dashboard with workspace/session counts and token compression stats.
-- Real-time terminal output, status changes, branch updates, and workspace events.
-- Git branch tracking, worktree helpers, and token reduction/compression services.
-- Sidebar panels for workspace, shell, dashboard, profile, settings, and chat.
+<h3 align="center"><a href="https://agntspce.dev/download"><ins>Download</ins></a> &nbsp;&bull;&nbsp; <a href="https://docs.agntspce.dev"><ins>Docs</ins></a></h3>
 
-## Overview
+<p align="center">
+  <img src="img/main.png" alt="AgntSpce desktop app running multiple AI coding agents in terminal panes" width="960" style="border-radius: 8px;" />
+</p>
 
-The app is split into two main parts:
+> **Windows users:** Switch to the [`forWindows`](https://github.com/agntspce/agntspce/tree/forWindows) branch for Windows builds. Note that Windows builds may have issues — please [raise an issue](https://github.com/agntspce/agntspce/issues) if you encounter any problems.
 
-- `electron/` contains the backend, PTY session management, workspace persistence, and Socket.IO event handling.
-- `src/` contains the React UI, including the terminal area, sidebars, modals, and dashboard panels.
+---
 
-At runtime, Electron starts a local server on `127.0.0.1:9460`, the renderer connects through Socket.IO, and terminal output is streamed back into xterm.js panes in real time.
+## Features
 
-## Core Features
+<table>
+<tr>
+<td width="50%" valign="middle">
 
-### Workspace management
+### Parallel Agent Execution
 
-- Create and switch between workspaces.
-- Persist workspace metadata locally.
-- Restore deleted workspaces from the trash.
-- Start terminals in the active workspace directory.
+Run Claude Code, Opencode, Codex, and Gemini CLI side-by-side. Each agent gets its own PTY-backed terminal with full session isolation.
 
-### Agent terminals
+[Docs →](https://docs.agntspce.dev/agents)
 
-- Launch agent sessions for Claude, Opencode, Codex, and Gemini.
-- Choose session mode and startup flags in the agent modal.
-- Use the startup overlay to continue, resume, or start fresh.
-- View agent terminals in the main workspace area.
+</td>
+<td width="50%">
+  <img src="img/parallel.png" alt="Multiple AI agents running in parallel" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-### Shell terminals
+### Workspace Management
 
-- Open regular shell sessions separately from agent sessions.
-- Toggle the shell sidebar from the header.
-- Keep shell terminals visually distinct from agent terminals.
+Create, switch, and organize workspaces with persistent state. Full CRUD with trash/restore and permanent delete flows.
 
-### Real-time terminal state
+[Docs →](https://docs.agntspce.dev/workspaces)
 
-- Stream terminal output over Socket.IO.
-- Detect busy, idle, waiting, and exited states.
-- Track branch changes and workspace updates.
-- Compress token-heavy output and show savings in the UI.
+</td>
+<td width="50%">
+  <img src="img/workspace.png" alt="Workspace sidebar with CRUD operations" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-### Dashboard and panels
+### Real-Time Terminal Streaming
 
-- View workspace/session totals.
-- Inspect token compression stats.
-- Use the profile and settings panels.
-- Access the chat panel from the main layout.
+Live terminal output streamed via Socket.IO into xterm.js panes. Status detection (idle, busy, waiting, exited) with instant UI updates.
 
-## Architecture
+[Docs →](https://docs.agntspce.dev/terminal)
 
-### Backend
+</td>
+<td width="50%">
+  <img src="img/terminal.png" alt="Live terminal output in xterm.js panes" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-- `electron/main.ts` starts the Electron window, Express server, and Socket.IO server.
-- `electron/services/sessionManager.ts` owns PTY lifecycle and session switching.
-- `electron/services/workspaceManager.ts` persists workspace data.
-- `electron/services/agentManager.ts` builds agent commands and validates agent options.
-- `electron/services/statusDetector.ts` infers terminal status from output.
-- `electron/services/gitHelper.ts` tracks branch information.
-- `electron/services/worktreeHelper.ts` manages worktree operations.
-- `electron/services/tokenReduction.ts` reduces terminal output and publishes savings.
+### AgntSpce Output Compression
 
-### Frontend
+Built-in command line output compression powered by [RTK](https://github.com/rtk-ai/rtk) — filters redundant and low-information output to drastically reduce token consumption without losing context.
 
-- `src/App.tsx` wires the overall layout and panel state.
-- `src/hooks/useSocket.ts` connects to the server and listens for live events.
-- `src/components/TerminalArea.tsx` renders the agent terminal grid.
-- `src/components/TerminalPane.tsx` hosts individual xterm.js terminals.
-- `src/components/ShellSidebar.tsx` renders shell sessions.
-- `src/components/WorkspaceSidebar.tsx` handles workspace actions.
-- `src/components/AgentPicker.tsx`, `src/components/AgentModal.tsx`, and `src/components/StartupUI.tsx` control agent creation.
-- `src/components/Dashboard.tsx`, `src/components/Profile.tsx`, and `src/components/Settings.tsx` render the supporting panels.
+[Docs →](https://docs.agntspce.dev/compression)
 
-## Getting Started
+</td>
+<td width="50%">
+  <img src="img/agntspce output compression.png" alt="Command line output compression dashboard" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
-### Install dependencies
+### AgntSpce Search MCP
+
+Semantic code search via MCP protocol — index and search your entire codebase using [Semble](https://github.com/MinishLab/semble). Find relevant code instantly across any workspace.
+
+[Docs →](https://docs.agntspce.dev/search)
+
+</td>
+<td width="50%">
+  <img src="img/agntspce search mcp.png" alt="Semantic code search MCP interface" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
+
+### Git & Branch Tracking
+
+Automatic branch detection, git worktree support, and diff review — all from within the app. Review changes without context switching.
+
+[Docs →](https://docs.agntspce.dev/git)
+
+</td>
+<td width="50%">
+  <img src="img/git review.png" alt="Git diff viewer and branch tracking" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
+
+### Built-in Code Editor
+
+Monaco-powered code editor with syntax highlighting, file tree, and editor tabs. Open, edit, and save files without leaving AgntSpce.
+
+[Docs →](https://docs.agntspce.dev/editor)
+
+</td>
+<td width="50%">
+  <img src="img/code editor.png" alt="Monaco code editor with file explorer" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
+</td>
+</tr>
+</table>
+
+**Also in the box:**
+
+- **[Shell terminals](https://docs.agntspce.dev/shell)** — Regular shell sessions alongside agent terminals in a collapsible sidebar.
+- **[Dashboard & stats](https://docs.agntspce.dev/dashboard)** — Workspace/session counts, agent usage tracking, and compression metrics.
+- **[Activity feed & notifications](https://docs.agntspce.dev/notifications)** — Real-time event log and unread state tracking.
+- **[Commander palette](https://docs.agntspce.dev/commander)** — Cmd+K command palette for fast navigation.
+- **[Caveman mode](https://docs.agntspce.dev/caveman)** — Minimalist panel for focused work.
+- **And more** — we ship regularly. The [changelog](https://github.com/agntspce/agntspce/releases) is the real feature list.
+
+---
+
+## Requirements
+
+| Requirement | Details |
+|:------------|:--------|
+| **OS** | macOS (primary), Windows, Linux |
+| **Runtime** | Node.js 18+ |
+| **Version Control** | Git 2.20+ |
+| **Package Manager** | npm |
+
+---
+
+## Tech Stack
+
+<p>
+  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-191970?logo=Electron&logoColor=white" alt="Electron" /></a>
+  <a href="https://reactjs.org/"><img src="https://img.shields.io/badge/React-%2320232a.svg?logo=react&logoColor=%2361DAFB" alt="React" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://vitejs.dev/"><img src="https://img.shields.io/badge/Vite-%23646CFF.svg?logo=vite&logoColor=white" alt="Vite" /></a>
+  <a href="https://socket.io/"><img src="https://img.shields.io/badge/Socket.IO-010101?logo=socket.io&logoColor=white" alt="Socket.IO" /></a>
+  <a href="https://expressjs.com/"><img src="https://img.shields.io/badge/Express-000000?logo=express&logoColor=white" alt="Express" /></a>
+  <a href="https://github.com/microsoft/node-pty"><img src="https://img.shields.io/badge/node--pty-0095D5?logo=npm&logoColor=white" alt="node-pty" /></a>
+  <a href="https://xtermjs.org/"><img src="https://img.shields.io/badge/xterm.js-FAB040?logo=terminal&logoColor=black" alt="xterm.js" /></a>
+  <a href="https://microsoft.github.io/monaco-editor/"><img src="https://img.shields.io/badge/Monaco-FF4081?logo=visualstudiocode&logoColor=white" alt="Monaco Editor" /></a>
+  <a href="https://www.npmjs.com/package/winston"><img src="https://img.shields.io/badge/Winston-231F20?logo=npm&logoColor=white" alt="Winston" /></a>
+</p>
+
+---
+
+## Installation
+
+### Desktop App
 
 ```bash
+# Clone the repository
+git clone https://github.com/agntspce/agntspce.git
+cd agntspce
+
+# Install dependencies
 npm install
-```
 
-### Run in development
-
-```bash
+# Run in development
 npm run dev
-```
 
-### Build for production
-
-```bash
-npm run build
-```
-
-### Preview the built app
-
-```bash
-npm run preview
-```
-
-### Package Electron builds
-
-```bash
+# Package for production
 npm run electron:build
 ```
 
-### Electron preview
+### Download Prebuilt Binaries
 
-```bash
-npm run electron:preview
-```
+- **[macOS](https://github.com/agntspce/agntspce/releases/latest)** — Apple Silicon & Intel
+- **[Windows](https://github.com/agntspce/agntspce/tree/forWindows)** — See the `forWindows` branch
+- **[Linux](https://github.com/agntspce/agntspce/releases/latest)** — AppImage
 
-## Scripts
+> **⚠️ Windows Note:** Windows builds are available on the [`forWindows`](https://github.com/agntspce/agntspce/tree/forWindows) branch but may have issues. If you run into problems, please [open an issue](https://github.com/agntspce/agntspce/issues).
 
-- `npm run dev` starts the Vite renderer.
-- `npm run build` runs TypeScript build checks and creates the Vite production bundle.
-- `npm run lint` runs Oxlint.
-- `npm run preview` serves the production Vite build locally.
-- `npm run electron:build` creates a packaged Electron app.
-- `npm run electron:preview` runs Electron against the built output.
+### Acknowledgment
 
-Note: `electron:dev` currently maps to `vite`, so it does not launch Electron by itself.
+AgntSpce is built on the shoulders of giants. We gratefully acknowledge the following open-source projects that power core features:
 
-## Technology Stack
+- **[Caveman](https://github.com/JuliusBrussee/caveman)** — Caveman mode panel for focused, distraction-free work.
+- **[RTK](https://github.com/rtk-ai/rtk)** — Powers AgntSpce command line output compression and intelligent token reduction across every layer.
+- **[Semble](https://github.com/MinishLab/semble)** — Semantic code indexing and search engine behind AgntSpce Search MCP.
 
-- Electron
-- React 19
-- TypeScript
-- Vite
-- Socket.IO
-- Express
-- node-pty
-- xterm.js
+These projects make AgntSpce more efficient, powerful, and intelligent. We are deeply grateful to their creators and communities.
 
-## Notes
+---
 
-- The app expects the local backend and renderer to stay in sync through Socket.IO events.
-- PTY sessions depend on the prebuilt native `node-pty` binaries.
-- Workspace and session state are stored locally under the app’s data directory.
+## Community
 
-## Repository Layout
+Join the AgntSpce community to get help, share feedback, and connect with other users:
 
-```text
-electron/        Electron main process and services
-src/             React renderer and UI components
-dist-electron/   Electron build output
-public/          Static assets
-scripts/         Build and helper scripts
-```
+- **[Discord](https://discord.gg/hcwQvggVR)** — Chat with the team and community
+- **[LinkedIn](https://www.linkedin.com/company/agntspce)** — Follow for updates and announcements
+- **[GitHub Issues](https://github.com/agntspce/agntspce/issues)** — Report bugs and request features
+- **[GitHub Discussions](https://github.com/agntspce/agntspce/discussions)** — Ask questions and share ideas
+
+### Team
+
+[![Aniket](https://img.shields.io/badge/Aniket%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member1)[![Rohan](https://img.shields.io/badge/Rohan%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member2)[![Prajwal](https://img.shields.io/badge/Prajwal%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member3)[![Nagsen](https://img.shields.io/badge/Nagsen%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member4)
+
+---
+
+## License
+
+Distributed under the **Apache 2.0 License**. See [`LICENSE`](LICENSE) for more information.
