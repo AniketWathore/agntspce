@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgntSpce Docs</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="docs-layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo">AgntSpce</div>
+      <nav class="sidebar-nav">
+        <div class="nav-section">
+          <div class="nav-section-title">Getting Started</div>
+          <a href="#overview" class="nav-link active">Overview</a>
+          <a href="#setup" class="nav-link">Setup Guide</a>
+          <a href="#your-first-workspace" class="nav-link">Your First Workspace</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Core Features</div>
+          <a href="#workspaces" class="nav-link">Workspaces</a>
+          <a href="#agent-terminals" class="nav-link">Agent Terminals</a>
+          <a href="#shell-terminals" class="nav-link">Shell Terminals</a>
+          <a href="#code-editor" class="nav-link">Code Editor</a>
+          <a href="#file-explorer" class="nav-link">File Explorer</a>
+          <a href="#git-integration" class="nav-link">Git Integration</a>
+          <a href="#dashboard" class="nav-link">Dashboard</a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-title">Advanced</div>
+          <a href="#caveman-mode" class="nav-link">Caveman Mode</a>
+          <a href="#output-filter" class="nav-link">Output Filter</a>
+          <a href="#parallel-tasks" class="nav-link">Parallel Tasks</a>
+          <a href="#worktrees" class="nav-link">Worktrees</a>
+          <a href="#keyboard-shortcuts" class="nav-link">Keyboard Shortcuts</a>
+          <a href="#configuration" class="nav-link">Configuration</a>
+        </div>
+      </nav>
+    </aside>
+    <main class="docs-content">
+
+      <!-- Overview -->
+      <section id="overview">
+        <h1>AgntSpce</h1>
+        <p class="lead">An open source desktop workspace for running and monitoring AI coding agents inside PTY-backed terminals.</p>
+        <p>AgntSpce combines workspace management, agent launches, live terminal output, git-aware status tracking, and token-compression metrics in one app. It runs entirely locally — no cloud dependency, no account required.</p>
+        <div class="info-box">
+          <strong>Requirements</strong>
+          <ul>
+            <li>macOS (Apple Silicon or Intel) — Windows and Linux support planned</li>
+            <li>Node.js 18+ and npm</li>
+            <li>Git installed</li>
+            <li>One or more AI coding CLI tools (Claude Code, Opencode, Codex, Gemini, etc.)</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Setup Guide -->
+      <section id="setup">
+        <h2>Setup Guide</h2>
+        <p>Install AgntSpce and get it running on your machine in minutes.</p>
+
+        <h3>Install dependencies</h3>
+        <div class="code-block">
+          <pre><code>npm install</code></pre>
+        </div>
+
+        <h3>Run in development</h3>
+        <div class="code-block">
+          <pre><code>npm run dev</code></pre>
+        </div>
+        <p>This starts the Vite dev server and the Electron app. The server runs on <code>127.0.0.1:9460</code>.</p>
+
+        <h3>Build for production</h3>
+        <div class="code-block">
+          <pre><code>npm run build</code></pre>
+        </div>
+
+        <h3>Package as Electron app</h3>
+        <div class="code-block">
+          <pre><code>npm run electron:build</code></pre>
+        </div>
+        <p>Outputs <code>.dmg</code> (mac), <code>.exe</code> (win), or <code>.AppImage</code> (linux) depending on your platform.</p>
+
+        <h3>Preview built app</h3>
+        <div class="code-block">
+          <pre><code>npm run electron:preview</code></pre>
+        </div>
+      </section>
+
+      <!-- Your First Workspace -->
+      <section id="your-first-workspace">
+        <h2>Your First Workspace</h2>
+        <p>A workspace is where all your agent sessions run. It points to a local directory or git repository.</p>
+
+        <h3>1. Open the Create Workspace dialog</h3>
+        <p>Click the <strong>Create Workspace</strong> button in the sidebar or use <kbd>⌘⇧N</kbd>.</p>
+
+        <h3>2. Choose a source</h3>
+        <p>You can either:</p>
+        <ul>
+          <li><strong>Local folder</strong> — Point to any directory on your machine</li>
+          <li><strong>Git URL</strong> — Clone a repository (requires <code>gh</code> auth)</li>
+        </ul>
+
+        <div class="code-block">
+          <pre><code># Or clone from the command line:
+git clone https://github.com/user/repo.git ~/AgntSpce/my-project</code></pre>
+        </div>
+
+        <h3>3. Launch an agent</h3>
+        <p>With your workspace active, click the <strong>+</strong> button in the terminal area or use <kbd>⌘⇧A</kbd> to launch an AI agent.</p>
+
+        <h3>4. Start working</h3>
+        <p>Your agent terminal is ready. You can also open a shell terminal (<kbd>⌘⇧S</kbd>), browse files in the sidebar, or open the code editor.</p>
+      </section>
+
+      <!-- Workspaces -->
+      <section id="workspaces">
+        <h2>Workspaces</h2>
+        <p>Workspaces are the foundation of AgntSpce. Each workspace has its own set of sessions, git context, and file explorer.</p>
+
+        <h3>Creating a workspace</h3>
+        <p>Click <strong>Create Workspace</strong> in the sidebar, or use the command palette (<kbd>⌘K</kbd>). You can create from:</p>
+        <ul>
+          <li><strong>Local directory</strong> — picks any folder on disk</li>
+          <li><strong>Git URL</strong> — clones the repo to <code>~/AgntSpce/&lt;name&gt;</code></li>
+        </ul>
+
+        <h3>Switching workspaces</h3>
+        <p>Click a workspace in the sidebar to switch. All your sessions are preserved per workspace and restored when you switch back. The app runs setup and teardown scripts on switch if configured.</p>
+
+        <h3>Managing workspaces</h3>
+        <ul>
+          <li><strong>Rename</strong> — Edit the name in the sidebar</li>
+          <li><strong>Duplicate</strong> — File &gt; Duplicate Workspace</li>
+          <li><strong>Export/Import</strong> — File &gt; Save As / Load. Produces <code>.workspace</code> files</li>
+          <li><strong>Delete</strong> — Moves to trash (restorable)</li>
+          <li><strong>Permanent delete</strong> — Removes from trash permanently</li>
+        </ul>
+
+        <h3>Workspace config</h3>
+        <p>Each workspace stores metadata locally in <code>~/.agent-workspace/workspaces/&lt;id&gt;.json</code>:</p>
+        <ul>
+          <li>Repository path and type</li>
+          <li>Worktree configuration</li>
+          <li>Environment variables</li>
+          <li>Setup and teardown scripts</li>
+          <li>Git URL (for cloned repos)</li>
+        </ul>
+      </section>
+
+      <!-- Agent Terminals -->
+      <section id="agent-terminals">
+        <h2>Agent Terminals</h2>
+        <p>Launch and manage AI coding agent sessions directly inside AgntSpce.</p>
+
+        <h3>Supported agents</h3>
+        <div class="agent-table">
+          <table>
+            <thead>
+              <tr><th>Agent</th><th>Modes</th><th>Parallel</th><th>Worktree</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Claude Code</td><td>fresh, continue, resume</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Opencode</td><td>fresh, continue</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Codex</td><td>fresh, continue, resume</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Gemini</td><td>fresh</td><td>✗</td><td>✗</td></tr>
+              <tr><td>Cursor Agent</td><td>fresh, continue</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Copilot</td><td>fresh, explain, suggest</td><td>✗</td><td>✗</td></tr>
+              <tr><td>Mastra Code</td><td>fresh, continue, agent</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Droid</td><td>fresh, review, plan</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Amp</td><td>fresh, continue, agent</td><td>✓</td><td>✓</td></tr>
+              <tr><td>Pi</td><td>fresh, chat, review</td><td>✓</td><td>✓</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Launching an agent</h3>
+        <p>Click the <strong>+</strong> button in the terminal area or press <kbd>⌘⇧A</kbd>. A picker shows all available agents. After selecting one, a modal lets you configure:</p>
+        <ul>
+          <li><strong>Mode</strong> — Fresh (new session), Continue (resume conversation), Resume (restore interrupted)</li>
+          <li><strong>Flags</strong> — Agent-specific options like YOLO mode, verbose output, debug logging</li>
+          <li><strong>Model</strong> — For agents that support model selection (Gemini, Codex, Cursor Agent)</li>
+          <li><strong>Reasoning effort</strong> — low/medium/high (Codex, Claude)</li>
+          <li><strong>Verbosity</strong> — low/medium/high (Codex, Claude)</li>
+        </ul>
+        <p>Once launched, the agent appears as a tab in the terminal area with its own PTY-backed session.</p>
+
+        <h3>Status indicators</h3>
+        <p>Each terminal shows its current status:</p>
+        <ul>
+          <li><span class="status-dot idle"></span> <strong>Idle</strong> — Waiting for input, or shell prompt detected</li>
+          <li><span class="status-dot busy"></span> <strong>Busy</strong> — Agent is executing a task</li>
+          <li><span class="status-dot waiting"></span> <strong>Waiting</strong> — Agent is prompting for permission or input</li>
+          <li><span class="status-dot exited"></span> <strong>Exited</strong> — Process has terminated</li>
+        </ul>
+
+        <h3>Auto-restart</h3>
+        <p>Claude sessions can auto-restart when they exit. Enable this in Settings. The session is recreated with a prompt telling you how to start a new Claude session.</p>
+      </section>
+
+      <!-- Shell Terminals -->
+      <section id="shell-terminals">
+        <h2>Shell Terminals</h2>
+        <p>Regular shell sessions alongside your agent terminals. Useful for running git commands, build scripts, or any terminal work.</p>
+
+        <h3>Opening a shell</h3>
+        <p>Press <kbd>⌘⇧S</kbd> or click the terminal icon in the activity bar. Shell terminals are visually distinct from agent terminals.</p>
+
+        <h3>Shell panel</h3>
+        <p>Shell sessions appear in a bottom panel that can be toggled via the activity bar or the View menu. The panel height is adjustable by dragging the resize handle.</p>
+      </section>
+
+      <!-- Code Editor -->
+      <section id="code-editor">
+        <h2>Code Editor</h2>
+        <p>A built-in code editor powered by Monaco Editor (the engine behind VS Code).</p>
+
+        <h3>Opening files</h3>
+        <p>Click any file in the File Explorer sidebar. The file opens in a new tab in the editor area.</p>
+
+        <h3>Editing</h3>
+        <ul>
+          <li>Multi-tab editing with dirty indicators (dot shows unsaved changes)</li>
+          <li>Language detection by file extension</li>
+          <li>Syntax highlighting for 20+ languages</li>
+          <li>Scroll position is preserved per file</li>
+        </ul>
+
+        <h3>Saving</h3>
+        <p>Press <kbd>⌘S</kbd> to save the current file. Changes are written to disk via the backend.</p>
+
+        <h3>Supported languages</h3>
+        <p>TypeScript, JavaScript, Python, Rust, Go, Ruby, Java, C++, C, CSS, HTML, JSON, Markdown, YAML, TOML, SQL, XML, Shell, and more.</p>
+      </section>
+
+      <!-- File Explorer -->
+      <section id="file-explorer">
+        <h2>File Explorer</h2>
+        <p>Browse your workspace files directly in the sidebar.</p>
+
+        <h3>Tree view</h3>
+        <p>The file tree shows your workspace directory, sorted with directories first. Dotfiles are hidden. Click to expand/collapse folders.</p>
+
+        <h3>File operations</h3>
+        <ul>
+          <li><strong>Create file</strong> — Create an empty file in any directory</li>
+          <li><strong>Create folder</strong> — Create a new subdirectory</li>
+          <li><strong>Rename</strong> — Rename files and folders</li>
+          <li><strong>Delete</strong> — Delete files or entire directories</li>
+        </ul>
+        <p>All operations go through the backend and write directly to disk.</p>
+      </section>
+
+      <!-- Git Integration -->
+      <section id="git-integration">
+        <h2>Git Integration</h2>
+        <p>Stay aware of your repository state without leaving the app.</p>
+
+        <h3>Branch tracking</h3>
+        <p>Each session shows its current git branch. Branches are polled every 30 seconds and cached with a 30-second TTL.</p>
+
+        <h3>Git Review panel</h3>
+        <p>Open the Git Review panel from the activity bar. It provides:</p>
+        <ul>
+          <li><strong>Commit log</strong> — Recent commits with hash, message, author, relative date</li>
+          <li><strong>Branches</strong> — All branches sorted by committerdate</li>
+          <li><strong>Working tree diff</strong> — Unstaged changes</li>
+          <li><strong>Commit diff</strong> — Changes in a specific commit</li>
+          <li><strong>File diff</strong> — Per-file diff, including new files</li>
+          <li><strong>Working tree files</strong> — Changed files with status, additions, deletions</li>
+        </ul>
+
+        <h3>Worktrees</h3>
+        <p>AgntSpce supports git worktrees for running parallel agent sessions on different branches. See the <a href="#worktrees">Worktrees</a> section.</p>
+      </section>
+
+      <!-- Dashboard -->
+      <section id="dashboard">
+        <h2>Dashboard</h2>
+        <p>An at-a-glance overview of your workspaces and sessions.</p>
+
+        <h3>Statistics</h3>
+        <ul>
+          <li>Total workspace count</li>
+          <li>Active session count</li>
+          <li>Token compression stats (original vs filtered bytes and tokens)</li>
+          <li>Events processed by the output filter</li>
+        </ul>
+
+        <h3>Deleted workspaces</h3>
+        <p>The dashboard lists recently deleted workspaces with options to restore or permanently delete them.</p>
+      </section>
+
+      <!-- Caveman Mode -->
+      <section id="caveman-mode">
+        <h2>Caveman Mode</h2>
+        <p>Reduce token usage by instructing your AI agent to respond more tersely. Caveman Mode injects style rules directly into the agent's context file.</p>
+
+        <h3>How it works</h3>
+        <p>When enabled, AgntSpce writes a <code>SKILL.md</code> (for Opencode) or <code>CLAUDE.md</code> (for Claude Code) into your workspace. These files contain instructions that tell the agent to be more concise.</p>
+
+        <h3>Three levels</h3>
+        <div class="level-cards">
+          <div class="level-card">
+            <h4>Lite</h4>
+            <p class="level-reduction">~30% fewer tokens</p>
+            <p>Professional tone, no filler words (just, really, basically). Full grammar and sentences preserved.</p>
+          </div>
+          <div class="level-card">
+            <h4>Full</h4>
+            <p class="level-reduction">~65% fewer tokens</p>
+            <p>Fragments allowed, articles dropped, short synonyms. "Caveman" style while keeping technical terms exact.</p>
+          </div>
+          <div class="level-card">
+            <h4>Ultra</h4>
+            <p class="level-reduction">~75% fewer tokens</p>
+            <p>Telegraphic style, abbreviations, no conjunctions. Maximum compression for maximum savings.</p>
+          </div>
+        </div>
+
+        <h3>Enabling Caveman Mode</h3>
+        <p>Click the Caveman icon (🪨) in the activity bar to open the panel. Toggle it on per-session and select your desired level.</p>
+
+        <h3>Disabling</h3>
+        <p>Toggle off in the Caveman panel, or tell your agent "stop caveman" or "normal mode". The skill/CLAUDE.md files are cleaned up automatically.</p>
+      </section>
+
+      <!-- Output Filter -->
+      <section id="output-filter">
+        <h2>Output Filter</h2>
+        <p>The output filter reduces noise in terminal output before it reaches you, saving tokens and screen space.</p>
+
+        <h3>What it filters</h3>
+        <ul>
+          <li><strong>ANSI escape sequences</strong> — Strips color codes and control sequences</li>
+          <li><strong>Duplicate lines</strong> — Deduplicates repeated output</li>
+          <li><strong>Progress bars</strong> — Removes progress indicators like <code>12/50 24%</code></li>
+          <li><strong>Empty lines</strong> — Collapses or strips blank lines</li>
+          <li><strong>Truncation</strong> — Limits lines by count or character length</li>
+          <li><strong>Skip/Keep patterns</strong> — Custom regex rules to filter specific output</li>
+          <li><strong>Match-output rules</strong> — Replaces matched output with a summary</li>
+        </ul>
+
+        <h3>Debug panel</h3>
+        <p>Open the Output Filter Debug panel from the activity bar to see real-time stats:</p>
+        <ul>
+          <li>Original vs filtered bytes and tokens</li>
+          <li>Reduction percentage</li>
+          <li>Rules applied per event</li>
+          <li>Event history</li>
+        </ul>
+
+        <h3>Command tracking</h3>
+        <p>The filter detects commands entered in the terminal and tracks their output separately. This powers the command history and per-command token savings.</p>
+      </section>
+
+      <!-- Parallel Tasks -->
+      <section id="parallel-tasks">
+        <h2>Parallel Tasks</h2>
+        <p>Launch multiple agent sessions simultaneously across different worktrees.</p>
+
+        <h3>How it works</h3>
+        <p>Parallel tasks create N agent sessions at once, each in its own worktree directory. A shared prompt is sent to all sessions after launch.</p>
+
+        <h3>Concurrency limits</h3>
+        <p>The agent orchestrator limits parallel execution to 6 concurrent sessions. Additional requests are queued. The orchestrator also monitors:</p>
+        <ul>
+          <li>CPU usage per session</li>
+          <li>Memory usage per session (threshold: 1GB)</li>
+          <li>Health checks every 15 seconds</li>
+          <li>Restart limits (max 3 per 60-second window)</li>
+        </ul>
+
+        <h3>Use cases</h3>
+        <ul>
+          <li>Run the same task across multiple branches</li>
+          <li>Test different approaches in parallel</li>
+          <li>Process multiple independent modules simultaneously</li>
+        </ul>
+      </section>
+
+      <!-- Worktrees -->
+      <section id="worktrees">
+        <h2>Worktrees</h2>
+        <p>Git worktrees allow you to check out multiple branches simultaneously in separate directories.</p>
+
+        <h3>Enabling worktrees</h3>
+        <p>Worktrees are configured per workspace. When enabled, AgntSpce creates worktree directories (e.g., <code>work1</code>, <code>work2</code>) alongside your repo and creates git worktrees for each.</p>
+
+        <h3>Adding a worktree</h3>
+        <p>Use the socket event <code>add-worktree</code> or the worktree API. A new branch (<code>&lt;worktreeName&gt;-dev</code>) is created from the base branch (master/main) and a git worktree is set up.</p>
+
+        <h3>Removing a worktree</h3>
+        <p>Related sessions are closed, then the git worktree is removed. Use the <code>remove-worktree</code> event.</p>
+
+        <h3>Worktree-aware agents</h3>
+        <p>Agents with <code>supportsWorktree: true</code> (Claude, Opencode, Codex, etc.) automatically get their own worktree directory when launched in parallel.</p>
+      </section>
+
+      <!-- Keyboard Shortcuts -->
+      <section id="keyboard-shortcuts">
+        <h2>Keyboard Shortcuts</h2>
+        <div class="shortcuts-table">
+          <table>
+            <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>⌘N</kbd></td><td>New Window</td></tr>
+              <tr><td><kbd>⌘⇧N</kbd></td><td>New Workspace</td></tr>
+              <tr><td><kbd>⌘⇧A</kbd></td><td>New Agent</td></tr>
+              <tr><td><kbd>⌘⇧S</kbd></td><td>New Shell</td></tr>
+              <tr><td><kbd>⌘O</kbd></td><td>Load Workspace</td></tr>
+              <tr><td><kbd>⌘S</kbd></td><td>Save Workspace / Save File</td></tr>
+              <tr><td><kbd>⌘W</kbd></td><td>Close Window</td></tr>
+              <tr><td><kbd>⌘⇧F</kbd></td><td>Toggle Focus Mode</td></tr>
+              <tr><td><kbd>⌘K</kbd></td><td>Toggle Commander Palette</td></tr>
+              <tr><td><kbd>⌘B</kbd></td><td>Toggle Chat Sidebar</td></tr>
+              <tr><td><kbd>⌘⇧B</kbd></td><td>Toggle Workspace Sidebar</td></tr>
+              <tr><td><kbd>⌘Tab</kbd> / <kbd>⌘⇧Tab</kbd></td><td>Cycle Agent Tabs</td></tr>
+              <tr><td><kbd>⌘1</kbd>-<kbd>⌘9</kbd></td><td>Go to Tab N</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Configuration -->
+      <section id="configuration">
+        <h2>Configuration</h2>
+
+        <h3><code>config.json</code> (project root)</h3>
+        <div class="code-block">
+<pre><code>{
+  "server": {
+    "port": 9460,
+    "host": "127.0.0.1"
+  },
+  "sessions": {
+    "timeoutMs": 1800000,
+    "maxBufferSize": 100000,
+    "maxProcessesPerSession": 50
+  },
+  "logging": {
+    "level": "info"
+  }
+}</code></pre>
+        </div>
+
+        <h3><code>~/.agent-workspace/config.json</code> (user config)</h3>
+        <p>Auto-generated on first run. Controls active workspace, recent workspaces list, theme preference, and whether to remember the last workspace on restart.</p>
+
+        <h3>Data locations</h3>
+        <table>
+          <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>~/.agent-workspace/workspaces/</code></td><td>Workspace definitions (JSON)</td></tr>
+            <tr><td><code>~/.agent-workspace/deleted-workspaces/</code></td><td>Trash (soft-deleted)</td></tr>
+            <tr><td><code>~/.agent-workspace/session-buffers/</code></td><td>Session output buffers</td></tr>
+            <tr><td><code>~/.agent-workspace/caveman-data.json</code></td><td>Caveman mode data</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+    </main>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
