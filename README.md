@@ -1,5 +1,5 @@
 <h1 align="center">
-  <a href="[https://agntspce.dev](https://agntspce-website.vercel.app/)"><img src="img/logo.png" alt="AgntSpce" width="64" valign="middle" /></a> AgntSpce
+  <a href="[https://agntspce-website.vercel.app/]"><img src="img/logo.png" alt="AgntSpce" width="64" valign="middle" /></a> AgntSpce
 </h1>
 
 <p align="center">
