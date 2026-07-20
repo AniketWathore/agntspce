@@ -13,14 +13,14 @@
 </p>
 
 <p align="center">
-  <a href="https://agntspce.dev"><img src="https://img.shields.io/badge/Website-4493F8?style=flat-square&logo=google-chrome&logoColor=white" alt="Website" /></a>
+  <a href="https://agntspce-website.vercel.app/"><img src="https://img.shields.io/badge/Website-4493F8?style=flat-square&logo=google-chrome&logoColor=white" alt="Website" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-4493F8?style=flat-square" alt="License" /></a>
   <a href="https://github.com/AniketWathore/agntspce/releases"><img src="https://img.shields.io/github/v/release/AniketWathore/agntspce?style=flat-square&logo=github" alt="Release" /></a>
   <a href="https://discord.gg/hcwQvggVR"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="https://www.linkedin.com/company/agntspce"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn" /></a>
 </p>
 
-<h3 align="center"><a href="https://agntspce.dev/download"><ins>Download</ins></a> &nbsp;&bull;&nbsp; <a href="https://docs.agntspce.dev"><ins>Docs</ins></a></h3>
+<h3 align="center"><a href="https://agntspce-website.vercel.app/download.html"><ins>Download</ins></a> &nbsp;&bull;&nbsp; <a href="https://agntspce-website.vercel.app/docs.html"><ins>Docs</ins></a></h3>
 
 <p align="center">
   <img src="img/main.png" alt="AgntSpce desktop app running multiple AI coding agents in terminal panes" width="960" style="border-radius: 8px;" />
