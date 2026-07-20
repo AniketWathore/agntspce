@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://agntspce.dev"><img src="https://img.shields.io/badge/Website-4493F8?style=flat-square&logo=google-chrome&logoColor=white" alt="Website" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-4493F8?style=flat-square" alt="License" /></a>
-  <a href="https://github.com/agntspce/agntspce/releases"><img src="https://img.shields.io/github/v/release/agntspce/agntspce?style=flat-square&logo=github" alt="Release" /></a>
+  <a href="https://github.com/AniketWathore/agntspce/releases"><img src="https://img.shields.io/github/v/release/AniketWathore/agntspce?style=flat-square&logo=github" alt="Release" /></a>
   <a href="https://discord.gg/hcwQvggVR"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="https://www.linkedin.com/company/agntspce"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?style=flat-square&logo=linkedin&logoColor=white" alt="LinkedIn" /></a>
 </p>
@@ -26,11 +26,41 @@
   <img src="img/main.png" alt="AgntSpce desktop app running multiple AI coding agents in terminal panes" width="960" style="border-radius: 8px;" />
 </p>
 
-> **Windows users:** Switch to the [`forWindows`](https://github.com/agntspce/agntspce/tree/forWindows) branch for Windows builds. Note that Windows builds may have issues — please [raise an issue](https://github.com/agntspce/agntspce/issues) if you encounter any problems.
+> **Windows users:** Switch to the [`forWindows`](https://github.com/AniketWathore/agntspce/tree/forWindows) branch for Windows builds. Note that Windows builds may have issues — please [raise an issue](https://github.com/AniketWathore/agntspce/issues) if you encounter any problems.
 
 ---
 
-## Features
+## Why AgntSpce?
+
+<table>
+<tr>
+<td width="33%" align="center" valign="top">
+
+### Multi-Agent Execution
+
+Run Claude Code, Codex, Opencode, and Gemini CLI simultaneously — each in its own isolated PTY-backed terminal. No tabs switching. No waiting.
+
+</td>
+<td width="33%" align="center" valign="top">
+
+### Token Reduction Layers
+
+Cut costs across every layer — command line output compression filters noise, semantic search indexes only what matters, and caveman skill strips all but essentials.
+
+</td>
+<td width="33%" align="center" valign="top">
+
+### Worktree Orchestration
+
+Each agent operates in its own isolated git worktree. Fan out tasks, compare results, and merge the winner — all without cross-contamination.
+
+</td>
+</tr>
+</table>
+
+---
+
+## All Features
 
 <table>
 <tr>
@@ -39,8 +69,6 @@
 ### Parallel Agent Execution
 
 Run Claude Code, Opencode, Codex, and Gemini CLI side-by-side. Each agent gets its own PTY-backed terminal with full session isolation.
-
-[Docs →](https://docs.agntspce.dev/agents)
 
 </td>
 <td width="50%">
@@ -54,8 +82,6 @@ Run Claude Code, Opencode, Codex, and Gemini CLI side-by-side. Each agent gets i
 
 Create, switch, and organize workspaces with persistent state. Full CRUD with trash/restore and permanent delete flows.
 
-[Docs →](https://docs.agntspce.dev/workspaces)
-
 </td>
 <td width="50%">
   <img src="img/workspace.png" alt="Workspace sidebar with CRUD operations" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
@@ -67,8 +93,6 @@ Create, switch, and organize workspaces with persistent state. Full CRUD with tr
 ### Real-Time Terminal Streaming
 
 Live terminal output streamed via Socket.IO into xterm.js panes. Status detection (idle, busy, waiting, exited) with instant UI updates.
-
-[Docs →](https://docs.agntspce.dev/terminal)
 
 </td>
 <td width="50%">
@@ -82,8 +106,6 @@ Live terminal output streamed via Socket.IO into xterm.js panes. Status detectio
 
 Built-in command line output compression powered by [RTK](https://github.com/rtk-ai/rtk) — filters redundant and low-information output to drastically reduce token consumption without losing context.
 
-[Docs →](https://docs.agntspce.dev/compression)
-
 </td>
 <td width="50%">
   <img src="img/agntspce output compression.png" alt="Command line output compression dashboard" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
@@ -95,8 +117,6 @@ Built-in command line output compression powered by [RTK](https://github.com/rtk
 ### AgntSpce Search MCP
 
 Semantic code search via MCP protocol — index and search your entire codebase using [Semble](https://github.com/MinishLab/semble). Find relevant code instantly across any workspace.
-
-[Docs →](https://docs.agntspce.dev/search)
 
 </td>
 <td width="50%">
@@ -110,8 +130,6 @@ Semantic code search via MCP protocol — index and search your entire codebase 
 
 Automatic branch detection, git worktree support, and diff review — all from within the app. Review changes without context switching.
 
-[Docs →](https://docs.agntspce.dev/git)
-
 </td>
 <td width="50%">
   <img src="img/git review.png" alt="Git diff viewer and branch tracking" width="100%" style="border-radius: 4px; aspect-ratio: 16/9; object-fit: cover;" />
@@ -123,8 +141,6 @@ Automatic branch detection, git worktree support, and diff review — all from w
 ### Built-in Code Editor
 
 Monaco-powered code editor with syntax highlighting, file tree, and editor tabs. Open, edit, and save files without leaving AgntSpce.
-
-[Docs →](https://docs.agntspce.dev/editor)
 
 </td>
 <td width="50%">
@@ -140,7 +156,7 @@ Monaco-powered code editor with syntax highlighting, file tree, and editor tabs.
 - **[Activity feed & notifications](https://docs.agntspce.dev/notifications)** — Real-time event log and unread state tracking.
 - **[Commander palette](https://docs.agntspce.dev/commander)** — Cmd+K command palette for fast navigation.
 - **[Caveman mode](https://docs.agntspce.dev/caveman)** — Minimalist panel for focused work.
-- **And more** — we ship regularly. The [changelog](https://github.com/agntspce/agntspce/releases) is the real feature list.
+- **And more** — we ship regularly. The [changelog](https://github.com/AniketWathore/agntspce/releases) is the real feature list.
 
 ---
 
@@ -178,7 +194,7 @@ Monaco-powered code editor with syntax highlighting, file tree, and editor tabs.
 
 ```bash
 # Clone the repository
-git clone https://github.com/agntspce/agntspce.git
+git clone https://github.com/AniketWathore/agntspce.git
 cd agntspce
 
 # Install dependencies
@@ -193,11 +209,11 @@ npm run electron:build
 
 ### Download Prebuilt Binaries
 
-- **[macOS](https://github.com/agntspce/agntspce/releases/latest)** — Apple Silicon & Intel
-- **[Windows](https://github.com/agntspce/agntspce/tree/forWindows)** — See the `forWindows` branch
-- **[Linux](https://github.com/agntspce/agntspce/releases/latest)** — AppImage
+- **[macOS](https://github.com/AniketWathore/agntspce/releases/latest)** — Apple Silicon & Intel
+- **[Windows](https://github.com/AniketWathore/agntspce/tree/forWindows)** — See the `forWindows` branch
+- **[Linux](https://github.com/AniketWathore/agntspce/releases/latest)** — AppImage *(Coming soon)*
 
-> **⚠️ Windows Note:** Windows builds are available on the [`forWindows`](https://github.com/agntspce/agntspce/tree/forWindows) branch but may have issues. If you run into problems, please [open an issue](https://github.com/agntspce/agntspce/issues).
+> **⚠️ Windows Note:** Windows builds are available on the [`forWindows`](https://github.com/AniketWathore/agntspce/tree/forWindows) branch but may have issues. If you run into problems, please [open an issue](https://github.com/AniketWathore/agntspce/issues).
 
 ### Acknowledgment
 
@@ -217,8 +233,8 @@ Join the AgntSpce community to get help, share feedback, and connect with other 
 
 - **[Discord](https://discord.gg/hcwQvggVR)** — Chat with the team and community
 - **[LinkedIn](https://www.linkedin.com/company/agntspce)** — Follow for updates and announcements
-- **[GitHub Issues](https://github.com/agntspce/agntspce/issues)** — Report bugs and request features
-- **[GitHub Discussions](https://github.com/agntspce/agntspce/discussions)** — Ask questions and share ideas
+- **[GitHub Issues](https://github.com/AniketWathore/agntspce/issues)** — Report bugs and request features
+- **[GitHub Discussions](https://github.com/AniketWathore/agntspce/discussions)** — Ask questions and share ideas
 
 ### Team
 
