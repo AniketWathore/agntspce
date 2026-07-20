@@ -238,7 +238,7 @@ Join the AgntSpce community to get help, share feedback, and connect with other 
 
 ### Team
 
-[![Aniket](https://img.shields.io/badge/Aniket%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member1)[![Rohan](https://img.shields.io/badge/Rohan%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member2)[![Prajwal](https://img.shields.io/badge/Prajwal%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member3)[![Nagsen](https://img.shields.io/badge/Nagsen%20-@linkedin-0A66C2?logo=linkedin)](https://linkedin.com/in/member4)
+[![Aniket](https://img.shields.io/badge/Aniket%20-@linkedin-0A66C2?logo=linkedin)]([https://linkedin.com/in/member1](https://www.linkedin.com/in/aniket-wathore-99a9ba248/))[![Rohan](https://img.shields.io/badge/Rohan%20-@linkedin-0A66C2?logo=linkedin)]([https://linkedin.com/in/member2](https://www.linkedin.com/in/therohangaikwad/))[![Prajwal](https://img.shields.io/badge/Prajwal%20-@linkedin-0A66C2?logo=linkedin)]([https://linkedin.com/in/member3](https://www.linkedin.com/in/prajwal-landge-b03729421/))
 
 ---
 
