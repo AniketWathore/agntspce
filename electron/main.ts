@@ -984,19 +984,32 @@ io.on('connection', (socket) => {
     }
   })
 
-  // ── Filesystem Operations ──────────────────────────────
-  async function getRepoRoot(wsPath: string): Promise<string> {
-    try {
-      const { spawnSync } = await import('child_process')
-      const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: wsPath, encoding: 'utf8', timeout: 5000, windowsHide: true })
-      if (result.status === 0 && result.stdout) {
-        return result.stdout.trim()
-      }
-      return wsPath
-    } catch {
-      return wsPath
+// ── Filesystem Operations ──────────────────────────────
+function resolveWorkspaceRoot(): string {
+  const ws = workspaceManager.getActiveWorkspace()
+  if (!ws?.repository?.path) return ''
+  return path.resolve(ws.repository.path)
+}
+
+function isPathInWorkspace(targetPath: string): boolean {
+  const root = resolveWorkspaceRoot()
+  if (!root) return false
+  const resolvedTarget = path.resolve(targetPath)
+  return resolvedTarget === root || resolvedTarget.startsWith(root + path.sep)
+}
+
+async function getRepoRoot(wsPath: string): Promise<string> {
+  try {
+    const { spawnSync } = await import('child_process')
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: wsPath, encoding: 'utf8', timeout: 5000, windowsHide: true })
+    if (result.status === 0 && result.stdout) {
+      return result.stdout.trim()
     }
+    return wsPath
+  } catch {
+    return wsPath
   }
+}
 
   socket.on('get-workspace-tree', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
     try {
@@ -1028,69 +1041,93 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('read-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
-    try {
-      const stat = await fs.stat(absolutePath)
-      if (stat.isDirectory()) {
-        if (callback) callback({ ok: false, error: 'Is a directory' })
-        return
-      }
-      const content = await fs.readFile(absolutePath, 'utf-8')
-      if (callback) callback({ ok: true, content })
-    } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+socket.on('read-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+  try {
+    if (!isPathInWorkspace(absolutePath)) {
+      if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+      return
     }
-  })
+    const stat = await fs.stat(absolutePath)
+    if (stat.isDirectory()) {
+      if (callback) callback({ ok: false, error: 'Is a directory' })
+      return
+    }
+    const content = await fs.readFile(absolutePath, 'utf-8')
+    if (callback) callback({ ok: true, content })
+  } catch (error: any) {
+    if (callback) callback({ ok: false, error: error.message })
+  }
+})
 
-  socket.on('write-file', async ({ absolutePath, content }: { absolutePath: string, content: string }, callback?: Function) => {
-    try {
-      await fs.writeFile(absolutePath, content, 'utf-8')
-      if (callback) callback({ ok: true })
-    } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+socket.on('write-file', async ({ absolutePath, content }: { absolutePath: string, content: string }, callback?: Function) => {
+  try {
+    if (!isPathInWorkspace(absolutePath)) {
+      if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+      return
     }
-  })
+    await fs.writeFile(absolutePath, content, 'utf-8')
+    if (callback) callback({ ok: true })
+  } catch (error: any) {
+    if (callback) callback({ ok: false, error: error.message })
+  }
+})
 
-  socket.on('create-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
-    try {
-      await fs.writeFile(absolutePath, '', 'utf-8')
-      if (callback) callback({ ok: true })
-    } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+socket.on('create-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+  try {
+    if (!isPathInWorkspace(absolutePath)) {
+      if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+      return
     }
-  })
+    await fs.writeFile(absolutePath, '', 'utf-8')
+    if (callback) callback({ ok: true })
+  } catch (error: any) {
+    if (callback) callback({ ok: false, error: error.message })
+  }
+})
 
-  socket.on('create-folder', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
-    try {
-      await fs.mkdir(absolutePath, { recursive: true })
-      if (callback) callback({ ok: true })
-    } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+socket.on('create-folder', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+  try {
+    if (!isPathInWorkspace(absolutePath)) {
+      if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+      return
     }
-  })
+    await fs.mkdir(absolutePath, { recursive: true })
+    if (callback) callback({ ok: true })
+  } catch (error: any) {
+    if (callback) callback({ ok: false, error: error.message })
+  }
+})
 
-  socket.on('rename-file', async ({ oldPath, newPath }: { oldPath: string, newPath: string }, callback?: Function) => {
-    try {
-      await fs.rename(oldPath, newPath)
-      if (callback) callback({ ok: true })
-    } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+socket.on('rename-file', async ({ oldPath, newPath }: { oldPath: string, newPath: string }, callback?: Function) => {
+  try {
+    if (!isPathInWorkspace(oldPath) || !isPathInWorkspace(newPath)) {
+      if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+      return
     }
-  })
+    await fs.rename(oldPath, newPath)
+    if (callback) callback({ ok: true })
+  } catch (error: any) {
+    if (callback) callback({ ok: false, error: error.message })
+  }
+})
 
-  socket.on('delete-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
-    try {
-      const stat = await fs.stat(absolutePath)
-      if (stat.isDirectory()) {
-        await fs.rm(absolutePath, { recursive: true, force: true })
-      } else {
-        await fs.unlink(absolutePath)
-      }
-      if (callback) callback({ ok: true })
-    } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+socket.on('delete-file', async ({ absolutePath }: { absolutePath: string }, callback?: Function) => {
+  try {
+    if (!isPathInWorkspace(absolutePath)) {
+      if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+      return
     }
-  })
+    const stat = await fs.stat(absolutePath)
+    if (stat.isDirectory()) {
+      await fs.rm(absolutePath, { recursive: true, force: true })
+    } else {
+      await fs.unlink(absolutePath)
+    }
+    if (callback) callback({ ok: true })
+  } catch (error: any) {
+    if (callback) callback({ ok: false, error: error.message })
+  }
+})
 
   socket.on('save-workspace', async () => {
     const ws = sessionManager.getWorkspace()

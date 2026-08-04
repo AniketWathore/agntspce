@@ -383,7 +383,7 @@ export class SessionManager extends EventEmitter {
       env.__WIN32_ORIGINAL_PATH = existingPath
     }
 
-    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'aider', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
+    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
     const isAgent = AGENT_TYPES.includes(config.type)
     const binDir = AGNTSPCE_BIN_DIR
 
@@ -985,11 +985,15 @@ export class SessionManager extends EventEmitter {
     return backlog
   }
 
-  cleanupAllSessions() {
-    for (const [id] of this.sessions) this.closeSession(id)
-    this.sessions.clear()
-    this.orchestrator?.shutdownAll()
+cleanupAllSessions() {
+  if (this.branchRefreshInterval) {
+    clearInterval(this.branchRefreshInterval)
+    this.branchRefreshInterval = null
   }
+  for (const [id] of this.sessions) this.closeSession(id)
+  this.sessions.clear()
+  this.orchestrator?.shutdownAll()
+}
 
   async updateGitBranch(worktreeId: string, cwd: string, force = false) {
     if (!this.gitHelper) return
