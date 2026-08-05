@@ -653,33 +653,43 @@ export function useSocket(): UseSocketReturn {
 
   // Chat functions
   const chatReqId = useRef(0)
+
+  const registerOneShot = useCallback((event: string, id: number, timeoutMs: number): Promise<any> => {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        socketRef.current?.off(event, handler)
+        resolve(null)
+      }, timeoutMs)
+      const handler = (data: any) => {
+        if (data._reqId === id) {
+          clearTimeout(timer)
+          socketRef.current?.off(event, handler)
+          resolve(data)
+        }
+      }
+      socketRef.current?.on(event, handler)
+    })
+  }, [])
+
   const chatGetModels = useCallback((): Promise<any[]> => {
     return new Promise((resolve) => {
       const id = ++chatReqId.current
-      const handler = (data: any) => {
-        if (data._reqId === id) {
-          socketRef.current?.off('chat-models', handler)
-          resolve(data.models)
-        }
-      }
+      registerOneShot('chat-models', id, 10000).then(data => {
+        resolve(data?.models ?? [])
+      })
       socketRef.current?.emit('chat-get-models', { _reqId: id })
-      socketRef.current?.on('chat-models', handler)
     })
-  }, [])
+  }, [registerOneShot])
 
   const chatSend = useCallback((threadId: string, providerId: string, content: string): Promise<any> => {
     return new Promise((resolve) => {
       const id = ++chatReqId.current
-      const handler = (data: any) => {
-        if (data._reqId === id) {
-          socketRef.current?.off('chat-response', handler)
-          resolve(data)
-        }
-      }
+      registerOneShot('chat-response', id, 60000).then(data => {
+        resolve(data ?? null)
+      })
       socketRef.current?.emit('chat-send', { _reqId: id, threadId, providerId, content })
-      socketRef.current?.on('chat-response', handler)
     })
-  }, [])
+  }, [registerOneShot])
 
   const chatSendStream = useCallback((threadId: string, providerId: string, content: string) => {
     socketRef.current?.emit('chat-send-stream', { threadId, providerId, content })
@@ -692,16 +702,12 @@ export function useSocket(): UseSocketReturn {
   const chatGetHistory = useCallback((threadId: string): Promise<any> => {
     return new Promise((resolve) => {
       const id = ++chatReqId.current
-      const handler = (data: any) => {
-        if (data._reqId === id) {
-          socketRef.current?.off('chat-history', handler)
-          resolve(data)
-        }
-      }
+      registerOneShot('chat-history', id, 10000).then(data => {
+        resolve(data ?? null)
+      })
       socketRef.current?.emit('chat-get-history', { _reqId: id, threadId })
-      socketRef.current?.on('chat-history', handler)
     })
-  }, [])
+  }, [registerOneShot])
 
   const chatUpdateApiKey = useCallback((providerId: string, apiKey: string) => {
     socketRef.current?.emit('chat-update-api-key', { providerId, apiKey })

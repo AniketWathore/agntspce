@@ -3,11 +3,13 @@ import { formatCommand } from './rtk/formatter'
 import fs from 'fs'
 import path from 'path'
 
-const LOG_FILE = '/tmp/agntspce-filter.log'
+const LOG_FILE = path.join(process.env.TMPDIR || process.env.TMP || '/tmp', 'agntspce-filter.log')
+const DEBUG_ENABLED = process.env.AGNTSPCE_FILTER_DEBUG === '1'
 function debugLog(msg: string) {
+  if (!DEBUG_ENABLED) return
   const line = `[${new Date().toISOString()}] ${msg}\n`
   try {
-    fs.appendFileSync(LOG_FILE, line)
+    fs.appendFile(LOG_FILE, line, () => {})
   } catch {}
 }
 

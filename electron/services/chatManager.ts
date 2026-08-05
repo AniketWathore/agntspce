@@ -3,12 +3,18 @@ import { OpenAIProvider } from './providers/openai'
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
 import { DeepSeekProvider } from './providers/deepseek'
+import { app } from 'electron'
+import * as fs from 'fs'
+import * as path from 'path'
+
+const PROVIDER_IDS: ProviderId[] = ['openai', 'anthropic', 'google', 'deepseek']
 
 export class ChatManager {
   private providers: Map<ProviderId, AIProvider> = new Map()
   private threads: Map<string, ChatThread> = new Map()
   private configs: Map<ProviderId, ProviderConfig> = new Map()
   private activeAborts: Map<string, AbortController> = new Map()
+  private configFilePath = path.join(app.getPath('userData'), 'chat-config.json')
 
   constructor() {
     this.loadConfigs()
@@ -16,14 +22,45 @@ export class ChatManager {
   }
 
   private loadConfigs() {
+    const saved = this.readSavedApiKeys()
     const defaultConfigs: ProviderConfig[] = [
-      { id: 'openai', name: 'OpenAI', model: 'gpt-4o', apiKey: process.env.OPENAI_API_KEY || '' },
-      { id: 'anthropic', name: 'Anthropic', model: 'claude-sonnet-4-20250514', apiKey: process.env.ANTHROPIC_API_KEY || '' },
-      { id: 'google', name: 'Google Gemini', model: 'gemini-2.5-flash', apiKey: process.env.GEMINI_API_KEY || '' },
-      { id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat', apiKey: process.env.DEEPSEEK_API_KEY || '' },
+      { id: 'openai', name: 'OpenAI', model: 'gpt-4o', apiKey: saved.openai ?? process.env.OPENAI_API_KEY ?? '' },
+      { id: 'anthropic', name: 'Anthropic', model: 'claude-sonnet-4-20250514', apiKey: saved.anthropic ?? process.env.ANTHROPIC_API_KEY ?? '' },
+      { id: 'google', name: 'Google Gemini', model: 'gemini-2.5-flash', apiKey: saved.google ?? process.env.GEMINI_API_KEY ?? '' },
+      { id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat', apiKey: saved.deepseek ?? process.env.DEEPSEEK_API_KEY ?? '' },
     ]
     for (const cfg of defaultConfigs) {
       this.configs.set(cfg.id, cfg)
+    }
+  }
+
+  private readSavedApiKeys(): Partial<Record<ProviderId, string>> {
+    try {
+      const content = fs.readFileSync(this.configFilePath, 'utf-8')
+      const parsed = JSON.parse(content)
+      if (parsed && typeof parsed === 'object') {
+        const result: Partial<Record<ProviderId, string>> = {}
+        for (const id of PROVIDER_IDS) {
+          const val = parsed[id]
+          if (typeof val === 'string' && val) result[id] = val
+        }
+        return result
+      }
+    } catch {}
+    return {}
+  }
+
+  private saveApiKeys() {
+    try {
+      const data: Record<string, string> = {}
+      for (const id of PROVIDER_IDS) {
+        const key = this.configs.get(id)?.apiKey || ''
+        if (key) data[id] = key
+      }
+      fs.mkdirSync(path.dirname(this.configFilePath), { recursive: true })
+      fs.writeFileSync(this.configFilePath, JSON.stringify(data, null, 2), 'utf-8')
+    } catch (e) {
+      console.error('Failed to save chat API keys:', e)
     }
   }
 
@@ -234,6 +271,7 @@ export class ChatManager {
     if (cfg) {
       cfg.apiKey = apiKey
       this.registerProvider(cfg)
+      this.saveApiKeys()
     }
   }
 }

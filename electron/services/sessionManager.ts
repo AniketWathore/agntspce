@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
 const _require = createRequire(import.meta.url)
-import type { Session, SessionConfig, SavedSessionData, Worktree, Workspace } from './types'
+import { AGENT_TYPES, type Session, type SessionConfig, type SavedSessionData, type Worktree, type Workspace } from './types'
 import { StatusDetector } from './statusDetector'
 import { GitHelper } from './gitHelper'
 import { WorktreeHelper } from './worktreeHelper'
@@ -134,7 +134,15 @@ function applyBackpressure(io: any): void {
       if (transport?.name === 'websocket') {
         const ws = transport.socket as any
         if (ws && ws.bufferedAmount > OUTBOUND_BUFFER_CAP) {
-          ws.terminate()
+          // Graceful backpressure: pause the socket instead of hard-terminating it.
+          // The renderer will reconnect/resume when it catches up, and we avoid
+          // dropping every client when a single consumer is slow.
+          try { socket.pause?.() } catch {}
+          const resume = () => {
+            try { socket.resume?.() } catch {}
+          }
+          ws.once?.('drain', resume)
+          ws.once?.('close', resume)
         }
       }
     }
@@ -383,8 +391,7 @@ export class SessionManager extends EventEmitter {
       env.__WIN32_ORIGINAL_PATH = existingPath
     }
 
-    const AGENT_TYPES = ['opencode', 'claude', 'codex', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi']
-    const isAgent = AGENT_TYPES.includes(config.type)
+    const isAgent = (AGENT_TYPES as readonly string[]).includes(config.type)
     const binDir = AGNTSPCE_BIN_DIR
 
     if (isAgent) {
@@ -711,7 +718,7 @@ export class SessionManager extends EventEmitter {
         repositoryType: '',
       })
       const session = this.sessions.get(sessionId)
-      if (session && (type === 'claude' || type === 'codex' || type === 'opencode' || type === 'gemini' || type === 'cursor-agent' || type === 'copilot' || type === 'mastracode' || type === 'droid' || type === 'amp' || type === 'pi' || type === 'kilocode' || type === 'windsurf')) {
+      if (session && (AGENT_TYPES as readonly string[]).includes(type)) {
         session.status = 'waiting'
         this.io?.emit('status-change', { sessionId, status: 'waiting' })
       }
@@ -1014,7 +1021,10 @@ cleanupAllSessions() {
     if (!session || session.status === 'exited') return
 
     const oldStatus = session.status
-    const status = this.statusDetector.detectStatus(sessionId, session.buffer.snapshot())
+    const isAgentType = (AGENT_TYPES as readonly string[]).includes(session.type)
+    const status = this.statusDetector.detectStatus(sessionId, session.buffer.snapshot(), {
+      agent: isAgentType ? session.type : null,
+    })
     if (status !== session.status) {
       session.status = status as any
       session.statusChangedAt = Date.now()

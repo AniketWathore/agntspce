@@ -104,6 +104,7 @@ export class StatusDetector {
 
   private getAssumeBusyWindowMs(opts: { agent?: string | null; isAgentTerminal: boolean; claudeLikely: boolean }): number {
     const agent = this.normalizeAgent(opts.agent)
+    if (agent === 'claude') return ASSUME_BUSY_SINCE_OUTPUT_CLAUDE_MS
     if (agent === 'codex') return ASSUME_BUSY_SINCE_OUTPUT_CODEX_MS
     if (agent === 'gemini') return ASSUME_BUSY_SINCE_OUTPUT_GEMINI_MS
     if (agent === 'opencode') return ASSUME_BUSY_SINCE_OUTPUT_OPENCODE_MS

@@ -1,9 +1,12 @@
 import { RingBuffer } from './ringBuffer'
 
+export const AGENT_TYPES = ['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'kilocode', 'windsurf'] as const
+export type AgentType = typeof AGENT_TYPES[number]
+
 export interface Session {
   id: string
   pty?: any
-  type: 'claude' | 'codex' | 'opencode' | 'gemini' | 'cursor-agent' | 'copilot' | 'mastracode' | 'droid' | 'amp' | 'pi' | 'server' | 'shell'
+  type: AgentType | 'server' | 'shell'
   worktreeId: string
   repositoryName?: string
   repositoryType?: string

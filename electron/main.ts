@@ -32,11 +32,18 @@ if (!gotLock) {
   app.quit()
 }
 
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+  }
+})
+
 function sendMenuAction(action: string, data?: any) {
   mainWindow?.webContents.send('menu-action', action, data)
 }
 
-function createNewWindow() {
+function buildWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -56,6 +63,12 @@ function createNewWindow() {
   } else {
     win.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
   }
+  return win
+}
+
+function createNewWindow() {
+  const win = buildWindow()
+  win.on('close', () => { if (mainWindow === win) mainWindow = null })
 }
 
 // Express + Socket.IO server
@@ -404,7 +417,7 @@ app_.use((_req, res, next) => {
   }
   next()
 })
-app_.use(express.json())
+app_.use(express.json({ limit: '1mb' }))
 
 // API routes
 app_.get('/api/status', (_req, res) => {
@@ -1013,6 +1026,10 @@ async function getRepoRoot(wsPath: string): Promise<string> {
 
   socket.on('get-workspace-tree', async ({ worktreePath }: { worktreePath: string }, callback?: Function) => {
     try {
+      if (!isPathInWorkspace(worktreePath)) {
+        if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
+        return
+      }
       const root = await getRepoRoot(worktreePath)
       async function readDir(dirPath: string, relativeRoot: string): Promise<any[]> {
         const entries: any[] = []
@@ -1251,26 +1268,7 @@ async function startServer() {
 // Electron window
 function createWindow() {
   rebuildMenu()
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 800,
-    minHeight: 600,
-    title: 'AgntSpce',
-    ...(isMac ? { titleBarStyle: 'hidden' as const } : { frame: false }),
-    webPreferences: {
-      preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  })
-  mainWindow.maximize()
-
-  if (isDev) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
-  } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), 'dist/index.html'))
-  }
+  mainWindow = buildWindow()
 
   let feedbackShown = false
   mainWindow.on('close', (e) => {
@@ -1294,6 +1292,7 @@ function createWindow() {
     }
     mainWindow?.close()
   })
+  mainWindow.on('closed', () => { mainWindow = null })
 }
 
 // IPC handlers
@@ -1342,8 +1341,6 @@ ipcMain.handle('select-directory', async () => {
 ipcMain.handle('get-default-path', () => os.homedir())
 
 ipcMain.handle('get-server-port', () => SERVER_PORT)
-
-ipcMain.handle('get-drop-path', () => null)
 
 ipcMain.handle('export-workspace', async () => {
   const activeId = workspaceManager.getActiveWorkspace()?.id
