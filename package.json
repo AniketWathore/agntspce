@@ -13,6 +13,7 @@
     "download:search": "node scripts/download-semble.js",
     "postinstall": "node bin/copy-rtk.js && node scripts/download-semble.js && node bin/compile-wrappers.mjs && npx electron-rebuild -f -w better-sqlite3",
     "lint": "oxlint",
+    "test": "vitest run",
     "preview": "vite preview",
     "electron:dev": "vite",
     "electron:build": "npm run build && electron-builder",
@@ -127,7 +128,8 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.0",
     "vite-plugin-electron": "^1.1.0",
-    "vite-plugin-electron-renderer": "^1.0.0"
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,
