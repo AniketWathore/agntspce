@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import useSocketEvent from '../hooks/useSocketEvent'
 import type { ChatMessage, ChatModelInfo, StreamChunk, ProviderId } from '../types'
 
 interface Props {
@@ -54,65 +55,57 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  useEffect(() => {
-    const unsubStream = socket.onChatStreamChunk((chunk: StreamChunk) => {
-      if (chunk.threadId !== threadId) return
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        if (last?.role === 'assistant' && last.streaming) {
-          const updated = [...prev]
+  useSocketEvent<StreamChunk>(socket.onChatStreamChunk, (chunk) => {
+    if (chunk.threadId !== threadId) return
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (last?.role === 'assistant' && last.streaming) {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          ...last,
+          content: last.content + chunk.content,
+        }
+        if (chunk.done) {
           updated[updated.length - 1] = {
-            ...last,
-            content: last.content + chunk.content,
+            ...updated[updated.length - 1],
+            streaming: false,
           }
-          if (chunk.done) {
-            updated[updated.length - 1] = {
-              ...updated[updated.length - 1],
-              streaming: false,
-            }
-            setStreaming(false)
-          }
-          return updated
-        }
-        return prev
-      })
-    })
-
-    const unsubResp = socket.onChatResponse((data: { threadId: string; message: ChatMessage }) => {
-      if (data.threadId !== threadId) return
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        if (last?.role === 'assistant' && last.streaming) {
-          const updated = [...prev]
-          updated[updated.length - 1] = { ...data.message, streaming: false }
           setStreaming(false)
-          return updated
         }
-        setStreaming(false)
-        return [...prev, { ...data.message, streaming: false }]
-      })
+        return updated
+      }
+      return prev
     })
+  }, [socket, threadId])
 
-    const unsubErr = socket.onChatError((data: { threadId: string; error: string }) => {
-      if (data.threadId !== threadId) return
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        if (last?.role === 'assistant' && last.streaming) {
-          const updated = [...prev]
-          updated[updated.length - 1] = { ...last, content: data.error, streaming: false, error: true }
-          setStreaming(false)
-          return updated
-        }
+  useSocketEvent<{ threadId: string; message: ChatMessage }>(socket.onChatResponse, (data) => {
+    if (data.threadId !== threadId) return
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (last?.role === 'assistant' && last.streaming) {
+        const updated = [...prev]
+        updated[updated.length - 1] = { ...data.message, streaming: false }
         setStreaming(false)
-        return [...prev, { id: generateId(), role: 'assistant', content: data.error, timestamp: Date.now(), error: true }]
-      })
+        return updated
+      }
+      setStreaming(false)
+      return [...prev, { ...data.message, streaming: false }]
     })
+  }, [socket, threadId])
 
-    return () => {
-      unsubStream()
-      unsubResp()
-      unsubErr()
-    }
+  useSocketEvent<{ threadId: string; error: string }>(socket.onChatError, (data) => {
+    if (data.threadId !== threadId) return
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (last?.role === 'assistant' && last.streaming) {
+        const updated = [...prev]
+        updated[updated.length - 1] = { ...last, content: data.error, streaming: false, error: true }
+        setStreaming(false)
+        return updated
+      }
+      setStreaming(false)
+      return [...prev, { id: generateId(), role: 'assistant', content: data.error, timestamp: Date.now(), error: true }]
+    })
   }, [socket, threadId])
 
   useEffect(() => {

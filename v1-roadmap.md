@@ -25,9 +25,9 @@ Legend: `[ ]` = pending, `[x]` = done, `[~]` = in progress
   - [x] `outputFilter` tests (20 passing)
   - [x] `agentManager` tests (30 passing)
   - [ ] `sessionManager` tests (blocked: heavy node-pty/WorkspaceManager deps)
-- [ ] **3. Fix StrictMode double-fire pattern**
-  - [ ] Shared `useSocketEvent` hook that guarantees `return unsub`
-  - [ ] Audit every existing socket listener consumer in `src/`
+- [x] **3. Fix StrictMode double-fire pattern**
+  - [x] Shared `useSocketEvent` hook that guarantees `return unsub`
+  - [x] Audit every existing socket listener consumer in `src/`
 - [ ] **4. Centralize config**
   - [ ] Single `config.ts` for port, CORS, session timeout, max buffer size
   - [ ] Server + builder read from same source
@@ -63,3 +63,4 @@ Legend: `[ ]` = pending, `[x]` = done, `[~]` = in progress
 | 2026-08-06 | Branch `agntspce-v1` created; roadmap added |
 | 2026-08-06 | **Done:** `main.ts` split — extracted `config.ts`, `window.ts`, `server/` (bootstrap, api, context, per-domain handlers); `main.ts` now 95 lines. `tsc -b` + `vite build` + lint pass. |
 | 2026-08-06 | **Done:** vitest added — `vitest.config.ts`, `"test": "vitest run"` script; 74 passing tests across `statusDetector` (24), `outputFilter` (20), `agentManager` (30). `vitest.config.ts` added to `tsconfig.node.json`. Orchestration integration tests excluded from vitest (run via `node --test`). `tsc -b` + `vite build` + `oxlint` all pass. |
+| 2026-08-06 | **Done:** StrictMode double-fire fix — new `useSocketEvent` hook guarantees `return unsub` structurally; migrated `App.tsx` (terminal-output buffer) and `ChatSidebar` (chat stream/response/error) to it. Audited `TerminalPane`/`TerminalArea` — already clean up correctly. `tsc -b` + `vite build` pass. |

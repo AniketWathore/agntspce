@@ -19,6 +19,7 @@ import { CodeEditor } from './components/CodeEditor'
 import type { Notification } from './components/NotificationPanel'
 
 import { useSocket } from './hooks/useSocket'
+import useSocketEvent from './hooks/useSocketEvent'
 
 import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenFile } from './types'
 import '@vscode/codicons/dist/codicon.css'
@@ -293,17 +294,12 @@ function App() {
     setAgentModalSession(sessionId)
   }
 
-  useEffect(() => {
-    const unsub = onTerminalOutput((data: TerminalOutput) => {
-      const current = (writeBuffersRef.current[data.sessionId] || '') + data.data
-      writeBuffersRef.current[data.sessionId] = current.length > MAX_BUFFER_BYTES
-        ? current.slice(-MAX_BUFFER_BYTES)
-        : current
-    })
-    return unsub
+  useSocketEvent<TerminalOutput>(onTerminalOutput, (data) => {
+    const current = (writeBuffersRef.current[data.sessionId] || '') + data.data
+    writeBuffersRef.current[data.sessionId] = current.length > MAX_BUFFER_BYTES
+      ? current.slice(-MAX_BUFFER_BYTES)
+      : current
   }, [onTerminalOutput])
-
-
 
   const prevSessionRef = useRef<Record<string, SessionState>>({})
   const firstMountRef = useRef(true)
