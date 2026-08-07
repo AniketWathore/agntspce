@@ -696,7 +696,7 @@ export class SessionManager extends EventEmitter {
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)
-    this.statusDetector.reset(sessionId)
+    this.statusDetector?.reset(sessionId)
     return true
   }
 
