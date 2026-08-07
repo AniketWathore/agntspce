@@ -110,7 +110,18 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     function doFit() {
       try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch { }
     }
-    setTimeout(doFit, 100)
+    let fitRaf = 0
+    let fitAttempts = 0
+    function retryFit() {
+      doFit()
+      const container = terminalRef.current
+      const hasSize = !!container && container.clientWidth > 0 && container.clientHeight > 0
+      if ((!hasSize || term.cols < 2 || term.rows < 2) && fitAttempts < 30) {
+        fitAttempts++
+        fitRaf = requestAnimationFrame(retryFit)
+      }
+    }
+    fitRaf = requestAnimationFrame(retryFit)
 
     term.onData((data) => {
       onInput(session.id, data)
@@ -164,6 +175,7 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
     return () => {
+      cancelAnimationFrame(fitRaf)
       unsub?.()
       themeObserver.disconnect()
       try { webglAddonRef.current?.dispose() } catch { }
@@ -175,14 +187,29 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
 
   useEffect(() => {
     if (!fitAddonRef.current || !paneRef.current) return
+    let raf = 0
     const observer = new ResizeObserver(() => {
-      try {
-        fitAddonRef.current?.fit()
-        termInstance.current?.refresh(0, termInstance.current.rows - 1)
-      } catch { }
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        try {
+          const term = termInstance.current
+          if (term) {
+            const prevCols = term.cols
+            const prevRows = term.rows
+            fitAddonRef.current?.fit()
+            if (term.cols !== prevCols || term.rows !== prevRows) {
+              term.refresh(0, term.rows - 1)
+            }
+          }
+        } catch { }
+      })
     })
     observer.observe(paneRef.current)
-    return () => observer.disconnect()
+    return () => {
+      cancelAnimationFrame(raf)
+      observer.disconnect()
+    }
   }, [])
 
   return (

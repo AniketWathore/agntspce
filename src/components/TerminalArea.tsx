@@ -138,7 +138,18 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     }
     webglAddonRef.current = webglAddon
     function doFit() { try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch {} }
-    setTimeout(doFit, 100)
+    let fitRaf = 0
+    let fitAttempts = 0
+    function retryFit() {
+      doFit()
+      const container = terminalRef.current
+      const hasSize = !!container && container.clientWidth > 0 && container.clientHeight > 0
+      if ((!hasSize || term.cols < 2 || term.rows < 2) && fitAttempts < 30) {
+        fitAttempts++
+        fitRaf = requestAnimationFrame(retryFit)
+      }
+    }
+    fitRaf = requestAnimationFrame(retryFit)
     term.onData((data) => { onInput(session.id, data) })
     term.onResize(({ cols, rows }) => { onResize(session.id, cols, rows) })
     termInstance.current = term
@@ -181,6 +192,7 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     })
 
     return () => {
+      cancelAnimationFrame(fitRaf)
       unsub?.()
       themeObserver.disconnect()
       try { webglAddonRef.current?.dispose() } catch { }
@@ -199,11 +211,19 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
   useEffect(() => {
     const el = terminalRef.current
     if (!el || hidden) return
+    let raf = 0
     const ro = new ResizeObserver(() => {
-      if (fitAddonRef.current) try { fitAddonRef.current.fit() } catch {}
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        if (fitAddonRef.current) try { fitAddonRef.current.fit() } catch {}
+      })
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
   }, [hidden])
 
   return (
@@ -349,8 +369,6 @@ export default function TerminalArea({
     : 0
   const tilingStyle = getTilingStyle(filteredSessions.length)
 
-  if (shellOnly && !bottomShellOpen && !activeView) return null
-
   return (
     <div className={`terminal-area-wrapper${terminalFullscreen ? ' fullscreen' : ''}`} style={{ position: 'relative' }}>
       {/* Terminal content — always mounted, never unmounted */}
@@ -359,7 +377,6 @@ export default function TerminalArea({
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
-        visibility: activePage ? 'hidden' : 'visible',
         pointerEvents: activePage ? 'none' : 'auto',
       }}>
         {!shellOnly && !activePage && (
@@ -402,50 +419,7 @@ export default function TerminalArea({
           </div>
         )}
 
-        {shellOnly ? (
-          <>
-            <div className={`bottom-shell${terminalDrag ? ' no-transition' : ''}`} style={{ flex: bottomShellOpen ? '1' : '0 0 0', overflow: 'hidden', minHeight: bottomShellOpen ? 80 : 0 }}>
-              <div className="bottom-shell-body" style={{ display: bottomShellOpen ? 'flex' : 'none' }}>
-                <div className="bottom-shell-terminal-area">
-                  {shellSessions.length === 0 ? (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-                      No shell terminals
-                    </div>
-                  ) : (
-                    shellSessions.map(s => (
-                      <ShellTerminal
-                        key={s.id}
-                        session={s}
-                        onInput={onInput}
-                        onResize={onResize}
-                        writeData={writeBuffersRef.current[s.id] || ''}
-                        hidden={s.id !== activeShellId}
-                        onTerminalOutput={onTerminalOutput}
-                      />
-                    ))
-                  )}
-                </div>
-                <ShellTabList
-                  shells={shellSessions}
-                  activeShellId={activeShellId}
-                  onSelect={setActiveShellId}
-                  onClose={handleShellClose}
-                  header={
-                    <div className="shell-tab-list-header">
-                      <div className="shell-tab-list-header-actions">
-                        <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
-                        <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-                          {terminalFullscreen ? '⊠' : '⊡'}
-                        </button>
-                        <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
-                      </div>
-                    </div>
-                  }
-                />
-              </div>
-            </div>
-          </>
-        ) : sessions.length === 0 ? (
+        {sessions.length === 0 ? (
           <>
             <div className="terminal-area-empty" style={!showAgents ? { display: 'none' } : {}}>
               <div className="empty-state">
