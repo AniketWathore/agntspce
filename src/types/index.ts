@@ -241,6 +241,7 @@ declare global {
       windowMaximize: () => Promise<void>
       windowClose: () => Promise<void>
       windowIsMaximized: () => Promise<boolean>
+      newWindow: () => Promise<void>
       popupMenu: (menuName: string, x: number, y: number) => Promise<void>
     }
   }

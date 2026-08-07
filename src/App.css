@@ -3630,6 +3630,37 @@
   flex: 1;
 }
 
+.create-workspace-presets-toggle {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  padding: 4px 0;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.create-workspace-presets-toggle:hover {
+  color: var(--accent);
+}
+
+.create-workspace-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.preset-script-input {
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
 .browse-btn {
   padding: 8px 14px;
   background: var(--bg-surface);

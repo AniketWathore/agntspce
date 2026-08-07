@@ -66,6 +66,9 @@ app.whenReady().then(async () => {
     if (activeWs) {
       ctx.sessionManager.setWorkspace(activeWs)
       await ctx.worktreeHelper.ensureWorktreesExist(activeWs)
+      try { await ctx.workspaceManager.runSetupScript(activeWs) } catch (e) {
+        console.warn('Setup script failed on boot:', e)
+      }
       // Check for saved sessions first. If they exist (with correct agent types),
       // restore them directly and skip creating default sessions from workspace.terminals.
       // This prevents wrong-type or duplicate sessions on app restart.

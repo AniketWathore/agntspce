@@ -79,16 +79,16 @@ export function rebuildMenu() {
         {
           label: 'File',
           submenu: [
-            { label: 'New Window', accelerator: 'Cmd+N', click: () => createNewWindow() },
-            { label: 'New Workspace', accelerator: 'Cmd+Shift+N', click: () => sendMenuAction('new-workspace') },
-            { label: 'New Agent', accelerator: 'Cmd+Shift+A', click: () => sendMenuAction('new-agent') },
-            { label: 'New Shell', accelerator: 'Cmd+Shift+S', click: () => sendMenuAction('new-shell') },
+            { label: 'New Window', accelerator: 'Cmd+T', click: () => createNewWindow() },
+            { label: 'New Workspace', accelerator: 'Cmd+N', click: () => sendMenuAction('new-workspace') },
+            { label: 'New Agent', accelerator: 'Cmd+A', click: () => sendMenuAction('new-agent') },
+            { label: 'Toggle Shell Panel', accelerator: 'Cmd+S', click: () => sendMenuAction('new-shell') },
             { type: 'separator' as const },
             { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
             { label: 'Load Workspace', accelerator: 'Cmd+O', click: () => sendMenuAction('load-workspace') },
             ...recentItems,
             { type: 'separator' as const },
-            { label: 'Save', accelerator: 'Cmd+S', click: () => sendMenuAction('save-workspace') },
+            { label: 'Save', click: () => sendMenuAction('save-workspace') },
             { label: 'Save As...', accelerator: 'Cmd+Shift+S', click: () => sendMenuAction('save-workspace-as') },
             { type: 'separator' as const },
             { label: 'Close Window', accelerator: 'Cmd+W', role: 'close' as const },
@@ -104,7 +104,7 @@ export function rebuildMenu() {
             { label: 'Cut', accelerator: 'Cmd+X', role: 'cut' as const },
             { label: 'Copy', accelerator: 'Cmd+C', role: 'copy' as const },
             { label: 'Paste', accelerator: 'Cmd+V', role: 'paste' as const },
-            { label: 'Select All', accelerator: 'Cmd+A', role: 'selectAll' as const },
+            { label: 'Select All', click: (item, focusedWindow) => focusedWindow?.webContents.selectAll() },
             { type: 'separator' as const },
             { role: 'services' as const },
             { type: 'separator' as const },
@@ -122,20 +122,36 @@ export function rebuildMenu() {
             { label: 'Actual Size', accelerator: 'Cmd+0', role: 'resetZoom' as const },
             { type: 'separator' as const },
             {
-              label: 'Toggle Shell Sidebar',
+              label: 'Toggle Chat Sidebar',
               accelerator: 'Cmd+B',
-              click: () => sendMenuAction('toggle-shell-sidebar'),
+              click: () => sendMenuAction('toggle-chat-sidebar'),
             },
             {
               label: 'Toggle Workspace Sidebar',
-              accelerator: 'Cmd+Shift+B',
+              accelerator: 'Cmd+E',
               click: () => sendMenuAction('toggle-workspace-sidebar'),
             },
             { type: 'separator' as const },
             {
               label: 'Focus Active Terminal',
-              accelerator: 'Cmd+Shift+F',
+              accelerator: 'Cmd+F',
               click: () => sendMenuAction('toggle-focus'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Dashboard',
+              accelerator: 'Cmd+D',
+              click: () => sendMenuAction('show-dashboard'),
+            },
+            {
+              label: 'Git Review',
+              accelerator: 'Cmd+G',
+              click: () => sendMenuAction('show-git-review'),
+            },
+            {
+              label: 'Settings',
+              accelerator: 'Cmd+J',
+              click: () => sendMenuAction('show-settings'),
             },
             { type: 'separator' as const },
             {
@@ -215,16 +231,16 @@ export function rebuildMenu() {
         {
           label: 'File',
           submenu: [
-            { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => createNewWindow() },
-            { label: 'New Workspace', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenuAction('new-workspace') },
-            { label: 'New Agent', accelerator: 'CmdOrCtrl+Shift+A', click: () => sendMenuAction('new-agent') },
-            { label: 'New Shell', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('new-shell') },
+            { label: 'New Window', accelerator: 'CmdOrCtrl+T', click: () => createNewWindow() },
+            { label: 'New Workspace', accelerator: 'CmdOrCtrl+N', click: () => sendMenuAction('new-workspace') },
+            { label: 'New Agent', accelerator: 'CmdOrCtrl+A', click: () => sendMenuAction('new-agent') },
+            { label: 'Toggle Shell Panel', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('new-shell') },
             { type: 'separator' as const },
             { label: 'Duplicate Workspace', click: () => sendMenuAction('duplicate-workspace') },
             { label: 'Load Workspace', accelerator: 'CmdOrCtrl+O', click: () => sendMenuAction('load-workspace') },
             ...recentItems,
             { type: 'separator' as const },
-            { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendMenuAction('save-workspace') },
+            { label: 'Save', click: () => sendMenuAction('save-workspace') },
             { label: 'Save As...', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('save-workspace-as') },
             { type: 'separator' as const },
             { label: 'Close Window', accelerator: 'CmdOrCtrl+W', role: 'close' as const },
@@ -244,7 +260,6 @@ export function rebuildMenu() {
             { label: 'Paste', click: (item, focusedWindow) => focusedWindow?.webContents.paste() },
             { label: 'Select All', click: (item, focusedWindow) => focusedWindow?.webContents.selectAll() },
             { type: 'separator' as const },
-            { role: 'find' as const },
           ],
         },
         {
@@ -255,20 +270,36 @@ export function rebuildMenu() {
             { role: 'resetZoom' as const },
             { type: 'separator' as const },
             {
-              label: 'Toggle Shell Sidebar',
+              label: 'Toggle Chat Sidebar',
               accelerator: 'CmdOrCtrl+B',
-              click: () => sendMenuAction('toggle-shell-sidebar'),
+              click: () => sendMenuAction('toggle-chat-sidebar'),
             },
             {
               label: 'Toggle Workspace Sidebar',
-              accelerator: 'CmdOrCtrl+Shift+B',
+              accelerator: 'CmdOrCtrl+E',
               click: () => sendMenuAction('toggle-workspace-sidebar'),
             },
             { type: 'separator' as const },
             {
               label: 'Focus Active Terminal',
-              accelerator: 'CmdOrCtrl+Shift+F',
+              accelerator: 'CmdOrCtrl+F',
               click: () => sendMenuAction('toggle-focus'),
+            },
+            { type: 'separator' as const },
+            {
+              label: 'Dashboard',
+              accelerator: 'CmdOrCtrl+D',
+              click: () => sendMenuAction('show-dashboard'),
+            },
+            {
+              label: 'Git Review',
+              accelerator: 'CmdOrCtrl+G',
+              click: () => sendMenuAction('show-git-review'),
+            },
+            {
+              label: 'Settings',
+              accelerator: 'CmdOrCtrl+J',
+              click: () => sendMenuAction('show-settings'),
             },
             { type: 'separator' as const },
             {
@@ -372,6 +403,7 @@ export function createWindow() {
 }
 
 export function registerIpcHandlers(rebuildMenuFn: () => void) {
+  ipcMain.handle('new-window', () => createNewWindow())
   ipcMain.handle('window-minimize', () => mainWindow?.minimize())
   ipcMain.handle('window-maximize', () => {
     if (mainWindow?.isMaximized()) mainWindow.unmaximize()

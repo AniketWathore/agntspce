@@ -195,7 +195,7 @@ export class WorkspaceManager {
     } catch {}
   }
 
-  async cloneFromGitUrl(gitUrl: string, name?: string): Promise<Workspace> {
+  async cloneFromGitUrl(gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }): Promise<Workspace> {
     const repoName = name || path.basename(gitUrl).replace(/\.git$/, '')
     const id = repoName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     const cloneDir = path.join(os.homedir(), 'AgntSpce', repoName)
@@ -224,6 +224,8 @@ export class WorkspaceManager {
           worktrees: { enabled: false, count: 0, namingPattern: 'work{n}', autoCreate: false },
           lastAccess: new Date().toISOString(),
           gitUrl,
+          setupScript: scripts?.setupScript,
+          teardownScript: scripts?.teardownScript,
         }
         await fs.writeFile(wsDir, JSON.stringify(ws, null, 2))
         this.workspaces.set(id, ws)

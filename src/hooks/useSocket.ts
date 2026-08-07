@@ -45,7 +45,7 @@ interface UseSocketReturn {
   executionHistory: ExecutionEvent[]
   sessionStartedAt: number
   requestFilterStats: () => void
-  createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
+  createWorkspaceFromGit: (gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
   addWorktree: (workspaceId: string) => Promise<any>
   removeWorktree: (workspaceId: string, worktreeId: string) => Promise<any>
@@ -412,9 +412,9 @@ export function useSocket(): UseSocketReturn {
     })
   }, [])
 
-  const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string): Promise<any> => {
+  const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }): Promise<any> => {
     return new Promise((resolve) => {
-      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name }, (res: any) => resolve(res))
+      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name, setupScript: scripts?.setupScript, teardownScript: scripts?.teardownScript }, (res: any) => resolve(res))
     })
   }, [])
 

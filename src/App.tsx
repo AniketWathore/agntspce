@@ -27,6 +27,7 @@ import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenF
 import '@vscode/codicons/dist/codicon.css'
 import './App.css'
 import { assetUrl } from './utils/assetUrl'
+import { parseCombo, eventMatches, type ShortcutCombo } from './utils/shortcuts'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'claude', name: 'Claude Code', icon: '🤖' },
@@ -178,6 +179,8 @@ function App() {
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set())
   const [editorScrollPositions, setEditorScrollPositions] = useState<Record<string, { line: number; column: number }>>({})
   const [viewMode, setViewMode] = useState<'agents' | 'files'>('agents')
+
+  const [agentPickerTrigger, setAgentPickerTrigger] = useState(0)
 
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [, setSessionHistory] = useState<any[]>([])
@@ -356,7 +359,7 @@ function App() {
     updateWorkspaceConfig(id, { name }).then(() => refreshWorkspaces())
   }
 
-  function addWorkspace(name: string, path: string) {
+  function addWorkspace(name: string, path: string, scripts?: { setupScript?: string; teardownScript?: string }) {
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     createWorkspace({
       id,
@@ -364,6 +367,8 @@ function App() {
       workspaceType: 'single-repo',
       repository: { path, type: 'generic' },
       worktrees: { enabled: false, count: 0, namingPattern: 'work{n}', autoCreate: false },
+      setupScript: scripts?.setupScript,
+      teardownScript: scripts?.teardownScript,
     }).then((res: any) => {
       if (res?.ok) {
         switchWorkspace(id)
@@ -395,7 +400,7 @@ function App() {
     return () => { active = false; clearInterval(id) }
   }, [wsPath, getGitFullStatus])
 
-  const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi'])
+  const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'kilocode', 'windsurf'])
   const agentSessions = useMemo(
     () => Object.values(sessions).filter(s => agentTypes.has(s.type)).slice(0, 12),
     [sessions]
@@ -413,16 +418,23 @@ function App() {
     setCreateWorkspaceModalOpen(true)
   }
 
-  async function handleCreateWorkspaceLocal(name: string, path: string) {
-    addWorkspace(name, path)
+  async function handleCreateWorkspaceLocal(name: string, path: string, scripts?: { setupScript?: string; teardownScript?: string }) {
+    addWorkspace(name, path, scripts)
   }
 
-  async function handleCreateWorkspaceFromGit(gitUrl: string, name?: string) {
-    const res = await createWorkspaceFromGit(gitUrl, name)
+  async function handleCreateWorkspaceFromGit(gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }) {
+    const res = await createWorkspaceFromGit(gitUrl, name, scripts)
     if (res?.ok) {
       switchWorkspace(res.workspace.id)
     } else {
       throw new Error(res?.error || 'Failed to clone repository')
+    }
+  }
+
+  async function handleLoadWorkspace() {
+    const result = await window.electronAPI?.importWorkspace()
+    if (result?.workspace) {
+      handleSelectWorkspace(result.workspace.id)
     }
   }
 
@@ -436,17 +448,39 @@ function App() {
   }
 
   const commanderCommands = useMemo(() => [
-    { id: 'new-agent', category: 'Terminals', label: 'New Agent Session', description: 'Create a new AI agent terminal', shortcut: '⌘⇧A', action: () => { createRawSession('claude') } },
-    { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', shortcut: '⌘⇧S', action: () => { handleNewShell() } },
-    { id: 'new-workspace', category: 'Workspaces', label: 'Create Workspace', description: 'Create a new workspace', shortcut: '⌘⇧N', action: () => { setCreateWorkspaceModalOpen(true) } },
-    { id: 'focus-mode', category: 'View', label: 'Toggle Focus Mode', description: 'Dim inactive terminals', shortcut: '⌘⇧F', action: () => { setFocusMode(o => !o) } },
-    { id: 'toggle-chat', category: 'View', label: 'Toggle Chat Sidebar', description: 'Show/hide the chat panel', shortcut: '⌘B', action: () => { handleToggleChatSidebar() } },
-    { id: 'toggle-workspace-sidebar', category: 'View', label: 'Toggle Workspace Sidebar', description: 'Show/hide workspace list', shortcut: '⌘⇧B', action: () => { handleToggleWorkspaceSidebar() } },
-    { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', action: () => { handleToggleBottomShell() } },
-    { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', action: () => { setActiveView('dashboard') } },
-    { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', action: () => { setActiveView('settings') } },
+    { id: 'commander', category: 'Navigation', label: 'Open Command Palette', description: 'Search and run commands', combo: 'cmd+k', action: () => { setCommanderOpen(o => !o) } },
+    { id: 'new-agent', category: 'Terminals', label: 'New Agent Session', description: 'Create a new AI agent terminal', combo: 'cmd+a', action: () => { handleToggleNewAgentPicker() } },
+    { id: 'new-shell', category: 'Terminals', label: 'New Shell Terminal', description: 'Open a shell terminal', combo: 'cmd+s', action: () => { handleToggleBottomShell() } },
+    { id: 'new-workspace', category: 'Workspaces', label: 'Create Workspace', description: 'Create a new workspace', combo: 'cmd+n', action: () => { setCreateWorkspaceModalOpen(true) } },
+    { id: 'load-workspace', category: 'Workspaces', label: 'Open Workspace', description: 'Load a workspace file', combo: 'cmd+o', action: () => { handleLoadWorkspace() } },
+    { id: 'new-window', category: 'Terminals', label: 'New Window', description: 'Open a new app window', combo: 'cmd+t', action: () => { window.electronAPI?.newWindow?.() } },
+    { id: 'focus-mode', category: 'View', label: 'Toggle Focus Mode', description: 'Dim inactive terminals', combo: 'cmd+f', action: () => { setFocusMode(o => !o) } },
+    { id: 'toggle-chat', category: 'View', label: 'Toggle Chat Sidebar', description: 'Show/hide the chat panel', combo: 'cmd+b', action: () => { handleToggleChatSidebar() } },
+    { id: 'toggle-workspace-sidebar', category: 'View', label: 'Toggle Workspace Sidebar', description: 'Show/hide workspace list', combo: 'cmd+e', action: () => { handleToggleWorkspaceSidebar() } },
+    { id: 'toggle-shell', category: 'View', label: 'Toggle Shell Panel', description: 'Show/hide the bottom shell panel', combo: 'cmd+\\', action: () => { handleToggleBottomShell() } },
+    { id: 'show-dashboard', category: 'View', label: 'Show Dashboard', description: 'View workspace stats and activity', combo: 'cmd+d', action: () => { handleToggleView('dashboard') } },
+    { id: 'show-git-review', category: 'View', label: 'Show Git Review', description: 'Review git changes and comments', combo: 'cmd+g', action: () => { handleToggleView('git-review') } },
+    { id: 'show-settings', category: 'View', label: 'Show Settings', description: 'Configure preferences', combo: 'cmd+j', action: () => { handleToggleView('settings') } },
     { id: 'clear-notifications', category: 'Notifications', label: 'Clear Notifications', description: 'Dismiss all notifications', action: () => { dismissAllNotifications() } },
-  ], [createRawSession, handleNewShell, setFocusMode, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView])
+  ], [setFocusMode, handleToggleChatSidebar, handleToggleWorkspaceSidebar, handleToggleBottomShell, setActiveView, setCommanderOpen, handleLoadWorkspace, handleToggleNewAgentPicker, handleToggleView])
+
+  const shortcuts = useMemo(() => {
+    return commanderCommands
+      .map(c => {
+        if (!c.combo) return null
+        const parsed = parseCombo(c.combo)
+        if (!parsed) return null
+        return { id: c.id, combo: parsed.combo, display: parsed.display, action: c.action }
+      })
+      .filter((s): s is { id: string; combo: ShortcutCombo; display: string; action: () => void } => s !== null)
+  }, [commanderCommands])
+
+  const commanderDisplay = useMemo(() => {
+    return commanderCommands.map(c => {
+      const parsed = c.combo ? parseCombo(c.combo) : null
+      return { ...c, display: parsed?.display }
+    })
+  }, [commanderCommands])
 
   function handleSelectWorkspace(id: string) {
     switchWorkspace(id)
@@ -529,19 +563,31 @@ function App() {
     setBottomShellOpen(o => !o)
   }
 
+  function handleToggleNewAgentPicker() {
+    setViewMode('agents')
+    setActiveView(null)
+    setBottomShellOpen(false)
+    setAgentPickerTrigger(t => t + 1)
+  }
+
+  function handleToggleView(view: 'dashboard' | 'settings' | 'git-review') {
+    setActiveView(prev => prev === view ? null : view)
+  }
+
   const menuActionRef = useRef<Record<string, (...args: any[]) => void>>({})
   menuActionRef.current = {
     handleNewTerminal, handleNewShell, handleCreateWorkspace, emit,
     handleSelectWorkspace, handleToggleChatSidebar, handleToggleWorkspaceSidebar,
-    setFocusMode,
+    setFocusMode, handleLoadWorkspace, setActiveView, handleToggleBottomShell,
+    handleToggleNewAgentPicker, handleToggleView,
   }
 
   useEffect(() => {
     const unsub = window.electronAPI?.onMenuAction?.((action, data) => {
       const ref = menuActionRef.current
       switch (action) {
-        case 'new-agent': ref.handleNewTerminal('claude'); break
-        case 'new-shell': ref.handleNewShell(); break
+        case 'new-agent': ref.handleToggleNewAgentPicker(); break
+        case 'new-shell': ref.handleToggleBottomShell(); break
         case 'new-workspace': ref.handleCreateWorkspace(); break
         case 'save-workspace': ref.emit('save-workspace'); break
         case 'save-workspace-as': {
@@ -550,14 +596,7 @@ function App() {
           })
           break
         }
-        case 'load-workspace': {
-          window.electronAPI?.importWorkspace().then(result => {
-            if (result?.workspace) {
-              ref.handleSelectWorkspace(result.workspace.id)
-            }
-          })
-          break
-        }
+        case 'load-workspace': ref.handleLoadWorkspace(); break
         case 'duplicate-workspace': {
           const name = prompt('New workspace name:')
           if (name?.trim()) {
@@ -568,14 +607,17 @@ function App() {
           break
         }
         case 'switch-workspace': ref.handleSelectWorkspace(data); break
-        case 'toggle-shell-sidebar': ref.handleToggleChatSidebar(); break
+        case 'toggle-chat-sidebar': ref.handleToggleChatSidebar(); break
         case 'toggle-workspace-sidebar': ref.handleToggleWorkspaceSidebar(); break
         case 'toggle-focus': ref.setFocusMode((o: boolean) => !o); break
+        case 'show-dashboard': ref.handleToggleView('dashboard'); break
+        case 'show-git-review': ref.handleToggleView('git-review'); break
+        case 'show-settings': ref.handleToggleView('settings'); break
         case 'show-shortcuts': alert(
-          '⌘N — New Window\n⌘⇧N — New Workspace\n⌘⇧A — New Agent\n⌘⇧S — New Shell\n' +
-          '⌘O — Load Workspace\n⌘S — Save\n⌘W — Close Window\n' +
-          '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab\n' +
-          '⌘B — Chat Sidebar\n⌘⇧B — Workspace Sidebar'
+          '⌘A — New Agent\n⌘S — Shell Panel\n⌘N — New Workspace\n⌘O — Open Workspace\n⌘T — New Window\n' +
+          '⌘B — Chat Sidebar\n⌘E — Workspace Sidebar\n⌘F — Focus Mode\n' +
+          '⌘D — Dashboard\n⌘G — Git Review\n⌘J — Settings\n⌘K — Command Palette\n' +
+          '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab'
         ); break
         case 'show-about': alert('AgntSpce — Currently in Beta'); break
       }
@@ -587,18 +629,6 @@ function App() {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
       if (!isMeta) return
-
-      if (e.key === 'k') {
-        e.preventDefault()
-        setCommanderOpen(o => !o)
-        return
-      }
-
-      if (e.key === 'F' && e.shiftKey) {
-        e.preventDefault()
-        setFocusMode(o => !o)
-        return
-      }
 
       if (e.key === 'Tab') {
         e.preventDefault()
@@ -617,11 +647,18 @@ function App() {
       if (num >= 1 && num <= 9 && num <= agentSessions.length) {
         e.preventDefault()
         setActiveSessionId(agentSessions[num - 1].id)
+        return
+      }
+
+      const match = shortcuts.find(s => eventMatches(e, s.combo))
+      if (match) {
+        e.preventDefault()
+        match.action()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [activeSessionId, agentSessions])
+  }, [activeSessionId, agentSessions, shortcuts])
 
   function onResizerMouseDown(side: 'left' | 'right') {
     return (e: React.MouseEvent) => {
@@ -1121,6 +1158,7 @@ function App() {
             onTerminalResizerMouseDown={onTerminalResizerMouseDown}
             terminalHeight={terminalHeight}
             terminalDrag={terminalDrag}
+            agentPickerTrigger={agentPickerTrigger}
             pageViews={[
               { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
                 <Suspense fallback={<div className="panel-suspense-fallback" />}>
@@ -1193,7 +1231,7 @@ function App() {
         onClose={() => setAgentModalSession(null)}
       />
       {commanderOpen && (
-        <CommanderPanel commands={commanderCommands} onClose={() => setCommanderOpen(false)} />
+        <CommanderPanel commands={commanderDisplay} onClose={() => setCommanderOpen(false)} />
       )}
       {notificationPanelOpen && (
         <NotificationPanel

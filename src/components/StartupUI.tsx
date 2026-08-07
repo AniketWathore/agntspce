@@ -11,9 +11,10 @@ interface StartupUIProps {
 }
 
 export default function StartupUI({ sessionId, agentConfigs, onStart, onAdvanced, onDismiss }: StartupUIProps) {
-  const [selectedAgent, setSelectedAgent] = useState('claude')
+  const [selectedAgent, setSelectedAgent] = useState(agentConfigs[0]?.id || 'claude')
 
   const config = agentConfigs.find(a => a.id === selectedAgent)
+  const modes = config?.modes || []
   const defaultFlags = config?.flags.filter(f => f.default).map(f => f.id) || []
 
   function handleMode(mode: string) {
@@ -46,9 +47,9 @@ export default function StartupUI({ sessionId, agentConfigs, onStart, onAdvanced
           </select>
         </div>
         <div className="startup-modes">
-          <button className="startup-mode-btn" onClick={() => handleMode('fresh')}>Fresh</button>
-          <button className="startup-mode-btn" onClick={() => handleMode('continue')}>Continue</button>
-          <button className="startup-mode-btn" onClick={() => handleMode('resume')}>Resume</button>
+          {modes.map(m => (
+            <button key={m.id} className="startup-mode-btn" onClick={() => handleMode(m.id)}>{m.name}</button>
+          ))}
         </div>
         <button className="startup-advanced" onClick={onAdvanced}>Advanced</button>
       </div>

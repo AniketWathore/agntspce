@@ -47,6 +47,7 @@ interface Props {
   onTerminalResizerMouseDown?: (e: React.MouseEvent) => void
   terminalHeight?: number
   terminalDrag?: boolean
+  agentPickerTrigger?: number
 }
 
 const AGENT_TYPES = [
@@ -248,6 +249,7 @@ export default function TerminalArea({
   chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
   pageViews, activeView, onViewChange, shellOnly,
   onTerminalResizerMouseDown, terminalHeight = 40, terminalDrag,
+  agentPickerTrigger = 0,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -320,6 +322,14 @@ export default function TerminalArea({
       onNewAgent()
     }
   }
+
+  const prevPickerTrigger = useRef(agentPickerTrigger)
+  useEffect(() => {
+    if (agentPickerTrigger !== prevPickerTrigger.current) {
+      prevPickerTrigger.current = agentPickerTrigger
+      handleAddAgentClick()
+    }
+  }, [agentPickerTrigger])
 
   function handleDropdownSelect(agentId: string) {
     setShowDropdown(false)

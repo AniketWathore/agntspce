@@ -17,6 +17,8 @@ const AGENT_COMMANDS: Record<string, string> = {
   droid: 'droid',
   amp: 'amp',
   pi: 'pi',
+  kilocode: 'kilocode',
+  windsurf: 'windsurf',
 }
 
 function getLoginShell(): string {
