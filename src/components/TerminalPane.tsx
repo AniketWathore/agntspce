@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import StatusDot from './StatusDot'
@@ -29,6 +30,7 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
   const [showStartup, setShowStartup] = useState(false)
 
@@ -94,6 +96,17 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
 
     term.open(terminalRef.current)
 
+    // Prefer the WebGL renderer (GPU-accelerated) for high-rate agent output.
+    // Fall back to the default DOM renderer when WebGL is unavailable.
+    let webglAddon: WebglAddon | null = null
+    try {
+      webglAddon = new WebglAddon()
+      term.loadAddon(webglAddon)
+    } catch {
+      webglAddon = null
+    }
+    webglAddonRef.current = webglAddon
+
     function doFit() {
       try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch { }
     }
@@ -153,6 +166,8 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     return () => {
       unsub?.()
       themeObserver.disconnect()
+      try { webglAddonRef.current?.dispose() } catch { }
+      webglAddonRef.current = null
       term.dispose()
       termInstance.current = null
     }

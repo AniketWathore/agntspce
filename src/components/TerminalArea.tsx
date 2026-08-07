@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
@@ -83,6 +84,7 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
 
   function buildTheme() {
     function v(name: string): string {
@@ -126,6 +128,14 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
     term.open(terminalRef.current)
+    let webglAddon: WebglAddon | null = null
+    try {
+      webglAddon = new WebglAddon()
+      term.loadAddon(webglAddon)
+    } catch {
+      webglAddon = null
+    }
+    webglAddonRef.current = webglAddon
     function doFit() { try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch {} }
     setTimeout(doFit, 100)
     term.onData((data) => { onInput(session.id, data) })
@@ -172,6 +182,8 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     return () => {
       unsub?.()
       themeObserver.disconnect()
+      try { webglAddonRef.current?.dispose() } catch { }
+      webglAddonRef.current = null
       term.dispose()
       termInstance.current = null
     }

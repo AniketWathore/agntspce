@@ -1,22 +1,24 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 
 import WorkspaceSidebar from './components/WorkspaceSidebar'
 import TerminalArea from './components/TerminalArea'
-import ChatSidebar from './components/ChatSidebar'
 import InputModal from './components/InputModal'
 import AgentModal from './components/AgentModal'
 import CreateWorkspaceModal from './components/CreateWorkspaceModal'
-import Dashboard from './components/Dashboard'
 import Settings from './components/Settings'
 import StatusBar from './components/StatusBar'
 import TitleBar from './components/TitleBar'
-import GitReviewPanel from './components/GitReviewPanel'
 import GitDiffViewer from './components/GitDiffViewer'
 import CommanderPanel from './components/CommanderPanel'
 import NotificationPanel from './components/NotificationPanel'
 import { EditorTabs } from './components/EditorTabs'
-import { CodeEditor } from './components/CodeEditor'
 import type { Notification } from './components/NotificationPanel'
+
+// Heavy panels loaded on demand to keep startup bundle small.
+const ChatSidebar = lazy(() => import('./components/ChatSidebar'))
+const Dashboard = lazy(() => import('./components/Dashboard'))
+const GitReviewPanel = lazy(() => import('./components/GitReviewPanel'))
+const CodeEditor = lazy(() => import('./components/CodeEditor').then(m => ({ default: m.CodeEditor })))
 
 import { useSocket } from './hooks/useSocket'
 import useSocketEvent from './hooks/useSocketEvent'
@@ -1017,21 +1019,23 @@ function App() {
             />
           )}
           {activeView === 'git-review' && (
-            <GitReviewPanel
-              worktreePath={activeWorkspace?.repository?.path || ''}
-              onSelectDiff={(filePath, status, commitHash) => openGitDiffTab(filePath, status, commitHash)}
-              getGitFullStatus={getGitFullStatus}
-              getGitFileDiff={getGitFileDiff}
-              getGitLog={getGitLog}
-              getGitBranches={getGitBranches}
-              getGitCommitFiles={getGitCommitFiles}
-              gitStageFile={gitStageFile}
-              gitUnstageFile={gitUnstageFile}
-              gitCommit={gitCommit}
-              gitPull={gitPull}
-              gitPush={gitPush}
-              gitFetch={gitFetch}
-            />
+            <Suspense fallback={<div className="panel-suspense-fallback" />}>
+              <GitReviewPanel
+                worktreePath={activeWorkspace?.repository?.path || ''}
+                onSelectDiff={(filePath, status, commitHash) => openGitDiffTab(filePath, status, commitHash)}
+                getGitFullStatus={getGitFullStatus}
+                getGitFileDiff={getGitFileDiff}
+                getGitLog={getGitLog}
+                getGitBranches={getGitBranches}
+                getGitCommitFiles={getGitCommitFiles}
+                gitStageFile={gitStageFile}
+                gitUnstageFile={gitUnstageFile}
+                gitCommit={gitCommit}
+                gitPull={gitPull}
+                gitPush={gitPush}
+                gitFetch={gitFetch}
+              />
+            </Suspense>
           )}
         </div>
         {(workspaceSidebarOpen || activeView === 'git-review') && <div className="resizer" onMouseDown={onResizerMouseDown('left')} />}
@@ -1062,18 +1066,20 @@ function App() {
                       language={activeFile.language}
                     />
                   ) : activeFile ? (
-                    <CodeEditor
-                      key={activeFile.id + (activeFileContent ? '' : '-empty')}
-                      filePath={activeFile.filePath}
-                      content={activeFileContent}
-                      language={activeFile.language}
-                      isDirty={isActiveFileDirty}
-                      theme={theme}
-                      scrollPosition={editorScrollPositions[activeFile.id] || null}
-                      onContentChange={handleFileContentChange}
-                      onSave={handleSaveFile}
-                      onScrollChange={handleEditorScrollChange}
-                    />
+                    <Suspense fallback={<div className="editor-suspense-fallback" />}>
+                      <CodeEditor
+                        key={activeFile.id + (activeFileContent ? '' : '-empty')}
+                        filePath={activeFile.filePath}
+                        content={activeFileContent}
+                        language={activeFile.language}
+                        isDirty={isActiveFileDirty}
+                        theme={theme}
+                        scrollPosition={editorScrollPositions[activeFile.id] || null}
+                        onContentChange={handleFileContentChange}
+                        onSave={handleSaveFile}
+                        onScrollChange={handleEditorScrollChange}
+                      />
+                    </Suspense>
                   ) : null}
                 </>
               ) : (
@@ -1117,21 +1123,23 @@ function App() {
             terminalDrag={terminalDrag}
             pageViews={[
               { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
-                <Dashboard
-                  workspaces={workspaces}
-                  sessions={sessions}
-                  activeWorkspace={activeWorkspace}
-                  deletedWorkspaces={deletedWorkspaces}
-                  onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
-                  onDelete={handleDeleteWorkspace}
-                  onRestore={handleRestoreWorkspace}
-                  onPermanentDelete={handlePermanentDelete}
-                  onNewWorkspace={handleCreateWorkspace}
-                  onClose={() => setActiveView(null)}
-                  filterStats={filterStats}
-                  searchEvents={searchEvents}
-                  commandHistory={commandHistory}
-                />
+                <Suspense fallback={<div className="panel-suspense-fallback" />}>
+                  <Dashboard
+                    workspaces={workspaces}
+                    sessions={sessions}
+                    activeWorkspace={activeWorkspace}
+                    deletedWorkspaces={deletedWorkspaces}
+                    onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+                    onDelete={handleDeleteWorkspace}
+                    onRestore={handleRestoreWorkspace}
+                    onPermanentDelete={handlePermanentDelete}
+                    onNewWorkspace={handleCreateWorkspace}
+                    onClose={() => setActiveView(null)}
+                    filterStats={filterStats}
+                    searchEvents={searchEvents}
+                    commandHistory={commandHistory}
+                  />
+                </Suspense>
               )},
               { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
                 <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} chatGetModels={chatGetModels} chatUpdateApiKey={chatUpdateApiKey} />
@@ -1143,21 +1151,25 @@ function App() {
         </main>
         <div className="resizer" style={{ opacity: chatSidebarOpen ? 1 : 0, pointerEvents: chatSidebarOpen ? 'auto' : 'none' }} onMouseDown={onResizerMouseDown('right')} />
         <div className={`panel-right${rightDrag ? ' no-transition' : ''}`} style={{ width: chatSidebarOpen ? chatWidth : 0 }}>
-          <ChatSidebar
-            onClose={() => setChatSidebarOpen(false)}
-            onNavigateToSettings={() => setActiveView('settings')}
-            socket={{
-              chatGetModels,
-              chatSendStream,
-              chatStopStream,
-              chatGetHistory,
-              chatUpdateApiKey,
-              chatDeleteThread,
-              onChatStreamChunk,
-              onChatResponse,
-              onChatError,
-            }}
-          />
+          {chatSidebarOpen && (
+            <Suspense fallback={<div className="panel-suspense-fallback" />}>
+              <ChatSidebar
+                onClose={() => setChatSidebarOpen(false)}
+                onNavigateToSettings={() => setActiveView('settings')}
+                socket={{
+                  chatGetModels,
+                  chatSendStream,
+                  chatStopStream,
+                  chatGetHistory,
+                  chatUpdateApiKey,
+                  chatDeleteThread,
+                  onChatStreamChunk,
+                  onChatResponse,
+                  onChatError,
+                }}
+              />
+            </Suspense>
+          )}
         </div>
       </div>
       <CreateWorkspaceModal

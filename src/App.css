@@ -1300,6 +1300,13 @@
   min-height: 0;
 }
 
+.editor-suspense-fallback,
+.panel-suspense-fallback {
+  flex: 1;
+  min-height: 0;
+  background: #1e1e1e;
+}
+
 .editor-empty-state {
   flex: 1;
   display: flex;

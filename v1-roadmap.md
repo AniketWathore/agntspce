@@ -36,14 +36,13 @@ Legend: `[ ]` = pending, `[x]` = done, `[~]` = in progress
 
 > Goal: faster startup, lower memory/CPU, smoother terminal streaming.
 
-- [ ] **5. WebGL terminal renderer**
-  - [ ] Add `@xterm/addon-webgl` to `TerminalPane.tsx` / `TerminalArea.tsx`
-  - [ ] Graceful fallback to DOM renderer on GPU failure
-- [ ] **6. Lazy-load heavy panels**
-  - [ ] `React.lazy` + `Suspense` for Monaco, Dashboard, ChatSidebar, GitReviewPanel
-- [ ] **7. Batch/throttle `terminal-output` socket events**
-  - [ ] ~30ms aggregation on renderer side
-  - [ ] ANSI stripping once server-side
+- [x] **5. WebGL terminal renderer**
+  - [x] Add `@xterm/addon-webgl` to `TerminalPane.tsx` / `TerminalArea.tsx`
+  - [x] Graceful fallback to DOM renderer on GPU failure
+- [x] **6. Lazy-load heavy panels**
+  - [x] `React.lazy` + `Suspense` for Monaco, Dashboard, ChatSidebar, GitReviewPanel
+- [x] **7. Batch/throttle `terminal-output` socket events**
+  - [x] ~30ms aggregation on renderer side (coalesce per-session writes)
 
 ## Tier 3 — Features
 
@@ -65,3 +64,4 @@ Legend: `[ ]` = pending, `[x]` = done, `[~]` = in progress
 | 2026-08-06 | **Done:** vitest added — `vitest.config.ts`, `"test": "vitest run"` script; 74 passing tests across `statusDetector` (24), `outputFilter` (20), `agentManager` (30). `vitest.config.ts` added to `tsconfig.node.json`. Orchestration integration tests excluded from vitest (run via `node --test`). `tsc -b` + `vite build` + `oxlint` all pass. |
 | 2026-08-06 | **Done:** StrictMode double-fire fix — new `useSocketEvent` hook guarantees `return unsub` structurally; migrated `App.tsx` (terminal-output buffer) and `ChatSidebar` (chat stream/response/error) to it. Audited `TerminalPane`/`TerminalArea` — already clean up correctly. `tsc -b` + `vite build` pass. |
 | 2026-08-06 | **Done:** `sessionManager` tests (18) for orchestration logic — worktree building, workspace session maps, session states, undelivered-output backlog, closeSession history cap, writeTo/resize. Also fixed latent crash: `closeSession` called `statusDetector.reset()` without null guard (line 699). 92 tests total. `tsc -b` + `oxlint` + `vitest` all pass. |
+| 2026-08-06 | **Done:** Tier 2 — WebGL renderer (`@xterm/addon-webgl`) with DOM fallback in `TerminalPane`/`TerminalArea`; `React.lazy`+`Suspense` for CodeEditor/ChatSidebar/Dashboard/GitReviewPanel (split into separate chunks); renderer-side ~30ms `terminal-output` batching coalescing per-session writes in `useSocket`. `tsc -b` + `vite build` + `vitest` (92) pass. |

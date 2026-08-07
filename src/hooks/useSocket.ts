@@ -118,6 +118,19 @@ export function useSocket(): UseSocketReturn {
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
   const filterEventCbs = useRef<((data: FilterEvent) => void)[]>([])
   const sessionUnhealthyCbs = useRef<((data: { sessionId: string, reason: string, usage?: any }) => void)[]>([])
+  const outputBuffer = useRef<Record<string, string>>({})
+  const outputTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushOutput = useCallback(() => {
+    outputTimer.current = null
+    const buffer = outputBuffer.current
+    outputBuffer.current = {}
+    for (const [sessionId, data] of Object.entries(buffer)) {
+      if (!data) continue
+      const payload = { sessionId, data }
+      terminalOutputCbs.current.forEach(cb => cb(payload))
+    }
+  }, [])
 
   useEffect(() => {
     const socket = io(SERVER_URL)
@@ -146,7 +159,11 @@ export function useSocket(): UseSocketReturn {
     })
 
     socket.on('terminal-output', (data: TerminalOutput) => {
-      terminalOutputCbs.current.forEach(cb => cb(data))
+      const cur = outputBuffer.current[data.sessionId] || ''
+      outputBuffer.current[data.sessionId] = cur + data.data
+      if (!outputTimer.current) {
+        outputTimer.current = setTimeout(flushOutput, 30)
+      }
     })
 
     socket.on('status-change', (data: StatusChange) => {
@@ -200,8 +217,12 @@ export function useSocket(): UseSocketReturn {
     socket.on('backlog', (data: Record<string, string>) => {
       for (const [sessionId, buffered] of Object.entries(data)) {
         if (buffered) {
-          terminalOutputCbs.current.forEach(cb => cb({ sessionId, data: buffered }))
+          const cur = outputBuffer.current[sessionId] || ''
+          outputBuffer.current[sessionId] = cur + buffered
         }
+      }
+      if (!outputTimer.current) {
+        outputTimer.current = setTimeout(flushOutput, 30)
       }
     })
 
@@ -247,9 +268,13 @@ export function useSocket(): UseSocketReturn {
   })
 
   return () => {
+      if (outputTimer.current) {
+        clearTimeout(outputTimer.current)
+        flushOutput()
+      }
       socket.disconnect()
     }
-  }, [])
+  }, [flushOutput])
 
   const onTerminalOutput = useCallback((cb: (data: TerminalOutput) => void) => {
     terminalOutputCbs.current.push(cb)
