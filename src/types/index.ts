@@ -103,6 +103,8 @@ export interface AgentStartConfig {
   reasoning?: string
   verbosity?: string
   resumeId?: string
+  declaredFiles?: string[]
+  prompt?: string
 }
 
 export interface FilterEvent {

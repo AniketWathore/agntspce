@@ -16,6 +16,7 @@ import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
 import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
+import { ContextWriter } from './orchestration/contextWriter'
 import * as rtkManager from './rtkManager'
 import { getActiveSearchPath, generateSessionToken } from './searchManager'
 import { resolveAgent, getLoginPath, getAllAgentBinaryDirs } from './agentResolver'
@@ -167,11 +168,16 @@ export class SessionManager extends EventEmitter {
   tokenUsageTracker = new TokenUsageTracker()
   outputFilter: OutputFilterService
   cavemanService = new CavemanService()
+  private contextWriter: ContextWriter | null = null
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
     this.io = io
     this.outputFilter = new OutputFilterService(dataDir)
+    // Start each app run with a clean slate: cumulative stats previously
+    // persisted inflated (ANSI/control-counted and double-counted) totals that
+    // never dropped across restarts, making the token dashboard unrealistic.
+    this.outputFilter.resetCumulativeStats()
     if (agentManager) this.agentManager = agentManager
     if (dataDir) this.cavemanService.setDataDir(dataDir)
     this.outputFilter.setOnCommandEvent((event) => {
@@ -193,6 +199,20 @@ export class SessionManager extends EventEmitter {
 
   getWorkspace(): Workspace | null {
     return this.workspace
+  }
+
+  private ensureContextWriter(): ContextWriter | null {
+    const repoPath = this.workspace?.repository?.path
+    if (!repoPath) {
+      this.contextWriter = null
+      return null
+    }
+    if (!this.contextWriter) {
+      this.contextWriter = new ContextWriter(repoPath, this.orchestrator?.getStateManager() ?? null)
+    } else {
+      this.contextWriter.setStateManager(this.orchestrator?.getStateManager() ?? null)
+    }
+    return this.contextWriter
   }
 
   setWorkspace(workspace: Workspace | null) {
@@ -307,7 +327,7 @@ export class SessionManager extends EventEmitter {
         }
 
         promises.push(
-          Promise.resolve().then(() => {
+          Promise.resolve().then(() =>
             this.createSession(sessionId, {
               command: getDefaultShell(),
               args,
@@ -317,7 +337,7 @@ export class SessionManager extends EventEmitter {
               repositoryName: terminal.repository?.name,
               repositoryType: terminal.repository?.type,
             })
-          })
+          )
         )
       }
     } else {
@@ -325,7 +345,7 @@ export class SessionManager extends EventEmitter {
         const claudeId = `${wt.id}-claude`
         if (!this.sessions.has(claudeId)) {
           promises.push(
-            Promise.resolve().then(() => {
+            Promise.resolve().then(() =>
               this.createSession(claudeId, {
                 command: getDefaultShell(),
                 args: buildShellArgs(`cd "${wt.path}"`),
@@ -333,13 +353,13 @@ export class SessionManager extends EventEmitter {
                 type: 'claude',
                 worktreeId: wt.id,
               })
-            })
+            )
           )
         }
         const serverId = `${wt.id}-server`
         if (!this.sessions.has(serverId)) {
           promises.push(
-            Promise.resolve().then(() => {
+            Promise.resolve().then(() =>
               this.createSession(serverId, {
                 command: getDefaultShell(),
                 args: buildShellArgs([
@@ -353,7 +373,7 @@ export class SessionManager extends EventEmitter {
                 type: 'server',
                 worktreeId: wt.id,
               })
-            })
+            )
           )
         }
         if (this.gitHelper) {
@@ -372,7 +392,7 @@ export class SessionManager extends EventEmitter {
     this.startBranchRefresh()
   }
 
-  createSession(sessionId: string, config: SessionConfig) {
+  async createSession(sessionId: string, config: SessionConfig) {
     if (!pty) throw new Error('node-pty unavailable')
     const env: any = { ...process.env, TERM: 'xterm-color' }
 
@@ -526,6 +546,15 @@ export class SessionManager extends EventEmitter {
         env[key] = val
       }
     }
+    let slotRelease: (() => void) | null = null
+    if (isAgent && this.orchestrator) {
+      try {
+        slotRelease = await this.orchestrator.acquireSlot()
+      } catch (err: any) {
+        console.error('[sessionManager] slot acquire failed, skipping session:', sessionId, err?.message || err)
+        return
+      }
+    }
     let ptyProcess
     try {
       ptyProcess = pty.spawn(config.command, config.args, {
@@ -536,6 +565,7 @@ export class SessionManager extends EventEmitter {
         env,
       })
     } catch (spawnErr: any) {
+      slotRelease?.()
       const shellPath = config.command || ''
       const shellExists = fs.existsSync(shellPath)
       let shellMode = '?'
@@ -587,11 +617,20 @@ export class SessionManager extends EventEmitter {
       cwdState: { current: config.cwd, previous: null, stack: [] },
       autoStarted: false,
       claudeLaunchState: null,
+      slotRelease: slotRelease
+        ? () => {
+            if (slotRelease) {
+              slotRelease()
+              slotRelease = null
+            }
+          }
+        : null,
     }
 
     ptyProcess.onData((data: string) => {
       session.buffer.write(data)
       session.lastActivity = Date.now()
+      this.orchestrator?.markHealthCheck(sessionId)
 
       // Process through output filter (detects agntspce $ markers, compresses output, returns modified data for the frontend display)
       const modifiedData = this.outputFilter.processOutput(sessionId, data)
@@ -608,9 +647,11 @@ export class SessionManager extends EventEmitter {
         session.deliveredBufferLength = session.buffer.totalBytes
       }
       this.refreshSessionStatus(sessionId)
+      this.updateSessionContext(sessionId, data)
     })
 
     ptyProcess.onExit(({ exitCode, signal }: any) => {
+      session.slotRelease?.()
       clearInterval(session.processMonitor!)
       session.status = 'exited'
       this.outputFilter.finalizeCommand(sessionId, exitCode ?? 1)
@@ -669,9 +710,49 @@ export class SessionManager extends EventEmitter {
     try { session.pty.resize(cols, rows) } catch { }
   }
 
+  // 2.2 per-agent context files: update `.agntspce/context/<agentId>.md` on
+  // output activity (throttled inside ContextWriter). Session type is the
+  // agent id (claude/codex/...) which matches the preamble naming.
+  private updateSessionContext(sessionId: string, tailOutput?: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    if (!(AGENT_TYPES as readonly string[]).includes(session.type)) return
+    const cw = this.ensureContextWriter()
+    if (!cw) return
+    const sm = this.orchestrator?.getStateManager()
+    const taskId = sm?.getSession(sessionId)?.taskId ?? null
+    cw.updateContext(session.type, {
+      tailOutput,
+      taskId,
+      branch: session.branch || null,
+      status: session.status,
+    })
+  }
+
+  // Final context flush on close: bypass throttle, write the full buffer tail,
+  // and mark the session exited so the file reflects the end state.
+  private finalizeSessionContext(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    if (!(AGENT_TYPES as readonly string[]).includes(session.type)) return
+    const cw = this.ensureContextWriter()
+    if (!cw) return
+    const sm = this.orchestrator?.getStateManager()
+    const taskId = sm?.getSession(sessionId)?.taskId ?? null
+    const tail = session.buffer?.snapshot?.() || ''
+    cw.updateContext(session.type, {
+      tailOutput: tail,
+      taskId,
+      branch: session.branch || null,
+      status: 'exited',
+      minIntervalMs: 0,
+    })
+  }
+
   closeSession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
+    session.slotRelease?.()
     this.sessionHistory.push({
       id: sessionId,
       type: session.type,
@@ -693,6 +774,7 @@ export class SessionManager extends EventEmitter {
     this.outputFilter.finalizeCommand(sessionId)
     this.outputFilter.cleanup(sessionId)
     this.cavemanService.cleanup(sessionId)
+    this.finalizeSessionContext(sessionId)
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)
@@ -700,7 +782,7 @@ export class SessionManager extends EventEmitter {
     return true
   }
 
-  createRawSession(type: string, workspacePath?: string, existingSessionId?: string): { sessionId: string } | null {
+  async createRawSession(type: string, workspacePath?: string, existingSessionId?: string): Promise<{ sessionId: string } | null> {
     const sessionId = existingSessionId || `raw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const cwd = workspacePath || this.workspace?.repository?.path || process.env.HOME || os.homedir() || '/tmp'
     const args = type === 'shell'
@@ -708,7 +790,7 @@ export class SessionManager extends EventEmitter {
       : buildShellArgs(`cd "${cwd}"`)
 
     try {
-      this.createSession(sessionId, {
+      await this.createSession(sessionId, {
         command: getDefaultShell(),
         args,
         cwd,
@@ -718,6 +800,10 @@ export class SessionManager extends EventEmitter {
         repositoryType: '',
       })
       const session = this.sessions.get(sessionId)
+      if (!session) {
+        console.error('createRawSession: session not registered (slot denied):', type, sessionId)
+        return null
+      }
       if (session && (AGENT_TYPES as readonly string[]).includes(type)) {
         session.status = 'waiting'
         this.io?.emit('status-change', { sessionId, status: 'waiting' })
@@ -817,7 +903,7 @@ export class SessionManager extends EventEmitter {
     for (const saved of sessions) {
       if (this.sessions.has(saved.id)) continue
       const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
-      const result = this.createRawSession(saved.type, cwd, saved.id)
+      const result = await this.createRawSession(saved.type, cwd, saved.id)
       if (result) {
         if (saved.agentConfig) {
           setTimeout(() => {
@@ -832,12 +918,13 @@ export class SessionManager extends EventEmitter {
     await Promise.all(restorePromises)
   }
 
-  createParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number, model?: string, reasoning?: string, verbosity?: string }): { sessionIds: string[], groupId: string } {
+  async createParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number, model?: string, reasoning?: string, verbosity?: string, declaredFiles?: string[] }): Promise<{ sessionIds: string[], groupId: string }> {
     const groupId = `parallel-${Date.now()}`
     const agentCfg = this.agentManager?.getAgent(config.agentId)
     const supportsWorktree = agentCfg?.capabilities?.supportsWorktree !== false
     const sessionIds: string[] = []
     const prompt = config.prompt || ''
+    const declaredFiles = Array.isArray(config.declaredFiles) ? config.declaredFiles : []
 
     let count: number
     let usedWorktrees: any[]
@@ -862,7 +949,7 @@ export class SessionManager extends EventEmitter {
         ? usedWorktrees[i].id
         : (this.workspace?.id || 'default')
       const sessionId = `${groupId}-${i}`
-      this.createSession(sessionId, {
+      await this.createSession(sessionId, {
         command: getDefaultShell(),
         args: buildShellArgs(`cd "${cwd}"`),
         cwd,
@@ -879,6 +966,20 @@ export class SessionManager extends EventEmitter {
     }
 
     if (sessionIds.length > 0) {
+      // 1.5 claim enforcement: each group member's declared scope is claimed
+      // before any agent launches. Siblings in the group share isolated
+      // worktrees, so they are excluded from blocking each other — but they
+      // still block against non-group active tasks.
+      for (const sid of sessionIds) {
+        if (declaredFiles.length === 0) continue
+        const groupExclusion = sessionIds.filter(other => other !== sid)
+        const enforced = this.orchestrator?.enforceSessionClaims(sid, config.agentId, declaredFiles, groupExclusion)
+        if (enforced === false) {
+          for (const rollbackId of sessionIds) this.closeSession(rollbackId)
+          throw new Error(`Parallel task blocked: declared files overlap another active task for session ${sid}. Resolve the claim conflict and retry.`)
+        }
+      }
+
       setTimeout(() => {
         for (const sid of sessionIds) {
           try {
@@ -889,12 +990,10 @@ export class SessionManager extends EventEmitter {
               model: config.model,
               reasoning: config.reasoning,
               verbosity: config.verbosity,
+              declaredFiles,
+              excludeSessionIds: sessionIds.filter(other => other !== sid),
+              prompt,
             })
-            if (prompt) {
-              setTimeout(() => {
-                this.writeToSession(sid, prompt + '\n')
-              }, 2000)
-            }
           } catch {}
         }
       }, 500)
@@ -909,6 +1008,17 @@ export class SessionManager extends EventEmitter {
     const validation = this.agentManager.validateConfig(config)
     if (!validation.valid) throw new Error(validation.error)
 
+    // 1.5 claim enforcement: the session's task must declare its file scope
+    // before the agent starts, and it must not overlap another active task.
+    if (this.orchestrator && (AGENT_TYPES as readonly string[]).includes(config.agentId)) {
+      const declared = Array.isArray(config.declaredFiles) ? config.declaredFiles : []
+      const excluded = Array.isArray(config.excludeSessionIds) ? config.excludeSessionIds : []
+      const enforced = this.orchestrator.enforceSessionClaims(sessionId, config.agentId, declared, excluded)
+      if (!enforced) {
+        throw new Error('Session blocked: declared files overlap another active task. Resolve the claim conflict and retry.')
+      }
+    }
+
     if (this.cavemanService.isEnabled(sessionId) && this.workspace?.repository?.path) {
       this.cavemanService.writeSkillFiles(this.workspace.repository.path, config.agentId)
     }
@@ -921,6 +1031,39 @@ export class SessionManager extends EventEmitter {
     }
     const newline = process.platform === 'win32' ? '\r\n' : '\n'
     this.writeToSession(sessionId, command + newline)
+
+    // 2.1 dispatch preamble: deliver the shared orchestration state as the
+    // agent's first input after it boots (agents are interactive CLIs that
+    // read stdin; a small delay lets the TUI finish starting). If a prompt is
+    // supplied (parallel tasks), it follows the preamble in the same write so
+    // the agent gets context then its task.
+    const isFreshDispatch = config.mode !== 'resume' && config.mode !== 'continue' && !config.resumeId
+    const sm = this.orchestrator?.getStateManager()
+    if (sm || config.prompt) {
+      try {
+        let body = ''
+        if (sm && isFreshDispatch) {
+          const ownTaskId = sm.getSession(sessionId)?.taskId || undefined
+          const preamble = sm.buildDispatchPreamble(config.agentId, ownTaskId ? [ownTaskId] : [])
+          if (preamble) body = preamble
+        }
+        if (config.prompt) {
+          body = body ? `${body}\n\nDispatch task:\n${config.prompt}` : config.prompt
+        }
+        if (body) {
+          const sid = sessionId
+          const payload = body
+          setTimeout(() => {
+            const s = this.sessions.get(sid)
+            if (s?.pty && s.status !== 'exited') {
+              this.writeToSession(sid, payload + newline)
+            }
+          }, 2200)
+        }
+      } catch (err: any) {
+        console.warn('[agntspce] Dispatch preamble failed:', sessionId, err?.message || err)
+      }
+    }
 
     session.autoStarted = true
     session.claudeLaunchState = 'launched'

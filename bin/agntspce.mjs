@@ -194,7 +194,10 @@ function stripAnsi(text) {
 }
 
 function estimateTokens(text) {
-  return Math.max(1, Math.ceil(text.length / 4))
+  const clean = stripAnsi(String(text || ''))
+    .replace(/\r\n/g, '\n')
+    .replace(/[\u200b-\u200f\u2028-\u202f\ufeff]/g, '')
+  return Math.max(1, Math.ceil(clean.length / 4))
 }
 
 function applyFilter(filter, output) {

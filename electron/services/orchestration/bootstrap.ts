@@ -4,6 +4,7 @@ import * as os from 'node:os'
 import { createHash } from 'node:crypto'
 import { StateManager } from './stateManager'
 import { Coordinator } from './coordinator'
+import { loadOrchestrationConfig } from './config'
 
 export interface DiscoveryInfo {
   pid: number
@@ -69,6 +70,27 @@ export function clearDiscovery(workspaceRoot: string): void {
   } catch {}
 }
 
+export function getAgntSpceDir(workspaceRoot: string): string {
+  return path.join(workspaceRoot, '.agntspce')
+}
+
+export function ensureAgntSpceDir(workspaceRoot: string): void {
+  fs.mkdirSync(getAgntSpceDir(workspaceRoot), { recursive: true })
+}
+
+export function teardownAgntSpce(workspaceRoot: string): void {
+  const discovery = readDiscovery(workspaceRoot)
+  if (discovery && isCoordinatorAlive(discovery)) {
+    console.warn('[orchestration] Coordinator still alive for', workspaceRoot, '— skipping .agntspce teardown')
+    return
+  }
+  try {
+    fs.rmSync(getAgntSpceDir(workspaceRoot), { recursive: true, force: true })
+  } catch (err: any) {
+    console.error('[orchestration] Failed to teardown .agntspce for', workspaceRoot, err?.message || err)
+  }
+}
+
 export function isCoordinatorAlive(discovery: DiscoveryInfo): boolean {
   try {
     process.kill(discovery.pid, 0)
@@ -118,7 +140,8 @@ export async function ensureCoordinator(options?: EnsureCoordinatorOptions): Pro
 
   try {
     const stateManager = options?.stateManager || new StateManager(dbPath, workspaceRoot)
-    const coordinator = new Coordinator(socketPath, stateManager)
+    const config = loadOrchestrationConfig(workspaceRoot)
+    const coordinator = new Coordinator(socketPath, stateManager, config)
     await coordinator.listen()
 
     writeDiscovery({

@@ -63,6 +63,8 @@ export interface AgentStartConfig {
   reasoning?: string
   verbosity?: string
   resumeId?: string
+  declaredFiles?: string[]
+  prompt?: string
 }
 
 export class AgentManager {
@@ -160,9 +162,9 @@ export class AgentManager {
       availableFlags: [],
       flagCategories: {},
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -293,9 +295,9 @@ export class AgentManager {
       availableFlags: [],
       flagCategories: {},
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -326,9 +328,9 @@ export class AgentManager {
         output: { name: 'Output Options', mutuallyExclusive: false },
       },
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -359,9 +361,9 @@ export class AgentManager {
         permissions: { name: 'Permissions', mutuallyExclusive: false },
       },
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -381,9 +383,9 @@ export class AgentManager {
       availableFlags: [],
       flagCategories: {},
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -404,9 +406,9 @@ export class AgentManager {
       availableFlags: [],
       flagCategories: {},
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -425,9 +427,9 @@ export class AgentManager {
       availableFlags: [],
       flagCategories: {},
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
 
@@ -446,9 +448,9 @@ export class AgentManager {
       availableFlags: [],
       flagCategories: {},
       capabilities: {
-        supportsWorktree: false,
-        requiresGitRepo: false,
-        supportsParallel: false,
+        supportsWorktree: true,
+        requiresGitRepo: true,
+        supportsParallel: true,
       },
     })
   }

@@ -61,6 +61,7 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
         sessionCount: ctx.agentOrchestrator.getSessionCount(),
         totalMemoryMB: ctx.agentOrchestrator.getTotalMemoryMB(),
         resourceUsage: ctx.agentOrchestrator.getAllResourceUsage(),
+        orchestration: ctx.agentOrchestrator.getOrchestrationStats(),
       })
     } catch (error: any) {
       if (callback) callback({ ok: false, error: error.message })

@@ -13,6 +13,7 @@ export interface MergeResult {
   buildPassed: boolean
   mergeCommitSha?: string
   error?: string
+  gateId?: string
 }
 
 export class MergeGate {
@@ -116,15 +117,19 @@ export class MergeGate {
       result.undeclaredFiles = undeclared
       const scopeOverlap = actualFiles.filter(f => activeScopeFiles.has(f))
       if (scopeOverlap.length > 0) {
+        // 4.3 human control point: a risky merge (file overlap with another
+        // active task) goes through a decision gate, not a silent escalation.
+        // The gate blocks the merge until a human approves; rejection releases
+        // the task for another agent (via coordinator resolve_gate).
         const clashTasks = [...new Set(scopeOverlap.flatMap(f => scopeToTask.get(f) || []))]
-        this.stateManager.createEscalation(
-          `Merge-time scope overlap with active tasks`,
-          `Task ${taskId} files ${scopeOverlap.join(', ')} overlap with active tasks: ${clashTasks.join(', ')}`,
-          [task.agentId || '']
+        const gate = this.stateManager.createGate(
+          taskId,
+          `Merge-time scope overlap: ${scopeOverlap.join(', ')} overlap with active tasks ${clashTasks.join(', ')}`
         )
-        this.stateManager.transitionTaskStatus(taskId, 'escalated')
-        return this.failResult(taskId,
-          `Scope overlap at merge time: ${scopeOverlap.join(', ')} conflict with tasks ${[...new Set(clashTasks)].join(', ')}. Escalation created. Worktree kept for review.`)
+        this.stateManager.postStatusUpdate(taskId, task.agentId || '', `Gate requested: merge overlaps ${scopeOverlap.join(', ')} with active tasks`)
+        result.gateId = gate.id
+        result.error = `Scope overlap at merge time: ${scopeOverlap.join(', ')} conflict with tasks ${[...new Set(clashTasks)].join(', ')}. Decision gate created — a human must approve before merging.`
+        return result
       }
 
       // ── Step 5: Capture integration ref SHA for compare-and-swap ──
@@ -247,8 +252,9 @@ export class MergeGate {
       // ── Step 10: Mark task done ──
       this.stateManager.transitionTaskStatus(taskId, 'done')
 
-      // ── Step 11: Remove task worktree/branch (successful only) ──
-      this.worktreeLifecycle.removeWorktree(taskId)
+      // ── Step 11: Remove task worktree/branch (successful only, merged-only) ──
+      this.worktreeLifecycle.removeWorktree(taskId, baseBranch)
+      this.stateManager.markWorktreeRemoved(taskId)
 
       // ── Step 12: Broadcast ──
       this.stateManager.sendMessage('agntspce-coordinator', null, true,

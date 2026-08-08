@@ -40,8 +40,16 @@ export function truncate(s: string, maxLen: number): string {
   return [...s].slice(0, maxLen - 3).join('') + '...'
 }
 
+// Estimate LLM tokens from text. Strip ANSI/control/zero-width characters first
+// so terminal TUI redraws and cursor sequences never inflate token counts.
 export function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4))
+  const clean = String(text || '')
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07|\x1b)/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[\u200b-\u200f\u2028-\u202f\ufeff]/g, '')
+  return Math.max(1, Math.ceil(clean.length / 4))
 }
 
 export function formatTokens(n: number): string {

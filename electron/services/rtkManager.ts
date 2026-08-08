@@ -5,6 +5,7 @@ import os from 'os'
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
+import { resolveAgent } from './agentResolver'
 
 // ── Constants ────────────────────────────────────────────────────
 // Must match EMBEDDED_SECRET in the RTK binary's activation.rs
@@ -183,7 +184,7 @@ const AGENT_CHECKS: AgentInfo[] = [
     cliFlag: '--agent codex',
     installCheck: () => {
       const home = os.homedir()
-      return fs.existsSync(path.join(home, '.codex'))
+      return fs.existsSync(path.join(home, '.codex')) && !!resolveAgent('codex')
     },
   },
 ]

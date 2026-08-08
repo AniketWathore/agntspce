@@ -24,8 +24,72 @@ export function createSchema(db: Database.Database): void {
       agent_id TEXT REFERENCES agents(id),
       created_at INTEGER NOT NULL,
       completed_at INTEGER,
-      branch_point TEXT
+      branch_point TEXT,
+      failure_count INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      session_type TEXT NOT NULL,
+      agent_id TEXT REFERENCES agents(id),
+      task_id TEXT REFERENCES tasks(id),
+      status TEXT NOT NULL DEFAULT 'idle',
+      branch TEXT,
+      worktree_id TEXT,
+      created_at INTEGER NOT NULL,
+      last_activity INTEGER NOT NULL,
+      closed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_task ON sessions(task_id);
+
+    CREATE TABLE IF NOT EXISTS worktrees (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      branch_name TEXT,
+      worktree_path TEXT,
+      source_ref TEXT,
+      task_id TEXT REFERENCES tasks(id),
+      session_id TEXT,
+      created_at INTEGER NOT NULL,
+      removed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_worktrees_task ON worktrees(task_id);
+    CREATE INDEX IF NOT EXISTS idx_worktrees_branch ON worktrees(branch_name);
+
+    CREATE TABLE IF NOT EXISTS claims (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      agent_id TEXT NOT NULL REFERENCES agents(id),
+      file_path TEXT NOT NULL,
+      claimed_at INTEGER NOT NULL,
+      released_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_claims_task ON claims(task_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_agent ON claims(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_claims_file ON claims(file_path);
+
+    CREATE TABLE IF NOT EXISTS agent_contexts (
+      agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+      context_md TEXT NOT NULL DEFAULT '',
+      file_path TEXT,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_contexts_updated ON agent_contexts(updated_at);
+
+    CREATE TABLE IF NOT EXISTS gates (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      status TEXT NOT NULL DEFAULT 'blocked',
+      reason TEXT NOT NULL,
+      decision TEXT,
+      created_at INTEGER NOT NULL,
+      resolved_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_gates_task ON gates(task_id);
+    CREATE INDEX IF NOT EXISTS idx_gates_status ON gates(status);
 
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
@@ -34,7 +98,8 @@ export function createSchema(db: Database.Database): void {
       broadcast INTEGER NOT NULL DEFAULT 0,
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      read_by TEXT NOT NULL DEFAULT '[]'
+      read_by TEXT NOT NULL DEFAULT '[]',
+      deliver_only_when_idle INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS escalations (
@@ -79,4 +144,18 @@ export function createSchema(db: Database.Database): void {
       updated_at INTEGER NOT NULL
     );
   `)
+}
+
+// Migrations for databases created by an earlier schema version. Safe to run
+// after createSchema on every boot — each migration checks before altering.
+export function migrateSchema(db: Database.Database): void {
+  const taskColumns = db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[]
+  if (!taskColumns.some(c => c.name === 'failure_count')) {
+    db.exec(`ALTER TABLE tasks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  const msgColumns = db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[]
+  if (!msgColumns.some(c => c.name === 'deliver_only_when_idle')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN deliver_only_when_idle INTEGER NOT NULL DEFAULT 0`)
+  }
 }

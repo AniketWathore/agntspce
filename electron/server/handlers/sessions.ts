@@ -19,7 +19,7 @@ export function registerSessionHandlers(ctx: ServerContext, socket: Socket): voi
   socket.on('create-raw-session', async ({ type, workspacePath }) => {
     try {
       const t = String(type || '').trim().toLowerCase() || 'shell'
-      const result = ctx.sessionManager.createRawSession(t, workspacePath)
+      const result = await ctx.sessionManager.createRawSession(t, workspacePath)
       if (result) {
         const states = ctx.sessionManager.getSessionStates()
         socket.emit('session-created', { sessionId: result.sessionId, sessions: states })
@@ -35,7 +35,7 @@ export function registerSessionHandlers(ctx: ServerContext, socket: Socket): voi
   socket.on('create-agent-session', async ({ type, workspacePath, config }) => {
     try {
       const t = String(type || '').trim().toLowerCase() || 'shell'
-      const result = ctx.sessionManager.createRawSession(t, workspacePath)
+      const result = await ctx.sessionManager.createRawSession(t, workspacePath)
       if (result) {
         try {
           ctx.sessionManager.startAgentWithConfig(result.sessionId, config)
@@ -84,7 +84,7 @@ export function registerSessionHandlers(ctx: ServerContext, socket: Socket): voi
         if (callback) callback({ ok: false, error: `Only ${availableSlots} of ${data.worktreeCount} requested slots available. Try fewer agents.` })
         return
       }
-      const { sessionIds, groupId } = ctx.sessionManager.createParallelTask(data)
+      const { sessionIds, groupId } = await ctx.sessionManager.createParallelTask(data)
       const states = ctx.sessionManager.getSessionStates()
       const groupSessions = sessionIds.map(id => states[id]).filter(Boolean)
       if (callback) callback({ ok: true, sessionIds, groupId, sessions: groupSessions, load: ctx.agentOrchestrator.getConcurrencyLoad() })

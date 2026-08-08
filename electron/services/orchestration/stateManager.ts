@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import Database from 'better-sqlite3'
 import { v4 as uuid } from 'uuid'
-import { createSchema } from './schema'
+import { createSchema, migrateSchema } from './schema'
 
 export interface AgentRow {
   id: string
@@ -26,6 +26,21 @@ export interface TaskRow {
   created_at: number
   completed_at: number | null
   branch_point: string | null
+  failure_count: number
+}
+
+export interface SessionRow {
+  id: string
+  workspace_id: string | null
+  session_type: string
+  agent_id: string | null
+  task_id: string | null
+  status: string
+  branch: string | null
+  worktree_id: string | null
+  created_at: number
+  last_activity: number
+  closed_at: number | null
 }
 
 export interface MessageRow {
@@ -36,6 +51,7 @@ export interface MessageRow {
   content: string
   created_at: number
   read_by: string
+  deliver_only_when_idle: number
 }
 
 export interface EscalationRow {
@@ -57,6 +73,26 @@ export interface StatusUpdateRow {
   created_at: number
 }
 
+export interface GateRow {
+  id: string
+  task_id: string
+  status: 'blocked' | 'approved' | 'rejected'
+  reason: string
+  decision: string | null
+  created_at: number
+  resolved_at: number | null
+}
+
+export interface GateInfo {
+  id: string
+  taskId: string
+  status: 'blocked' | 'approved' | 'rejected'
+  reason: string
+  decision: string | null
+  createdAt: number
+  resolvedAt: number | null
+}
+
 export interface WorkspaceContextResult {
   agents: { id: string; name: string; type: string; status: string }[]
   tasks: { id: string; description: string; status: string; agentId: string | null }[]
@@ -75,6 +111,45 @@ export interface TaskOverview {
   agentId: string | null
   createdAt: number
   completedAt: number | null
+  failureCount: number
+}
+
+export interface SessionOverview {
+  id: string
+  workspaceId: string | null
+  sessionType: string
+  agentId: string | null
+  taskId: string | null
+  status: string
+  branch: string | null
+  worktreeId: string | null
+  createdAt: number
+  lastActivity: number
+  closedAt: number | null
+}
+
+export interface WorktreeRow {
+  id: string
+  repo_path: string
+  branch_name: string | null
+  worktree_path: string | null
+  source_ref: string | null
+  task_id: string | null
+  session_id: string | null
+  created_at: number
+  removed_at: number | null
+}
+
+export interface WorktreeOverview {
+  id: string
+  repoPath: string
+  branchName: string | null
+  worktreePath: string | null
+  sourceRef: string | null
+  taskId: string | null
+  sessionId: string | null
+  createdAt: number
+  removedAt: number | null
 }
 
 export interface AgentInfo {
@@ -95,6 +170,7 @@ export interface MessageInfo {
   broadcast: boolean
   content: string
   createdAt: number
+  deliverOnlyWhenIdle: boolean
 }
 
 export interface EscalationInfo {
@@ -139,6 +215,7 @@ export class StateManager {
     this.db.pragma('journal_mode = WAL')
     this.workspaceRepoPath = workspaceRepoPath
     createSchema(this.db)
+    migrateSchema(this.db)
     this.initSystemAgent()
     this.initIntegrationBranch()
   }
@@ -321,6 +398,33 @@ export class StateManager {
     return this.getTask(id)!
   }
 
+  ensureSessionTask(sessionId: string, sessionType: string, description: string): TaskOverview {
+    const session = this.getSession(sessionId)
+    if (session?.taskId) {
+      const existing = this.getTask(session.taskId)
+      if (existing) return existing
+    }
+    const task = this.createTask(description, [])
+    this.linkSessionToTask(sessionId, task.id)
+    // Clean up duplicate "Ad-hoc … session" bookkeeping rows that accumulated
+    // when registerSession used to wipe session.task_id and create a fresh task
+    // on every registration/restart.
+    this.closeDuplicateSessionTasks(task.id, description)
+    return task
+  }
+
+  // Abandon other active tasks that share the same session-bookkeeping
+  // description (same session suffix). Keeps the DB and preamble clean.
+  closeDuplicateSessionTasks(keepTaskId: string, description: string): void {
+    try {
+      this.db.prepare(
+        "UPDATE tasks SET status = 'abandoned', completed_at = ? WHERE description = ? AND id != ? AND status IN ('open', 'claimed', 'in_progress', 'merging', 'setup_failed')"
+      ).run(Date.now(), description, keepTaskId)
+    } catch (err: any) {
+      console.error('[stateManager] closeDuplicateSessionTasks failed:', err?.message || err)
+    }
+  }
+
   getTask(id: string): TaskOverview | null {
     const row = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined
     if (!row) return null
@@ -389,6 +493,53 @@ export class StateManager {
     this.db.prepare('UPDATE tasks SET actual_files = ? WHERE id = ?').run(JSON.stringify(files), taskId)
   }
 
+  // Claim enforcement for the session-start path (1.5). Every session that
+  // launches an agent must declare its scope before the agent starts. If the
+  // declared files overlap another active task, claim is rejected (thrown).
+  // Sessions in the same parallel group run in isolated worktrees, so their
+  // tasks are excluded from the overlap check against one another.
+  claimSessionTask(sessionId: string, agentId: string, declaredFiles: string[], excludeSessionIds: string[] = []): TaskOverview {
+    const session = this.getSession(sessionId)
+    if (!session) throw new CoordinatorError('NOT_FOUND', `Session ${sessionId} not found`)
+
+    let task = session.taskId ? this.getTask(session.taskId) : null
+
+    // A terminal task (already done/abandoned/escalated) must not block a
+    // fresh session start — unlink it and open a new task for this session.
+    if (task && (task.status === 'done' || task.status === 'abandoned' || task.status === 'escalated')) {
+      this.db.prepare('UPDATE sessions SET task_id = NULL WHERE id = ?').run(sessionId)
+      task = null
+    }
+
+    if (!task) {
+      task = this.ensureSessionTask(sessionId, agentId, `Session ${sessionId.slice(-8)}`)
+    }
+
+    const excludeTaskIds = new Set<string>()
+    for (const sid of excludeSessionIds) {
+      const s = this.getSession(sid)
+      if (s?.taskId) excludeTaskIds.add(s.taskId)
+    }
+    excludeTaskIds.add(task.id)
+
+    const overlap = this.checkFileOverlap(declaredFiles, task.id, excludeSessionIds.length > 0 ? [...excludeTaskIds] : undefined)
+    if (overlap.overlaps) {
+      throw new CoordinatorError('OVERLAP', `File overlap: ${overlap.conflictingFiles.join(', ')} is claimed by another active task`, {
+        conflictingFiles: overlap.conflictingFiles,
+        conflictingTaskIds: overlap.conflictingTaskIds,
+      })
+    }
+
+    this.db.prepare('UPDATE tasks SET declared_files = ?, agent_id = ? WHERE id = ?')
+      .run(JSON.stringify(declaredFiles), this.resolveAgentRef(agentId), task.id)
+
+    if (task.status === 'open') {
+      this.transitionTaskStatus(task.id, 'in_progress')
+    }
+
+    return this.getTask(task.id)!
+  }
+
   releaseTask(taskId: string): void {
     this.db.prepare(
       "UPDATE tasks SET agent_id = NULL WHERE id = ? AND status IN ('claimed', 'in_progress', 'setup_failed')"
@@ -408,23 +559,205 @@ export class StateManager {
       agentId: row.agent_id,
       createdAt: row.created_at,
       completedAt: row.completed_at,
+      failureCount: row.failure_count,
+    }
+  }
+
+  // ── Failure Tracking (circuit breaker) ──
+
+  getTaskFailureCount(taskId: string): number {
+    const row = this.db.prepare('SELECT failure_count FROM tasks WHERE id = ?').get(taskId) as { failure_count: number } | undefined
+    return row?.failure_count ?? 0
+  }
+
+  recordTaskFailure(taskId: string): number {
+    this.db.prepare('UPDATE tasks SET failure_count = failure_count + 1 WHERE id = ?').run(taskId)
+    return this.getTaskFailureCount(taskId)
+  }
+
+  resetTaskFailures(taskId: string): void {
+    this.db.prepare('UPDATE tasks SET failure_count = 0 WHERE id = ?').run(taskId)
+  }
+
+  // 3.3 circuit breaker: a task that keeps failing is released back to `open`
+  // (agent/branch/worktree cleared) so another agent can claim it fresh.
+  // Returns the released task, or null if it couldn't be released.
+  redispatchTask(taskId: string): TaskOverview | null {
+    const task = this.getTask(taskId)
+    if (!task) return null
+    if (task.status === 'done' || task.status === 'abandoned') return null
+    this.db.prepare(
+      "UPDATE tasks SET status = 'open', agent_id = NULL, branch_name = NULL, worktree_path = NULL, branch_point = NULL WHERE id = ?"
+    ).run(taskId)
+    return this.getTask(taskId)
+  }
+
+  // ── Session CRUD (unified store, Phase 0.2) ──
+
+  // agent_id FKs reference registered orchestrator agents only. UI-launched
+  // sessions carry a CLI type ('claude'/'codex'/'shell') as their agentId,
+  // which is NOT a registered agent — resolve it to NULL so the FK holds.
+  private resolveAgentRef(agentId: string | null | undefined): string | null {
+    if (!agentId) return null
+    const row = this.db.prepare('SELECT id FROM agents WHERE id = ?').get(agentId) as { id: string } | undefined
+    return row ? agentId : null
+  }
+
+  upsertSession(session: {
+    id: string
+    workspaceId?: string | null
+    sessionType: string
+    agentId?: string | null
+    taskId?: string | null
+    status?: string
+    branch?: string | null
+    worktreeId?: string | null
+    lastActivity?: number
+  }): void {
+    const now = session.lastActivity ?? Date.now()
+    const agentRef = this.resolveAgentRef(session.agentId)
+    const existing = this.db.prepare('SELECT id FROM sessions WHERE id = ?').get(session.id) as { id: string } | undefined
+    if (existing) {
+      this.db.prepare(
+        'UPDATE sessions SET workspace_id = ?, session_type = ?, agent_id = ?, task_id = ?, status = ?, branch = ?, worktree_id = ?, last_activity = ? WHERE id = ?'
+      ).run(
+        session.workspaceId ?? null,
+        session.sessionType,
+        agentRef,
+        session.taskId ?? null,
+        session.status ?? 'idle',
+        session.branch ?? null,
+        session.worktreeId ?? null,
+        now,
+        session.id
+      )
+    } else {
+      this.db.prepare(
+        'INSERT INTO sessions (id, workspace_id, session_type, agent_id, task_id, status, branch, worktree_id, created_at, last_activity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(
+        session.id,
+        session.workspaceId ?? null,
+        session.sessionType,
+        agentRef,
+        session.taskId ?? null,
+        session.status ?? 'idle',
+        session.branch ?? null,
+        session.worktreeId ?? null,
+        now,
+        now
+      )
+    }
+  }
+
+  getSession(id: string): SessionOverview | null {
+    const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionRow | undefined
+    if (!row) return null
+    return this.rowToSession(row)
+  }
+
+  listSessions(): SessionOverview[] {
+    const rows = this.db.prepare('SELECT * FROM sessions ORDER BY created_at ASC').all() as SessionRow[]
+    return rows.map(r => this.rowToSession(r))
+  }
+
+  closeSessionRecord(id: string): void {
+    this.db.prepare("UPDATE sessions SET status = 'exited', closed_at = ? WHERE id = ?").run(Date.now(), id)
+  }
+
+  touchSession(id: string, lastActivity: number = Date.now()): void {
+    this.db.prepare('UPDATE sessions SET last_activity = ? WHERE id = ?').run(lastActivity, id)
+  }
+
+  linkSessionToTask(sessionId: string, taskId: string): void {
+    this.db.prepare('UPDATE sessions SET task_id = ? WHERE id = ?').run(taskId, sessionId)
+  }
+
+  private rowToSession(row: SessionRow): SessionOverview {
+    return {
+      id: row.id,
+      workspaceId: row.workspace_id,
+      sessionType: row.session_type,
+      agentId: row.agent_id,
+      taskId: row.task_id,
+      status: row.status,
+      branch: row.branch,
+      worktreeId: row.worktree_id,
+      createdAt: row.created_at,
+      lastActivity: row.last_activity,
+      closedAt: row.closed_at,
+    }
+  }
+
+  // ── Worktree CRUD (unified store, Phase 1.2) ──
+
+  recordWorktree(worktree: {
+    id: string
+    branchName?: string | null
+    worktreePath?: string | null
+    sourceRef?: string | null
+    taskId?: string | null
+    sessionId?: string | null
+  }): void {
+    this.db.prepare(
+      'INSERT OR REPLACE INTO worktrees (id, repo_path, branch_name, worktree_path, source_ref, task_id, session_id, created_at, removed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      worktree.id,
+      this.workspaceRepoPath,
+      worktree.branchName ?? null,
+      worktree.worktreePath ?? null,
+      worktree.sourceRef ?? null,
+      worktree.taskId ?? null,
+      worktree.sessionId ?? null,
+      Date.now(),
+      null
+    )
+  }
+
+  markWorktreeRemoved(id: string): void {
+    this.db.prepare('UPDATE worktrees SET removed_at = ? WHERE id = ?').run(Date.now(), id)
+  }
+
+  getWorktree(id: string): WorktreeOverview | null {
+    const row = this.db.prepare('SELECT * FROM worktrees WHERE id = ?').get(id) as WorktreeRow | undefined
+    if (!row) return null
+    return this.rowToWorktree(row)
+  }
+
+  listActiveWorktrees(): WorktreeOverview[] {
+    const rows = this.db.prepare('SELECT * FROM worktrees WHERE removed_at IS NULL ORDER BY created_at ASC').all() as WorktreeRow[]
+    return rows.map(r => this.rowToWorktree(r))
+  }
+
+  private rowToWorktree(row: WorktreeRow): WorktreeOverview {
+    return {
+      id: row.id,
+      repoPath: row.repo_path,
+      branchName: row.branch_name,
+      worktreePath: row.worktree_path,
+      sourceRef: row.source_ref,
+      taskId: row.task_id,
+      sessionId: row.session_id,
+      createdAt: row.created_at,
+      removedAt: row.removed_at,
     }
   }
 
   // ── File Overlap Checking ──
 
-  checkFileOverlap(declaredFiles: string[], excludeTaskId?: string): {
+  checkFileOverlap(declaredFiles: string[], excludeTaskId?: string, excludeTaskIds?: string[]): {
     overlaps: boolean
     conflictingFiles: string[]
     conflictingTaskIds: string[]
   } {
     const activeTasks = this.getActiveTasks()
     const declaredSet = new Set(declaredFiles)
+    const excluded = new Set<string>(excludeTaskIds || [])
+    if (excludeTaskId) excluded.add(excludeTaskId)
     const conflicts: string[] = []
     const conflictTaskIds = new Set<string>()
 
     for (const t of activeTasks) {
-      if (excludeTaskId && t.id === excludeTaskId) continue
+      if (excluded.has(t.id)) continue
       for (const f of [...t.declaredFiles, ...(t.actualFiles || [])]) {
         if (declaredSet.has(f)) {
           conflicts.push(f)
@@ -455,12 +788,16 @@ export class StateManager {
 
   // ── Message CRUD ──
 
-  sendMessage(fromAgentId: string, toAgentId: string | null, broadcast: boolean, content: string): MessageInfo {
+  // 3.1 idle-delivered messaging: a message sent to a specific agent is queued
+  // (deliverOnlyWhenIdle=true) and only surfaces via getPendingMessages once
+  // the receiver is IDLE — busy agents are never interrupted mid-task.
+  // Broadcasts and explicit deliverOnlyWhenIdle=false deliver immediately.
+  sendMessage(fromAgentId: string, toAgentId: string | null, broadcast: boolean, content: string, deliverOnlyWhenIdle = true): MessageInfo {
     const id = uuid()
     const now = Date.now()
     this.db.prepare(
-      'INSERT INTO messages (id, from_agent_id, to_agent_id, broadcast, content, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, fromAgentId, toAgentId, broadcast ? 1 : 0, content, now)
+      'INSERT INTO messages (id, from_agent_id, to_agent_id, broadcast, content, created_at, deliver_only_when_idle) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, fromAgentId, toAgentId, broadcast ? 1 : 0, content, now, broadcast ? 0 : (deliverOnlyWhenIdle ? 1 : 0))
     return {
       id,
       fromAgentId,
@@ -468,13 +805,23 @@ export class StateManager {
       broadcast,
       content,
       createdAt: now,
+      deliverOnlyWhenIdle: broadcast ? false : deliverOnlyWhenIdle,
     }
   }
 
+  // Delivery gate (3.1): idle-delivered messages are held back while the
+  // receiver is actively working a task. Broadcasts and immediate messages
+  // always pass. A registered-but-taskless agent is considered idle, so
+  // piggybacking still works right after registration.
   getPendingMessages(agentId: string): MessageInfo[] {
+    const receiverBusy = this.isReceiverBusy(agentId)
     const rows = this.db.prepare(
-      `SELECT * FROM messages WHERE (to_agent_id = ? OR broadcast = 1) AND json_extract(read_by, '$."' || ? || '"') IS NULL ORDER BY created_at ASC`
-    ).all(agentId, agentId) as MessageRow[]
+      `SELECT * FROM messages
+       WHERE (to_agent_id = ? OR broadcast = 1)
+         AND json_extract(read_by, '$."' || ? || '"') IS NULL
+         AND (deliver_only_when_idle = 0 OR broadcast = 1 OR ? = 0)
+       ORDER BY created_at ASC`
+    ).all(agentId, agentId, receiverBusy ? 1 : 0) as MessageRow[]
     return rows.map(r => ({
       id: r.id,
       fromAgentId: r.from_agent_id,
@@ -482,14 +829,28 @@ export class StateManager {
       broadcast: r.broadcast === 1,
       content: r.content,
       createdAt: r.created_at,
+      deliverOnlyWhenIdle: r.deliver_only_when_idle === 1,
     }))
+  }
+
+  // True while the agent is mid-task (claimed or actively working). An agent
+  // whose task is `merging` is awaiting the merge pipeline — treated as idle.
+  private isReceiverBusy(agentId: string): boolean {
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM tasks WHERE agent_id = ? AND status IN ('claimed', 'in_progress')`
+    ).get(agentId) as { n: number }
+    return (row?.n ?? 0) > 0
   }
 
   markMessagesRead(agentId: string): void {
     const now = Date.now().toString()
+    const receiverBusy = this.isReceiverBusy(agentId)
     const messages = this.db.prepare(
-      `SELECT id, read_by FROM messages WHERE (to_agent_id = ? OR broadcast = 1) AND json_extract(read_by, '$."' || ? || '"') IS NULL`
-    ).all(agentId, agentId) as { id: string; read_by: string }[]
+      `SELECT id, read_by FROM messages
+       WHERE (to_agent_id = ? OR broadcast = 1)
+         AND json_extract(read_by, '$."' || ? || '"') IS NULL
+         AND (deliver_only_when_idle = 0 OR broadcast = 1 OR ? = 0)`
+    ).all(agentId, agentId, receiverBusy ? 1 : 0) as { id: string; read_by: string }[]
     const updateStmt = this.db.prepare('UPDATE messages SET read_by = ? WHERE id = ?')
     for (const msg of messages) {
       const readBy: Record<string, string> = JSON.parse(msg.read_by)
@@ -539,6 +900,67 @@ export class StateManager {
   getOpenEscalations(): EscalationInfo[] {
     const rows = this.db.prepare("SELECT * FROM escalations WHERE status = 'open' ORDER BY created_at ASC").all() as EscalationRow[]
     return rows.map(r => this.rowToEscalation(r))
+  }
+
+  // ── Decision Gates (3.4) ──
+
+  // 3.4: a gate blocks a risky merge until a human approves. `blocked` →
+  // `approved` lets the merge proceed; `rejected` releases the task so another
+  // agent can pick it up. Uses the `gates` table (Phase 0).
+  createGate(taskId: string, reason: string): GateInfo {
+    const id = uuid()
+    const now = Date.now()
+    this.db.prepare(
+      "INSERT INTO gates (id, task_id, status, reason, created_at) VALUES (?, ?, 'blocked', ?, ?)"
+    ).run(id, taskId, reason, now)
+    return this.getGate(id)!
+  }
+
+  getGate(id: string): GateInfo | null {
+    const row = this.db.prepare('SELECT * FROM gates WHERE id = ?').get(id) as GateRow | undefined
+    if (!row) return null
+    return this.rowToGate(row)
+  }
+
+  resolveGate(id: string, decision: string): GateInfo {
+    const gate = this.getGate(id)
+    if (!gate) throw new CoordinatorError('NOT_FOUND', `Gate ${id} not found`)
+    if (gate.status !== 'blocked') throw new CoordinatorError('INVALID_STATE', `Gate ${id} is already ${gate.status}`)
+    const status = decision.toLowerCase() === 'approve' || decision.toLowerCase() === 'approved' ? 'approved' : 'rejected'
+    this.db.prepare('UPDATE gates SET status = ?, decision = ?, resolved_at = ? WHERE id = ?')
+      .run(status, decision, Date.now(), id)
+    return this.getGate(id)!
+  }
+
+  listGates(): GateInfo[] {
+    const rows = this.db.prepare('SELECT * FROM gates ORDER BY created_at DESC').all() as GateRow[]
+    return rows.map(r => this.rowToGate(r))
+  }
+
+  getOpenGatesForTask(taskId: string): GateInfo[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM gates WHERE task_id = ? AND status = 'blocked' ORDER BY created_at ASC"
+    ).all(taskId) as GateRow[]
+    return rows.map(r => this.rowToGate(r))
+  }
+
+  hasOpenGate(taskId: string): boolean {
+    const row = this.db.prepare(
+      "SELECT COUNT(*) AS n FROM gates WHERE task_id = ? AND status = 'blocked'"
+    ).get(taskId) as { n: number }
+    return (row?.n ?? 0) > 0
+  }
+
+  private rowToGate(row: GateRow): GateInfo {
+    return {
+      id: row.id,
+      taskId: row.task_id,
+      status: row.status,
+      reason: row.reason,
+      decision: row.decision,
+      createdAt: row.created_at,
+      resolvedAt: row.resolved_at,
+    }
   }
 
   private rowToEscalation(row: EscalationRow): EscalationInfo {
@@ -597,6 +1019,154 @@ export class StateManager {
     const pendingMessages = forAgentId ? this.getPendingMessages(forAgentId) : []
 
     return { agents, tasks, openEscalations, pendingMessages }
+  }
+
+  // Dispatch preamble (2.1): a compact header injected as the first message a
+  // freshly-launched agent receives, naming who's active, what they claim, and
+  // on which branches — so every agent starts knowing the orchestration state.
+  // Capped at ~2KB to keep agent context small (trap: never exceed a few KB).
+  buildDispatchPreamble(forAgentId?: string, excludeTaskIds: string[] = []): string {
+    const exclude = new Set(excludeTaskIds)
+    const agents = this.getActiveAgents().filter(a => a.agentType !== 'system')
+    // Only advertise REAL orchestrated work. Internal bookkeeping tasks created
+    // for UI-launched agent sessions ("Ad-hoc <agent> session …" / "Session …")
+    // are not shareable work and only clutter every agent's dispatch header.
+    const tasks = this.getActiveTasks().filter(t =>
+      !exclude.has(t.id) &&
+      !/^Ad-hoc\s+\w+\s+session\s+/i.test(t.description || '') &&
+      !/^Session\s+[\w-]{1,10}$/i.test(t.description || '')
+    )
+    const completions = this.getRecentCompletions(2)
+    // Only inject when there is genuinely shareable state. "Registered agents"
+    // or historical completions alone shouldn't spam a freshly-opened agent's
+    // chat — if there's no active work to coordinate, there's nothing to say.
+    if (tasks.length === 0) return ''
+
+    const lines: string[] = []
+    lines.push('AgntSpce dispatch — shared workspace state')
+
+    if (tasks.length > 0) {
+      lines.push('', 'Active tasks:')
+      for (const t of tasks) {
+        const files = t.declaredFiles.length > 0 ? `  files: ${t.declaredFiles.join(', ')}` : ''
+        const branch = t.branchName ? `  branch: ${t.branchName}` : ''
+        const actual = this.getBranchDiffFiles(t)
+        const actualStr = actual.length > 0 ? `  touching: ${actual.join(', ')}` : ''
+        const desc = t.description.length > 100 ? t.description.slice(0, 100) + '…' : t.description
+        lines.push(`- ${t.status} ${t.agentId ?? 'unassigned'}${branch}${files}${actualStr}  — ${desc}`)
+      }
+    }
+
+    if (completions.length > 0) {
+      lines.push('', 'Recently completed:')
+      for (const c of completions) {
+        const sum = c.summary.length > 120 ? c.summary.slice(0, 120) + '…' : c.summary
+        lines.push(`- ${c.agentName}: ${sum}`)
+      }
+    }
+
+    if (agents.length > 0) {
+      lines.push('', 'Registered agents:')
+      for (const a of agents) {
+        if (forAgentId && a.id === forAgentId) continue
+        lines.push(`- ${a.name} (${a.agentType}) [${a.status}]`)
+      }
+    }
+
+    const preamble = lines.join('\n')
+    const max = 2000
+    return preamble.length > max ? preamble.slice(0, max) + '\n…[truncated]' : preamble
+  }
+
+  // Actual files another agent's branch has changed (2.5). Mirrors the diff
+  // computation in mergeGate.ts:83-85 (`git diff --name-only branchPoint..branch`).
+  // Capped + best-effort: a transient git failure (branch already merged/deleted)
+  // must never break preamble construction.
+  private getBranchDiffFiles(task: TaskOverview, maxFiles = 8): string[] {
+    if (!task.branchPoint || !task.branchName) return []
+    try {
+      const out = execFileSync(
+        'git',
+        ['diff', '--name-only', `${task.branchPoint}..${task.branchName}`],
+        { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }
+      )
+      const files = out.split('\n').map(l => l.trim()).filter(Boolean)
+      return files.length > maxFiles ? files.slice(0, maxFiles) : files
+    } catch {
+      return []
+    }
+  }
+
+  // Recent completed task summaries across all agents (2.3 broadcast): feeds
+  // the dispatch preamble so a newly-launched agent sees what others just
+  // finished. Capped to a small number to keep the preamble lean.
+  getRecentCompletions(limit = 3): { agentName: string; summary: string; completedAt: number }[] {
+    const rows = this.db.prepare(
+      `SELECT ts.summary, ts.updated_at, t.agent_id, t.completed_at
+       FROM task_summaries ts
+       JOIN tasks t ON t.id = ts.task_id
+       WHERE t.status = 'done'
+       ORDER BY ts.updated_at DESC LIMIT ?`
+    ).all(limit) as { summary: string; updated_at: number; agent_id: string | null; completed_at: number | null }[]
+
+    return rows.map(r => ({
+      agentName: r.agent_id ? this.getAgentDisplayName(r.agent_id) : 'unassigned',
+      summary: r.summary,
+      completedAt: r.completed_at || r.updated_at,
+    }))
+  }
+
+  private getAgentDisplayName(agentId: string): string {
+    const row = this.db.prepare('SELECT name FROM agents WHERE id = ?').get(agentId) as { name: string } | undefined
+    return row?.name || agentId.slice(0, 8)
+  }
+
+  // 5.3 orchestrator gauges: aggregate counts used by the stats panel. Cheap
+  // queries against existing indexes — safe to call on every stats request.
+  getOrchestratorStats(): {
+    agents: { total: number; active: number; idle: number; paused: number }
+    tasks: Record<string, number>
+    worktrees: number
+    sessions: number
+    messages: { pending: number; total: number }
+    escalations: number
+    gates: { blocked: number; approved: number; rejected: number }
+    completions: number
+  } {
+    const agentRows = this.db.prepare('SELECT status FROM agents').all() as { status: string }[]
+    const agents = { total: agentRows.length, active: 0, idle: 0, paused: 0 }
+    for (const a of agentRows) {
+      if (a.status === 'active') agents.active++
+      else if (a.status === 'idle') agents.idle++
+      else if (a.status === 'paused') agents.paused++
+    }
+
+    const taskRows = this.db.prepare('SELECT status FROM tasks').all() as { status: string }[]
+    const tasks: Record<string, number> = {}
+    for (const t of taskRows) tasks[t.status] = (tasks[t.status] || 0) + 1
+
+    const worktrees = (this.db.prepare('SELECT COUNT(*) AS c FROM worktrees WHERE removed_at IS NULL').get() as { c: number }).c
+    const sessions = (this.db.prepare('SELECT COUNT(*) AS c FROM sessions WHERE status != \'closed\'').get() as { c: number }).c
+
+    const msg = this.db.prepare('SELECT read_by FROM messages').all() as { read_by: string }[]
+    const messages = {
+      pending: msg.filter(m => m.read_by === '[]').length,
+      total: msg.length,
+    }
+
+    const escalations = (this.db.prepare("SELECT COUNT(*) AS c FROM escalations WHERE status = 'open'").get() as { c: number }).c
+
+    const gateRows = this.db.prepare('SELECT status FROM gates').all() as { status: string }[]
+    const gates = { blocked: 0, approved: 0, rejected: 0 }
+    for (const g of gateRows) {
+      if (g.status === 'blocked') gates.blocked++
+      else if (g.status === 'approved') gates.approved++
+      else if (g.status === 'rejected') gates.rejected++
+    }
+
+    const completions = (this.db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE status = 'done'").get() as { c: number }).c
+
+    return { agents, tasks, worktrees, sessions, messages, escalations, gates, completions }
   }
 
   // ── Stale Agent Sweep ──

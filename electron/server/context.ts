@@ -9,6 +9,8 @@ import { GitHelper } from '../services/gitHelper'
 import { WorktreeHelper } from '../services/worktreeHelper'
 import { AgentOrchestrator } from '../services/agentOrchestrator'
 import { ChatManager } from '../services/chatManager'
+import { getMaxConcurrentSessions } from '../config'
+import type { StateManager } from '../services/orchestration/stateManager'
 
 export interface ServerContext {
   io: Server
@@ -32,6 +34,7 @@ export interface CreateServerContextOptions {
   expressApp: Express
   userDataPath: string
   rebuildMenu: () => void
+  stateManager?: StateManager | null
 }
 
 export function createServerContext(opts: CreateServerContextOptions): ServerContext {
@@ -41,7 +44,8 @@ export function createServerContext(opts: CreateServerContextOptions): ServerCon
   const statusDetector = new StatusDetector()
   const gitHelper = new GitHelper()
   const worktreeHelper = new WorktreeHelper()
-  const agentOrchestrator = new AgentOrchestrator(opts.io)
+  const agentOrchestrator = new AgentOrchestrator(opts.io, getMaxConcurrentSessions())
+  agentOrchestrator.setStateManager(opts.stateManager ?? null)
   const chatManager = new ChatManager()
 
   sessionManager.setStatusDetector(statusDetector)

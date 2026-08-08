@@ -90,10 +90,9 @@ export class WorktreeLifecycle {
     return this.repoPath
   }
 
-  createWorktree(taskId: string, sourceRef: string): WorktreeResult {
-    const shortId = taskId.slice(0, 8)
-    const branchName = `agntspce/task-${shortId}`
-    const worktreePath = path.join(this.baseDir, `task-${shortId}`)
+  createWorktree(id: string, sourceRef: string): WorktreeResult {
+    const branchName = `worktree/${id}`
+    const worktreePath = path.join(this.baseDir, id)
 
     if (fs.existsSync(worktreePath)) {
       throw new Error(`Worktree path already exists: ${worktreePath}`)
@@ -120,6 +119,30 @@ export class WorktreeLifecycle {
     this.execGit(['worktree', 'add', '-b', branchName, worktreePath, sourceRef])
 
     return { worktreePath, branchName }
+  }
+
+  // 5.4 no-worktree mode: create the task branch in the main repo (checked out
+  // by the agent working in-place) instead of a detached git worktree.
+  createInRepoBranch(taskId: string, sourceRef: string): void {
+    const branchName = `worktree/${taskId}`
+    try {
+      this.execGit(['branch', '-D', branchName])
+    } catch {}
+    this.execGit(['branch', branchName, sourceRef])
+    this.execGit(['checkout', branchName])
+  }
+
+  // 5.4 no-worktree teardown: after a successful merge, return the repo working
+  // tree to the integration branch and delete the (now-merged) task branch.
+  // A checked-out branch cannot be deleted, so checkout must come first.
+  cleanupInRepoTaskBranch(taskId: string, integrationBranch: string): void {
+    const branchName = `worktree/${taskId}`
+    try {
+      this.execGit(['checkout', integrationBranch])
+    } catch {}
+    try {
+      this.execGit(['branch', '-D', branchName])
+    } catch {}
   }
 
   removeScratchWorktree(worktreePath: string): void {
@@ -154,12 +177,14 @@ export class WorktreeLifecycle {
     }
   }
 
-  removeWorktree(taskId: string): void {
-    const shortId = taskId.slice(0, 8)
-    const branchName = `agntspce/task-${shortId}`
-    const worktreePath = path.join(this.baseDir, `task-${shortId}`)
+  removeWorktree(id: string, integrationBranch?: string): void {
+    const branchName = `worktree/${id}`
+    const worktreePath = path.join(this.baseDir, id)
 
-    if (!fs.existsSync(worktreePath)) return
+    if (!fs.existsSync(worktreePath)) {
+      this.deleteBranchIfMerged(branchName, integrationBranch)
+      return
+    }
 
     try {
       this.execGit(['worktree', 'remove', worktreePath])
@@ -169,28 +194,36 @@ export class WorktreeLifecycle {
       } catch {}
     }
 
-    try {
-      this.execGit(['branch', '-D', branchName])
-    } catch {}
+    this.deleteBranchIfMerged(branchName, integrationBranch)
 
     try {
       fs.rmSync(worktreePath, { recursive: true, force: true })
     } catch {}
   }
 
-  worktreeExists(taskId: string): boolean {
-    const shortId = taskId.slice(0, 8)
-    return fs.existsSync(path.join(this.baseDir, `task-${shortId}`))
+  private deleteBranchIfMerged(branchName: string, integrationBranch?: string): void {
+    if (!integrationBranch) return
+    try {
+      // git merge-base --is-ancestor exits 0 (true) when the branch has been
+      // merged into the integration branch. Only delete merged branches so
+      // unmerged work is never destroyed by teardown.
+      this.execGit(['merge-base', '--is-ancestor', branchName, integrationBranch])
+      this.execGit(['branch', '-D', branchName])
+    } catch {
+      // Branch is unmerged (or missing) — keep it so the work survives.
+    }
   }
 
-  getWorktreePath(taskId: string): string {
-    const shortId = taskId.slice(0, 8)
-    return path.join(this.baseDir, `task-${shortId}`)
+  worktreeExists(id: string): boolean {
+    return fs.existsSync(path.join(this.baseDir, id))
   }
 
-  getBranchName(taskId: string): string {
-    const shortId = taskId.slice(0, 8)
-    return `agntspce/task-${shortId}`
+  getWorktreePath(id: string): string {
+    return path.join(this.baseDir, id)
+  }
+
+  getBranchName(id: string): string {
+    return `worktree/${id}`
   }
 
   cleanupScratchWorktrees(): void {
@@ -199,5 +232,23 @@ export class WorktreeLifecycle {
       if (!entry.isDirectory() || !entry.name.startsWith('scratch-')) continue
       this.removeScratchWorktree(path.join(this.baseDir, entry.name))
     }
+  }
+
+  // 5.1 crash recovery: remove task worktrees whose task is no longer active
+  // (done / abandoned / missing). Follows the merged-branch-only rule so an
+  // unmerged branch's work survives. Returns the count removed.
+  sweepOrphanWorktrees(activeTaskIds: Set<string>, integrationBranch?: string): number {
+    if (!fs.existsSync(this.baseDir)) return 0
+    let removed = 0
+    for (const entry of fs.readdirSync(this.baseDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith('scratch-')) continue
+      const taskId = entry.name
+      if (activeTaskIds.has(taskId)) continue
+      try {
+        this.removeWorktree(taskId, integrationBranch)
+        removed++
+      } catch {}
+    }
+    return removed
   }
 }

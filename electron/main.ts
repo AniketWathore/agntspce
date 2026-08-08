@@ -4,6 +4,7 @@ import { initialize as initRtk } from './services/rtkManager'
 import { initialize as initSearch, injectClaudeCodeConfig, injectOpenCodeConfig } from './services/searchManager'
 import { ensureCoordinator, getWorkspaceRoot } from './services/orchestration/bootstrap'
 import type { Coordinator } from './services/orchestration'
+import type { StateManager } from './services/orchestration/stateManager'
 import { bootstrapServer } from './server'
 import { createWindow, getMainWindow, registerIpcHandlers, rebuildMenu } from './window'
 app.setName('AgntSpce')
@@ -24,10 +25,12 @@ app.on('second-instance', () => {
 
 let orchestrationCoordinator: Coordinator | null = null
 
+let orchestrationStateManager: StateManager | null = null
+
 let serverHandle: ReturnType<typeof bootstrapServer> | null = null
 
 function startServer() {
-  serverHandle = bootstrapServer(app.getPath('userData'), rebuildMenu)
+  serverHandle = bootstrapServer(app.getPath('userData'), rebuildMenu, orchestrationStateManager)
   return serverHandle
 }
 
@@ -46,8 +49,10 @@ app.whenReady().then(async () => {
     const result = await ensureCoordinator()
     if (result.status === 'started') {
       orchestrationCoordinator = result.coordinator
+      orchestrationStateManager = result.stateManager
       console.log('[orchestration] Coordinator started')
     } else if (result.status === 'already_running') {
+      orchestrationStateManager = result.stateManager
       console.log('[orchestration] Coordinator already running for', result.workspaceRoot)
     } else if (result.status === 'error') {
       console.error('[orchestration] Coordinator error:', result.error)

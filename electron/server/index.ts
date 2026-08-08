@@ -5,6 +5,7 @@ import { isAllowedCorsOrigin, MAX_JSON_BODY_SIZE, MAX_PORT_RETRIES, SERVER_HOST,
 import { createServerContext, type ServerContext } from './context'
 import { registerApiRoutes } from './api'
 import { registerAllHandlers } from './handlers'
+import type { StateManager } from '../services/orchestration/stateManager'
 
 export interface ServerHandle {
   io: Server
@@ -13,7 +14,7 @@ export interface ServerHandle {
   listen: () => void
 }
 
-export function bootstrapServer(userDataPath: string, rebuildMenu: () => void): ServerHandle {
+export function bootstrapServer(userDataPath: string, rebuildMenu: () => void, stateManager?: StateManager | null): ServerHandle {
   const expressApp = express()
   const httpServer = createServer(expressApp)
   const io = new Server(httpServer, {
@@ -40,7 +41,7 @@ export function bootstrapServer(userDataPath: string, rebuildMenu: () => void): 
   })
   expressApp.use(express.json({ limit: MAX_JSON_BODY_SIZE }))
 
-  const ctx = createServerContext({ io, httpServer, expressApp, userDataPath, rebuildMenu })
+  const ctx = createServerContext({ io, httpServer, expressApp, userDataPath, rebuildMenu, stateManager })
 
   registerApiRoutes(expressApp, ctx)
 

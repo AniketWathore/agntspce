@@ -88,7 +88,7 @@ export class CoordinatorClient {
     }
   }
 
-  async request(method: string, params: Record<string, unknown> = {}): Promise<RpcResult> {
+  async request(method: string, params: Record<string, unknown> = {}, idempotencyKey?: string): Promise<RpcResult> {
     if (!this.socket || !this.connected) {
       return { error: { code: 'NOT_CONNECTED', message: 'Not connected to coordinator' }, pendingMessages: [] }
     }
@@ -96,7 +96,8 @@ export class CoordinatorClient {
     const id = String(++this.requestId)
     return new Promise<RpcResult>((resolve, reject) => {
       this.pending.set(id, { resolve, reject })
-      const request = JSON.stringify({ id, method, params }) + '\n'
+      const finalParams = idempotencyKey ? { ...params, idempotencyKey } : params
+      const request = JSON.stringify({ id, method, params: finalParams }) + '\n'
       try {
         this.socket!.write(request)
       } catch (e) {
