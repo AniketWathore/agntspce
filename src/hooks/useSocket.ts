@@ -4,11 +4,33 @@ import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchC
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
+export interface OrchestratorTaskStats {
+  total: number
+  open: number
+  claimed: number
+  in_progress: number
+  merging: number
+  setup_failed: number
+  done: number
+  abandoned: number
+  escalated: number
+}
+
 export interface OrchestratorStats {
   concurrency: { active: number, queued: number, max: number }
   sessionCount: number
   totalMemoryMB: number
   resourceUsage: { sessionId: string, pid: number, cpuPercent: number, memoryMB: number, collectedAt: number }[]
+  orchestration: {
+    agents: { total: number; active: number; idle: number; paused: number }
+    tasks: Record<string, number>
+    worktrees: number
+    sessions: number
+    messages: { pending: number; total: number }
+    escalations: number
+    gates: { blocked: number; approved: number; rejected: number }
+    completions: number
+  } | null
 }
 
 interface UseSocketReturn {
@@ -443,7 +465,7 @@ export function useSocket(): UseSocketReturn {
     return new Promise((resolve) => {
       socketRef.current?.emit('get-orchestrator-stats', {}, (res: any) => {
         if (res?.ok) resolve(res)
-        else resolve({ concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [] })
+        else resolve({ concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [], orchestration: null })
       })
     })
   }, [])

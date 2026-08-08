@@ -2540,6 +2540,41 @@
   gap: 16px;
 }
 
+/* Dashboard Tab Navigation */
+.dashboard-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 24px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.dashboard-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 16px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.dashboard-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dashboard-tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* Overview Stats Grid */
 .dashboard-overview {
   display: grid;
@@ -2880,6 +2915,245 @@
   color: var(--danger);
   border-color: var(--danger-border);
   background: var(--danger-bg);
+}
+
+/* ── Orchestration Panel ─────────────────── */
+.orch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.orch-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: -8px;
+}
+
+.orch-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.orch-panel-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.orch-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 6px rgba(63, 185, 80, 0.6);
+  animation: orch-pulse 2s infinite;
+}
+
+.orch-live-dot.refreshing {
+  animation: none;
+  background: #d29922;
+}
+
+@keyframes orch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.orch-overview {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.orch-stat-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.orch-stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.orch-stat-value {
+  display: block;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  line-height: 1.1;
+}
+
+.orch-stat-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+.orch-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #58a6ff;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.orch-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.orch-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.orch-section-total {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.orch-section-total.warn {
+  color: #f0883e;
+}
+
+.orch-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 20px;
+}
+
+.orch-task-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.orch-task-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.orch-task-count {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.orch-task-track {
+  height: 6px;
+  background: var(--bg-elevated);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.orch-task-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+
+.orch-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.orch-chart {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #58a6ff;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+.orch-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.orch-savings-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orch-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.orch-session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.orch-session-name {
+  color: var(--text-muted);
+}
+
+.orch-session-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.orch-session-value.ok {
+  color: #3fb950;
+}
+
+.orch-session-value.warn {
+  color: #d29922;
+}
+
+.orch-session-value.bad {
+  color: #f85149;
+}
+
+.orch-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 48px 24px;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.orch-empty p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 /* ── Prompt Debug ───────────────────────── */
