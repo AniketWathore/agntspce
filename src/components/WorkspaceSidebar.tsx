@@ -92,6 +92,7 @@ export default function WorkspaceSidebar({
                       style={{ fontSize: 12, width: 16 }}
                     />
                   </div>
+                  <i className="codicon codicon-folder workspace-icon" style={{ fontSize: 14, flexShrink: 0, color: '#CCCCCC' }} />
                   <div
                     className={`workspace-tree-name${isActive ? ' active' : ''}`}
                     onClick={() => onSelect(ws.id)}

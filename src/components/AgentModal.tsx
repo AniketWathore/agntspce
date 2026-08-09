@@ -18,6 +18,7 @@ export default function AgentModal({ open, sessionId, agentConfigs, onStart, onC
   const [selectedReasoning, setSelectedReasoning] = useState<string | undefined>(undefined)
   const [selectedVerbosity, setSelectedVerbosity] = useState<string | undefined>(undefined)
   const [resumeId, setResumeId] = useState<string>('')
+  const [declaredFiles, setDeclaredFiles] = useState<string>('')
   const [activePreset, setActivePreset] = useState<string | null>(null)
 
   const config = agentConfigs.find(a => a.id === selectedAgent)
@@ -30,6 +31,7 @@ export default function AgentModal({ open, sessionId, agentConfigs, onStart, onC
       setSelectedReasoning(config.defaultReasoning ?? undefined)
       setSelectedVerbosity(config.defaultVerbosity ?? undefined)
       setResumeId('')
+      setDeclaredFiles('')
       setActivePreset(null)
     }
   }, [open, selectedAgent, agentConfigs])
@@ -99,6 +101,9 @@ export default function AgentModal({ open, sessionId, agentConfigs, onStart, onC
       reasoning: selectedReasoning,
       verbosity: selectedVerbosity,
       resumeId: selectedMode === 'resume' ? resumeId || undefined : undefined,
+      declaredFiles: declaredFiles
+        ? declaredFiles.split(',').map(f => f.trim()).filter(Boolean)
+        : undefined,
     })
     onClose()
   }
@@ -250,6 +255,20 @@ export default function AgentModal({ open, sessionId, agentConfigs, onStart, onC
                 })}
               </div>
             )}
+
+            <div className="declared-files-config">
+              <label className="flag-category-label">
+                Declared Files <span className="flag-desc">(comma-separated paths this agent will own)</span>
+              </label>
+              <input
+                className="declared-files-input"
+                type="text"
+                value={declaredFiles}
+                onChange={e => setDeclaredFiles(e.target.value)}
+                placeholder="src/utils/, package.json"
+                title="Claim enforcement: this agent's scope is checked against other active sessions before it starts."
+              />
+            </div>
 
             <div className="quick-presets">
               <div className="presets-label">Quick Presets</div>

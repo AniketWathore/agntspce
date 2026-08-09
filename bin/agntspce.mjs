@@ -194,7 +194,10 @@ function stripAnsi(text) {
 }
 
 function estimateTokens(text) {
-  return Math.max(1, Math.ceil(text.length / 4))
+  const clean = stripAnsi(String(text || ''))
+    .replace(/\r\n/g, '\n')
+    .replace(/[\u200b-\u200f\u2028-\u202f\ufeff]/g, '')
+  return Math.max(1, Math.ceil(clean.length / 4))
 }
 
 function applyFilter(filter, output) {
@@ -335,12 +338,29 @@ function cmdRun(args) {
   }
 
   const commandStr = args.join(' ')
-  const filter = findFilter(commandStr)
-  const binary = resolveBinary(args[0])
+  // Normalize: if the agent passes the full binary path, replace with "agntspce"
+  // so the terminal shows "agntspce $ ..." instead of the absolute path.
+  const wrapperPath = process.argv[1] || ''
+  const wrapperBase = 'agntspce'
+  // Normalize args: replace any absolute/full path to our wrapper binary with just base name
+  const normalizedArgs = args.map(a => {
+    // Direct match to wrapper binary path
+    if (a === wrapperPath || a === wrapperBase) return wrapperBase
+    // Any absolute path that ends with our binary name (dist-electron/rtk/agntspce, bin/agntspce, etc.)
+    if (path.basename(a) === wrapperBase && (a.includes('/') || a.includes('\\'))) {
+      return wrapperBase
+    }
+    if (wrapperPath && a.includes(wrapperPath)) return wrapperBase
+    return a
+  })
+  const displayArgs = normalizedArgs[0] === wrapperBase ? normalizedArgs.slice(1) : normalizedArgs
+  const displayStr = displayArgs.join(' ')
+  const filter = findFilter(displayStr)
+  const binary = resolveBinary(normalizedArgs[0] || args[0])
 
   // Emit command marker so OutputFilterService can detect and track this command.
   // Using process.stderr so it doesn't pollute the filtered stdout output.
-  process.stderr.write(`agntspce $ ${commandStr}\n`)
+  process.stderr.write(`agntspce $ ${displayStr}\n`)
 
   const result = spawnSync(binary, args.slice(1), {
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -369,15 +389,27 @@ function cmdRun(args) {
   }
 
   const stdout = result.stdout ? result.stdout.toString() : ''
-  const stderr = result.stderr ? result.stderr.toString() : ''
-  const raw = (stdout + stderr).trim()
+  const stderrText = result.stderr ? result.stderr.toString() : ''
+  // Suppress any lines that contain the full binary path (e.g. agent showing absolute path)
+  const wrapperFullPath = process.argv[1] ? path.basename(process.argv[1]) === 'agntspce.mjs' ? process.argv[1].replace('.mjs', '') : '' : ''
+  const binaryDir = wrapperFullPath ? path.dirname(wrapperFullPath) : ''
+  const suppressRegex = /dist-electron[\\/]rtk[\\/]agntspce|\/Users\/prashik\/Aniket\/agntspce\/dist-electron\/rtk\/agntspce|\/Users\/prashik\/Aniket\/agntspce\/bin\/agntspce/g
+  const suppressFilter = (text) => {
+    return text.split('\n').filter(line => {
+      // Suppress lines that contain the absolute wrapper binary path (agent showing full path)
+      return !suppressRegex.test(line)
+    }).join('\n')
+  }
+  const stdoutFiltered = suppressFilter(stdout)
+  const stderrFiltered = suppressFilter(stderrText)
+  const raw = (stdoutFiltered + stderrFiltered).trim()
   const exitCode = result.status ?? 0
 
   if (!filter) {
-    if (stdout) process.stdout.write(stdout)
-    if (stderr) process.stderr.write(stderr)
+    if (stdoutFiltered) process.stdout.write(stdoutFiltered)
+    if (stderrFiltered) process.stderr.write(stderrFiltered)
     const rt = estimateTokens(raw)
-    reportStats(rt, rt, commandStr, exitCode)
+    reportStats(rt, rt, displayStr, exitCode)
     return
   }
 
@@ -394,7 +426,7 @@ function cmdRun(args) {
     process.stdout.write(filtered + '\n')
   }
   // Report token savings to backend via HTTP (bypasses PTY output parsing)
-  reportStats(rawTokens, filteredTokens, commandStr, exitCode)
+  reportStats(rawTokens, filteredTokens, displayStr, exitCode)
 }
 
 // ── Entry Point ────────────────────────────────────────────────

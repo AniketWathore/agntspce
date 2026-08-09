@@ -13,6 +13,8 @@ const AGENT_IMAGE_MAP: Record<string, { text: string; color: string }> = {
   pi: { text: 'pi-text.svg', color: 'pi-color.png' },
   kilocode: { text: 'kilocode-color.png', color: 'kilocode-color.png' },
   windsurf: { text: 'windsurf-color.png', color: 'windsurf-color.png' },
+  'cursor-agent': { text: 'cursor-text.svg', color: 'cursor-color.svg' },
+  mastracode: { text: 'mastra-text.svg', color: 'mastra-color.svg' },
 }
 
 export function getAgentTextImage(type: string): string {

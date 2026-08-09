@@ -1,10 +1,15 @@
 import { useState } from 'react'
 
+interface PresetScripts {
+  setupScript?: string
+  teardownScript?: string
+}
+
 interface CreateWorkspaceModalProps {
   open: boolean
   onClose: () => void
-  onCreateLocal: (name: string, path: string) => Promise<void>
-  onCreateFromGit: (gitUrl: string, name?: string) => Promise<void>
+  onCreateLocal: (name: string, path: string, scripts?: PresetScripts) => Promise<void>
+  onCreateFromGit: (gitUrl: string, name?: string, scripts?: PresetScripts) => Promise<void>
 }
 
 export default function CreateWorkspaceModal({ open, onClose, onCreateLocal, onCreateFromGit }: CreateWorkspaceModalProps) {
@@ -12,6 +17,9 @@ export default function CreateWorkspaceModal({ open, onClose, onCreateLocal, onC
   const [name, setName] = useState('')
   const [gitUrl, setGitUrl] = useState('')
   const [path, setPath] = useState('')
+  const [showPresets, setShowPresets] = useState(false)
+  const [setupScript, setSetupScript] = useState('')
+  const [teardownScript, setTeardownScript] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -22,7 +30,7 @@ export default function CreateWorkspaceModal({ open, onClose, onCreateLocal, onC
     setLoading(true)
     setError('')
     try {
-      await onCreateLocal(name.trim(), path.trim())
+      await onCreateLocal(name.trim(), path.trim(), { setupScript, teardownScript })
       onClose()
     } catch (e: any) {
       setError(e?.message || 'Failed to create workspace')
@@ -35,7 +43,7 @@ export default function CreateWorkspaceModal({ open, onClose, onCreateLocal, onC
     setLoading(true)
     setError('')
     try {
-      await onCreateFromGit(gitUrl.trim(), name.trim() || undefined)
+      await onCreateFromGit(gitUrl.trim(), name.trim() || undefined, { setupScript, teardownScript })
       onClose()
     } catch (e: any) {
       setError(e?.message || 'Failed to clone repository')
@@ -103,6 +111,33 @@ export default function CreateWorkspaceModal({ open, onClose, onCreateLocal, onC
             </>
           )}
         </div>
+
+        <button className="create-workspace-presets-toggle" onClick={() => setShowPresets(o => !o)}>
+          {showPresets ? '▾' : '▸'} Presets (setup / teardown scripts)
+        </button>
+
+        {showPresets && (
+          <div className="create-workspace-presets">
+            <div className="create-workspace-fields">
+              <label>Setup script (runs when workspace opens):</label>
+              <textarea
+                className="text-input preset-script-input"
+                placeholder={'npm install\n# any shell commands'}
+                value={setupScript}
+                onChange={e => setSetupScript(e.target.value)}
+                rows={3}
+              />
+              <label>Teardown script (runs when workspace closes):</label>
+              <textarea
+                className="text-input preset-script-input"
+                placeholder={'# stop servers, clean up\n'}
+                value={teardownScript}
+                onChange={e => setTeardownScript(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+        )}
 
         {error && <p className="error-text">{error}</p>}
 

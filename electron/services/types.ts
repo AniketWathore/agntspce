@@ -28,6 +28,7 @@ export interface Session {
   processMonitor?: NodeJS.Timeout | null
   workspace?: string | null
   sessionGroupId?: string
+  slotRelease?: (() => void) | null
 }
 
 export interface SessionConfig {

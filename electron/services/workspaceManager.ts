@@ -4,6 +4,13 @@ import * as path from 'path'
 import * as os from 'os'
 import { spawn } from 'child_process'
 import type { Workspace, SavedSessionData, WorkspaceExport } from './types'
+import {
+  ensureAgntSpceDir,
+  teardownAgntSpce,
+  getDbPath,
+  getDiscoveryPath,
+} from './orchestration/bootstrap'
+import { FileIndexer } from './fileIndexer'
 
 const CONFIG_DIR = path.join(os.homedir(), '.agent-workspace')
 
@@ -85,6 +92,7 @@ export class WorkspaceManager {
     const configured = String(this.config?.activeWorkspace || '').trim()
     if (remember && configured && this.workspaces.has(configured)) {
       this.activeWorkspace = this.workspaces.get(configured)!
+      this.ensureWorkspaceScaffold(this.activeWorkspace)
       return
     }
     if (this.workspaces.size > 0) {
@@ -95,11 +103,66 @@ export class WorkspaceManager {
           return bTime - aTime
         })
       this.activeWorkspace = sorted[0]!
+      this.ensureWorkspaceScaffold(this.activeWorkspace)
     }
   }
 
   getActiveWorkspace(): Workspace | null {
     return this.activeWorkspace
+  }
+
+  private getWorkspaceRepoPath(ws: Workspace): string | null {
+    const repoPath = ws.repository?.path
+    if (!repoPath) return null
+    try {
+      if (!fsSync.existsSync(repoPath) || !fsSync.statSync(repoPath).isDirectory()) return null
+      return repoPath
+    } catch {
+      return null
+    }
+  }
+
+  getOrchestrationPaths(ws: Workspace): { repoPath: string; dbPath: string; discoveryPath: string } | null {
+    const repoPath = this.getWorkspaceRepoPath(ws)
+    if (!repoPath) return null
+    return {
+      repoPath,
+      dbPath: getDbPath(repoPath),
+      discoveryPath: getDiscoveryPath(repoPath),
+    }
+  }
+
+  private ensureWorkspaceScaffold(ws: Workspace): void {
+    const repoPath = this.getWorkspaceRepoPath(ws)
+    if (!repoPath) return
+    try {
+      ensureAgntSpceDir(repoPath)
+      this.ensureFileIndex(repoPath, ws.id)
+    } catch (err: any) {
+      console.warn('[workspace] Failed to scaffold .agntspce for', ws.id, err?.message || err)
+    }
+  }
+
+  private ensureFileIndex(repoPath: string, workspaceId: string): void {
+    try {
+      const indexer = new FileIndexer(repoPath)
+      if (!indexer.load()) {
+        const stats = indexer.scan(repoPath)
+        console.log(`[workspace] Indexed ${stats.files} files, ${stats.edges} edges for workspace ${workspaceId}`)
+      }
+    } catch (err: any) {
+      console.warn('[workspace] Failed to build file index for', workspaceId, err?.message || err)
+    }
+  }
+
+  private teardownWorkspaceScaffold(ws: Workspace): void {
+    const repoPath = this.getWorkspaceRepoPath(ws)
+    if (!repoPath) return
+    try {
+      teardownAgntSpce(repoPath)
+    } catch (err: any) {
+      console.warn('[workspace] Failed to teardown .agntspce for', ws.id, err?.message || err)
+    }
   }
 
   private sessionStatePath(workspaceId: string): string {
@@ -195,7 +258,7 @@ export class WorkspaceManager {
     } catch {}
   }
 
-  async cloneFromGitUrl(gitUrl: string, name?: string): Promise<Workspace> {
+  async cloneFromGitUrl(gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }): Promise<Workspace> {
     const repoName = name || path.basename(gitUrl).replace(/\.git$/, '')
     const id = repoName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     const cloneDir = path.join(os.homedir(), 'AgntSpce', repoName)
@@ -224,10 +287,13 @@ export class WorkspaceManager {
           worktrees: { enabled: false, count: 0, namingPattern: 'work{n}', autoCreate: false },
           lastAccess: new Date().toISOString(),
           gitUrl,
+          setupScript: scripts?.setupScript,
+          teardownScript: scripts?.teardownScript,
         }
         await fs.writeFile(wsDir, JSON.stringify(ws, null, 2))
         this.workspaces.set(id, ws)
         await this.addRecentWorkspace(id)
+        this.ensureWorkspaceScaffold(ws)
         resolve(ws)
       })
       proc.on('error', reject)
@@ -355,6 +421,7 @@ export class WorkspaceManager {
     await this.saveConfig()
     await this.updateWorkspace(workspaceId, { lastAccess: new Date().toISOString() })
     await this.addRecentWorkspace(workspaceId)
+    this.ensureWorkspaceScaffold(ws)
     return ws
   }
 
@@ -370,6 +437,7 @@ export class WorkspaceManager {
     await fs.writeFile(filePath, JSON.stringify(data, null, 2))
     this.workspaces.set(data.id, data)
     await this.addRecentWorkspace(data.id)
+    this.ensureWorkspaceScaffold(data)
     return data
   }
 
@@ -395,6 +463,7 @@ export class WorkspaceManager {
     try { await fs.unlink(this.sessionStatePath(workspaceId)) } catch {}
     this.workspaces.delete(workspaceId)
     if (this.activeWorkspace?.id === workspaceId) this.activeWorkspace = null
+    this.teardownWorkspaceScaffold(ws)
   }
 
   listWorkspaces(): Workspace[] {
@@ -451,6 +520,7 @@ export class WorkspaceManager {
           )
           this.workspaces.set(ws.id, ws)
           await fs.unlink(path.join(deletedDir, file))
+          this.ensureWorkspaceScaffold(ws)
           return ws
         }
       } catch {}

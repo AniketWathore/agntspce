@@ -1,5 +1,8 @@
 import { PrioritySemaphore } from './prioritySemaphore'
 import { ResourceTracker } from './resourceTracker'
+import type { StateManager } from './orchestration/stateManager'
+import { WorktreeLifecycle } from './orchestration/worktreeLifecycle'
+import { AGENT_TYPES } from './types'
 
 interface SessionRecord {
   id: string
@@ -13,7 +16,7 @@ interface SessionRecord {
 }
 
 export class AgentOrchestrator {
-  private concurrencyLimiter = new PrioritySemaphore(6)
+  private concurrencyLimiter: PrioritySemaphore
   private resourceTracker = new ResourceTracker()
   private sessions = new Map<string, SessionRecord>()
   private healthInterval: NodeJS.Timeout | null = null
@@ -21,12 +24,33 @@ export class AgentOrchestrator {
   private readonly RESTART_WINDOW_MS = 60000
   private readonly HEALTH_TIMEOUT_MS = 15000
   private readonly HEALTH_CHECK_INTERVAL_MS = 15000
+  private readonly maxConcurrentSessions: number
   private io: any
+  private stateManager: StateManager | null = null
 
-  constructor(io: any) {
+  constructor(io: any, maxConcurrentSessions = 8) {
     this.io = io
+    this.maxConcurrentSessions = maxConcurrentSessions
+    this.concurrencyLimiter = new PrioritySemaphore(maxConcurrentSessions)
     this.startHealthChecks()
     this.resourceTracker.startMonitoring()
+  }
+
+  setStateManager(sm: StateManager | null): void {
+    this.stateManager = sm
+  }
+
+  getStateManager(): StateManager | null {
+    return this.stateManager
+  }
+
+  getOrchestrationStats() {
+    try {
+      return this.stateManager?.getOrchestratorStats() ?? null
+    } catch (err: any) {
+      console.error('[orchestrator] getOrchestrationStats failed:', err?.message || err)
+      return null
+    }
   }
 
   async acquireSlot(priority = 1, signal?: AbortSignal): Promise<() => void> {
@@ -45,11 +69,73 @@ export class AgentOrchestrator {
       lastHealthCheck: Date.now(),
       healthy: true,
     })
+    try {
+      // Preserve the existing task link across restarts: upsertSession without
+      // taskId would null it out, then ensureSessionTask re-creates a NEW task
+      // on every register — the duplicate "Ad-hoc … session" entries.
+      const existing = this.stateManager?.getSession(sessionId)
+      const existingTaskId = existing?.taskId ?? null
+      this.stateManager?.upsertSession({
+        id: sessionId,
+        sessionType: agentId,
+        agentId,
+        taskId: existingTaskId,
+        worktreeId: worktreeId || null,
+        status: 'idle',
+      })
+      if ((AGENT_TYPES as readonly string[]).includes(agentId as any)) {
+        const task = this.stateManager?.ensureSessionTask(sessionId, agentId, `Ad-hoc ${agentId} session ${sessionId.slice(-8)}`)
+        // Re-link if ensureSessionTask replaced the old task (e.g. terminal task)
+        if (task && task.id !== existingTaskId) {
+          this.stateManager?.linkSessionToTask(sessionId, task.id)
+        }
+      }
+    } catch (err: any) {
+      console.error('[orchestrator] registerSession persistence failed:', sessionId, err?.message || err)
+    }
   }
 
   unregisterSession(sessionId: string): void {
     this.resourceTracker.unregisterSession(sessionId)
     this.sessions.delete(sessionId)
+    try {
+      this.stateManager?.closeSessionRecord(sessionId)
+      this.teardownMergedWorktree(sessionId)
+    } catch (err: any) {
+      console.error('[orchestrator] unregisterSession persistence failed:', sessionId, err?.message || err)
+    }
+  }
+
+  private teardownMergedWorktree(sessionId: string): void {
+    const sm = this.stateManager
+    if (!sm) return
+    const session = sm.getSession(sessionId)
+    if (!session?.taskId) return
+    const task = sm.getTask(session.taskId)
+    if (!task || task.status !== 'done' || !task.worktreePath) return
+    try {
+      const integrationBranch = sm.getIntegrationBranch()
+      new WorktreeLifecycle(sm.getRepoPath()).removeWorktree(session.taskId, integrationBranch)
+    } catch (err: any) {
+      console.error('[orchestrator] worktree teardown failed:', sessionId, err?.message || err)
+    }
+  }
+
+  touchSession(sessionId: string): void {
+    try {
+      this.stateManager?.touchSession(sessionId)
+    } catch {}
+  }
+
+  enforceSessionClaims(sessionId: string, agentId: string, declaredFiles: string[], excludeSessionIds: string[] = []): boolean {
+    if (!this.stateManager) return true
+    try {
+      this.stateManager.claimSessionTask(sessionId, agentId, declaredFiles, excludeSessionIds)
+      return true
+    } catch (err: any) {
+      console.error('[orchestrator] session claim enforcement blocked:', sessionId, err?.message || err)
+      return false
+    }
   }
 
   canRestart(sessionId: string): boolean {
@@ -76,7 +162,7 @@ export class AgentOrchestrator {
     return {
       active: this.concurrencyLimiter.currentLoad,
       queued: this.concurrencyLimiter.queuedCount,
-      max: 6,
+      max: this.maxConcurrentSessions,
     }
   }
 
@@ -139,6 +225,9 @@ export class AgentOrchestrator {
       record.lastHealthCheck = Date.now()
       record.healthy = true
     }
+    try {
+      this.stateManager?.touchSession(sessionId)
+    } catch {}
   }
 
   isHealthy(sessionId: string): boolean {

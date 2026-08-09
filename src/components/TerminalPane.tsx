@@ -23,9 +23,13 @@ interface Props {
   onTerminalOutput?: (cb: (event: { sessionId: string, data: string }) => void) => () => void
   layoutMode?: 'grid' | 'focus' | 'side-left' | 'side-right'
   onLayoutChange?: (mode: 'grid' | 'focus' | 'side-left' | 'side-right') => void
+  onResizeStart?: (sessionId: string, edge: 'left' | 'right' | 'top' | 'bottom', x: number, y: number) => void
+  onResizeMove?: (sessionId: string, edge: 'left' | 'right' | 'top' | 'bottom', x: number, y: number) => void
+  onResizeEnd?: () => void
+  edgeHandles?: ('left' | 'right' | 'top' | 'bottom')[]
 }
 
-export default function TerminalPane({ session, onInput, onResize, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange }: Props) {
+export default function TerminalPane({ session, onInput, onResize, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles }: Props) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -95,9 +99,20 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     term.open(terminalRef.current)
 
     function doFit() {
-      try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch { }
+      try { fitAddon.fit() } catch { }
     }
-    setTimeout(doFit, 100)
+    let fitRaf = 0
+    let fitAttempts = 0
+    function retryFit() {
+      doFit()
+      const container = terminalRef.current
+      const hasSize = !!container && container.clientWidth > 0 && container.clientHeight > 0
+      if ((!hasSize || term.cols < 2 || term.rows < 2) && fitAttempts < 30) {
+        fitAttempts++
+        fitRaf = requestAnimationFrame(retryFit)
+      }
+    }
+    fitRaf = requestAnimationFrame(retryFit)
 
     term.onData((data) => {
       onInput(session.id, data)
@@ -151,6 +166,7 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
     return () => {
+      cancelAnimationFrame(fitRaf)
       unsub?.()
       themeObserver.disconnect()
       term.dispose()
@@ -160,18 +176,57 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
 
   useEffect(() => {
     if (!fitAddonRef.current || !paneRef.current) return
+    let raf = 0
     const observer = new ResizeObserver(() => {
-      try {
-        fitAddonRef.current?.fit()
-        termInstance.current?.refresh(0, termInstance.current.rows - 1)
-      } catch { }
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        try {
+          fitAddonRef.current?.fit()
+        } catch { }
+      })
     })
     observer.observe(paneRef.current)
-    return () => observer.disconnect()
+    return () => {
+      cancelAnimationFrame(raf)
+      observer.disconnect()
+    }
   }, [])
+
+function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!onResizeStart || !onResizeMove) return
+    const startX = e.clientX
+    const startY = e.clientY
+    onResizeStart(session.id, edge, startX, startY)
+    document.body.style.cursor = edge === 'left' || edge === 'right' ? 'col-resize' : 'row-resize'
+    document.body.style.userSelect = 'none'
+
+    function onMove(ev: MouseEvent) {
+      onResizeMove?.(session.id, edge, ev.clientX, ev.clientY)
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      onResizeEnd?.()
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  const handles = edgeHandles ?? ['left', 'right', 'top', 'bottom']
+  const showHandle = (edge: 'left' | 'right' | 'top' | 'bottom') =>
+    handles.includes(edge) && onResizeStart && onResizeMove
 
   return (
     <div className={`terminal-pane${dimmed ? ' dimmed' : ''}${session.sessionGroupId ? ' grouped' : ''}`} ref={paneRef} style={session.sessionGroupId ? { ...style, borderLeftColor: groupColor } : style}>
+      {showHandle('left') && <div className="pane-resize-handle pane-resize-left" onMouseDown={(e) => handleResizeDown('left', e)} />}
+      {showHandle('right') && <div className="pane-resize-handle pane-resize-right" onMouseDown={(e) => handleResizeDown('right', e)} />}
+      {showHandle('top') && <div className="pane-resize-handle pane-resize-top" onMouseDown={(e) => handleResizeDown('top', e)} />}
+      {showHandle('bottom') && <div className="pane-resize-handle pane-resize-bottom" onMouseDown={(e) => handleResizeDown('bottom', e)} />}
       <div className="terminal-header">
         <StatusDot status={session.status} />
         {isAgentType ? (

@@ -103,6 +103,8 @@ export interface AgentStartConfig {
   reasoning?: string
   verbosity?: string
   resumeId?: string
+  declaredFiles?: string[]
+  prompt?: string
 }
 
 export interface FilterEvent {
@@ -241,6 +243,7 @@ declare global {
       windowMaximize: () => Promise<void>
       windowClose: () => Promise<void>
       windowIsMaximized: () => Promise<boolean>
+      newWindow: () => Promise<void>
       popupMenu: (menuName: string, x: number, y: number) => Promise<void>
     }
   }

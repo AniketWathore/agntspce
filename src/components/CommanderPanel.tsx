@@ -6,6 +6,7 @@ interface Command {
   label: string
   description: string
   shortcut?: string
+  display?: string
   action: () => void
 }
 
@@ -118,7 +119,7 @@ export default function CommanderPanel({ commands, onClose }: Props) {
                   >
                     <div className="commander-item-left">
                       <span className="commander-item-label">{cmd.label}</span>
-                      {cmd.shortcut && <span className="commander-item-shortcut">{cmd.shortcut}</span>}
+                      {(cmd.display || cmd.shortcut) && <span className="commander-item-shortcut">{cmd.display || cmd.shortcut}</span>}
                     </div>
                     <span className="commander-item-desc">{cmd.description}</span>
                   </div>

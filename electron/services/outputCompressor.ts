@@ -32,7 +32,13 @@ export class TokenUsageTracker {
   }
 
   private estimateTokens(text: string): number {
-    return Math.max(1, Math.ceil(text.trim().length / 4))
+    const clean = String(text || '')
+      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+      .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07|\x1b)/g, '')
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f]/g, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/[\u200b-\u200f\u2028-\u202f\ufeff]/g, '')
+    return Math.max(1, Math.ceil(clean.length / 4))
   }
 
   cleanup(sessionId: string): void {

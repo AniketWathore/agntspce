@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, type CSSProperties, type ReactNode } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -46,6 +46,7 @@ interface Props {
   onTerminalResizerMouseDown?: (e: React.MouseEvent) => void
   terminalHeight?: number
   terminalDrag?: boolean
+  agentPickerTrigger?: number
 }
 
 const AGENT_TYPES = [
@@ -55,21 +56,60 @@ const AGENT_TYPES = [
   { id: 'gemini', label: 'Gemini CLI', icon: '✨' },
 ]
 
-function getTilingStyle(count: number): CSSProperties {
+function getTilingStyle(count: number, paneSizes: Record<string, number>, sessionIds: string[]): CSSProperties {
   const base: CSSProperties = { display: 'grid', gap: 4, padding: '0 4px 4px', minHeight: 0, flex: 1 }
+  const w = sessionIds.map(id => Math.max(0.3, paneSizes[id] || 1))
+
   if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-  if (count === 2) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
-  if (count <= 4) return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
+  if (count === 2) return { ...base, gridTemplateColumns: `${w[0]}fr ${w[1]}fr`, gridTemplateRows: '1fr' }
+  if (count === 3) return { ...base, gridTemplateColumns: `${w[0]}fr ${w[1] + w[2]}fr`, gridTemplateRows: `${w[1]}fr ${w[2]}fr` }
+  if (count === 4) return { ...base, gridTemplateColumns: `${w[0] + w[2]}fr ${w[1] + w[3]}fr`, gridTemplateRows: `${w[0] + w[1]}fr ${w[2] + w[3]}fr` }
+  if (count === 5) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr`, gridTemplateRows: '1fr 1fr' }
+  if (count === 6) return { ...base, gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)' }
+  if (count === 7) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr 1fr`, gridTemplateRows: 'repeat(2, 1fr)' }
+  if (count === 9) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr 1fr 1fr`, gridTemplateRows: 'repeat(2, 1fr)' }
   const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
   const rows = Math.ceil(count / cols)
   return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
 }
 
 function getItemStyle(index: number, count: number, _activeIndex: number): CSSProperties {
-  if (count === 3 && index === 0) {
+  // First agent spans full height in its column (not 2 cols)
+  if ((count === 3 || count === 5 || count === 7 || count === 9) && index === 0) {
     return { gridRow: 'span 2' }
   }
   return {}
+}
+
+function getGridEdgeHandles(index: number, count: number): ('left' | 'right' | 'top' | 'bottom')[] {
+  if (count === 2) {
+    return index === 0 ? ['left', 'right'] : ['right']
+  }
+  if (count === 3) {
+    return index === 0 ? ['left', 'right'] :
+           index === 1 ? ['top', 'right', 'bottom'] :
+           ['right', 'bottom']
+  }
+  if (count === 4) {
+    return index === 0 ? ['left', 'right', 'top'] :
+           index === 1 ? ['right', 'top'] :
+           index === 2 ? ['left', 'right', 'bottom'] :
+           ['right', 'bottom']
+  }
+  if (count === 5) {
+    return index === 0 ? ['left', 'right', 'top'] :
+           index === 1 ? ['right', 'top'] :
+           index === 2 ? ['left', 'right'] :
+           index === 3 ? ['right'] :
+           ['right', 'bottom']
+  }
+  if (count === 7) {
+    return index === 0 ? ['left', 'right'] :
+           index === 3 ? ['left', 'right', 'top'] :
+           index === 4 ? ['right', 'top'] :
+           ['left', 'right', 'bottom']
+  }
+  return ['left', 'right', 'top', 'bottom']
 }
 
 function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTerminalOutput }: {
@@ -126,8 +166,19 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
     term.open(terminalRef.current)
-    function doFit() { try { fitAddon.fit(); term.refresh(0, term.rows - 1) } catch {} }
-    setTimeout(doFit, 100)
+    function doFit() { try { fitAddon.fit() } catch {} }
+    let fitRaf = 0
+    let fitAttempts = 0
+    function retryFit() {
+      doFit()
+      const container = terminalRef.current
+      const hasSize = !!container && container.clientWidth > 0 && container.clientHeight > 0
+      if ((!hasSize || term.cols < 2 || term.rows < 2) && fitAttempts < 30) {
+        fitAttempts++
+        fitRaf = requestAnimationFrame(retryFit)
+      }
+    }
+    fitRaf = requestAnimationFrame(retryFit)
     term.onData((data) => { onInput(session.id, data) })
     term.onResize(({ cols, rows }) => { onResize(session.id, cols, rows) })
     termInstance.current = term
@@ -170,6 +221,7 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
     })
 
     return () => {
+      cancelAnimationFrame(fitRaf)
       unsub?.()
       themeObserver.disconnect()
       term.dispose()
@@ -186,11 +238,19 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
   useEffect(() => {
     const el = terminalRef.current
     if (!el || hidden) return
+    let raf = 0
     const ro = new ResizeObserver(() => {
-      if (fitAddonRef.current) try { fitAddonRef.current.fit() } catch {}
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        if (fitAddonRef.current) try { fitAddonRef.current.fit() } catch {}
+      })
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
   }, [hidden])
 
   return (
@@ -236,6 +296,7 @@ export default function TerminalArea({
   chatSidebarOpen, onToggleChatSidebar, onTerminalOutput,
   pageViews, activeView, onViewChange, shellOnly,
   onTerminalResizerMouseDown, terminalHeight = 40, terminalDrag,
+  agentPickerTrigger = 0,
 }: Props) {
   const [activeGroupTab, setActiveGroupTab] = useState<string>('all')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -245,6 +306,8 @@ export default function TerminalArea({
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null)
   const [splitLayout, setSplitLayout] = useState<'grid' | 'side-left' | 'side-right'>('grid')
   const prevShellCount = useRef(shellSessions.length)
+  const [paneSizes, setPaneSizes] = useState<Record<string, number>>({})
+  const dragRef = useRef<{ sessionId: string; edge: string; startX: number; startY: number; startSize: number } | null>(null)
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -288,6 +351,49 @@ export default function TerminalArea({
     prevShellCount.current = shellSessions.length
   }, [shellSessions])
 
+  useEffect(() => {
+    const count = filteredSessions.length
+    setPaneSizes(prev => {
+      const prevIds = new Set(Object.keys(prev))
+      // Reset pane sizes when agent count changes (layout restructuring)
+      const countChanged = prevIds.size !== count || !prevIds.has(filteredSessions[0]?.id || '')
+      if (!countChanged) {
+        // Only add new sessions without resetting existing ones
+        const next = { ...prev }
+        filteredSessions.forEach((s, i) => {
+          if (next[s.id] === undefined) {
+            if (count === 3) next[s.id] = i === 0 ? 2 : 1
+            else if (count === 1) next[s.id] = 1
+            else if (count === 2) next[s.id] = 1
+            else if (count === 4) next[s.id] = 1
+            else if (count === 5) next[s.id] = i === 0 ? 2 : 1
+            else if (count === 6) next[s.id] = 1
+            else if (count === 7) next[s.id] = i === 0 ? 2 : 1
+            else next[s.id] = 1
+          }
+        })
+        return next
+      }
+      // Full reset: compute new layout based on count
+      const next: Record<string, number> = {}
+      filteredSessions.forEach((s, i) => {
+        if (count === 1) next[s.id] = 1
+        else if (count === 2) next[s.id] = 1
+        else if (count === 3) next[s.id] = i === 0 ? 2 : 1
+        else if (count === 4) next[s.id] = 1
+        else if (count === 5) next[s.id] = i === 0 ? 2 : 1
+        else if (count === 6) next[s.id] = 1
+        else if (count === 7) next[s.id] = i === 0 ? 2 : 1
+        else next[s.id] = 1
+      })
+      // Persist to localStorage
+      try {
+        localStorage.setItem('terminalPaneSizes', JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }, [filteredSessions])
+
   const useHorizontalScroll = bottomShellOpen && filteredSessions.length >= 3
 
   const showAgents = !(terminalFullscreen && bottomShellOpen)
@@ -301,6 +407,86 @@ export default function TerminalArea({
       .map(t => ({ id: t.id, label: t.label, icon: t.icon, count: typeCounts[t.id] })),
   ]
 
+  const [dragging, setDragging] = useState(false)
+  const gridContainerRef = useRef<HTMLDivElement>(null)
+  const dragSizeRef = useRef<{ [sessionId: string]: number }>({})
+
+  function handleResizeStart(sessionId: string, edge: string, x: number, y: number) {
+    dragRef.current = { sessionId, edge, startX: x, startY: y, startSize: paneSizes[sessionId] || 1 }
+    dragSizeRef.current[sessionId] = paneSizes[sessionId] || 1
+    setDragging(true)
+  }
+
+  function handleResizeMove(sessionId: string, edge: string, x: number, y: number) {
+    const drag = dragRef.current
+    if (!drag || drag.sessionId !== sessionId) return
+    const container = gridContainerRef.current
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    const deltaX = x - drag.startX
+    const deltaY = y - drag.startY
+    let factorX = 0
+    let factorY = 0
+    if (edge === 'left' || edge === 'right') {
+      factorX = deltaX / rect.width
+      if (edge === 'left') factorX = -factorX
+    } else {
+      factorY = deltaY / rect.height
+      if (edge === 'top') factorY = -factorY
+    }
+    const factor = (edge === 'left' || edge === 'right') ? factorX : factorY
+    const newSize = Math.max(0.25, Math.min(8, drag.startSize + factor))
+    dragSizeRef.current[sessionId] = newSize
+
+    // Direct DOM manipulation during drag to avoid React re-renders
+    const w = filteredSessions.map(s => {
+      if (s.id === sessionId) return Math.max(0.3, newSize)
+      return Math.max(0.3, paneSizes[s.id] || 1)
+    })
+
+    const count = filteredSessions.length
+
+    if (count === 2) {
+      container.style.gridTemplateColumns = `${w[0]}fr ${w[1]}fr`
+    } else if (count === 3) {
+      container.style.gridTemplateColumns = `${w[0]}fr ${w[1] + w[2]}fr`
+      container.style.gridTemplateRows = `${w[1]}fr ${w[2]}fr`
+    } else if (count === 4) {
+      container.style.gridTemplateColumns = `${w[0] + w[2]}fr ${w[1] + w[3]}fr`
+      container.style.gridTemplateRows = `${w[0] + w[1]}fr ${w[2] + w[3]}fr`
+    } else if (count === 5) {
+      // 4 columns: first spans 2 cols (50%) — but user wants ~30%. Let's use 3 cols instead.
+      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr`
+      container.style.gridTemplateRows = '1fr 1fr'
+    } else if (count === 7) {
+      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr 1fr 1fr`
+      container.style.gridTemplateRows = '1fr 1fr'
+    } else if (count === 9) {
+      // 5 columns for simplicity (first = 20%, close to 10% approximate)
+      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr 1fr 1fr`
+      container.style.gridTemplateRows = '1fr 1fr'
+    } else {
+      // Default: split evenly with first column larger for odd counts
+      const cols = Math.ceil(Math.sqrt(count))
+      container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+      const rows = Math.ceil(count / cols)
+      container.style.gridTemplateRows = `repeat(${rows}, 1fr)`
+    }
+  }
+
+  const handleResizeEnd = useCallback(() => {
+    const drag = dragRef.current
+    if (drag) {
+      const finalSize = dragSizeRef.current[drag.sessionId]
+      if (finalSize !== undefined) {
+        setPaneSizes(prev => ({ ...prev, [drag.sessionId]: finalSize }))
+      }
+    }
+    setDragging(false)
+    dragRef.current = null
+    dragSizeRef.current = {}
+  }, [])
+
   function handleAddAgentClick() {
     if (agentsList && agentsList.length > 0) {
       setShowDropdown(o => !o)
@@ -308,6 +494,14 @@ export default function TerminalArea({
       onNewAgent()
     }
   }
+
+  const prevPickerTrigger = useRef(agentPickerTrigger)
+  useEffect(() => {
+    if (agentPickerTrigger !== prevPickerTrigger.current) {
+      prevPickerTrigger.current = agentPickerTrigger
+      handleAddAgentClick()
+    }
+  }, [agentPickerTrigger])
 
   function handleDropdownSelect(agentId: string) {
     setShowDropdown(false)
@@ -325,9 +519,8 @@ export default function TerminalArea({
   const activeIdx = activeSessionId
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
     : 0
-  const tilingStyle = getTilingStyle(filteredSessions.length)
-
-  if (shellOnly && !bottomShellOpen && !activeView) return null
+  const sessionIds = filteredSessions.map(s => s.id)
+  const tilingStyle = getTilingStyle(filteredSessions.length, paneSizes, sessionIds)
 
   return (
     <div className={`terminal-area-wrapper${terminalFullscreen ? ' fullscreen' : ''}`} style={{ position: 'relative' }}>
@@ -337,7 +530,6 @@ export default function TerminalArea({
         flexDirection: 'column',
         flex: 1,
         minHeight: 0,
-        visibility: activePage ? 'hidden' : 'visible',
         pointerEvents: activePage ? 'none' : 'auto',
       }}>
         {!shellOnly && !activePage && (
@@ -380,50 +572,7 @@ export default function TerminalArea({
           </div>
         )}
 
-        {shellOnly ? (
-          <>
-            <div className={`bottom-shell${terminalDrag ? ' no-transition' : ''}`} style={{ flex: bottomShellOpen ? '1' : '0 0 0', overflow: 'hidden', minHeight: bottomShellOpen ? 80 : 0 }}>
-              <div className="bottom-shell-body" style={{ display: bottomShellOpen ? 'flex' : 'none' }}>
-                <div className="bottom-shell-terminal-area">
-                  {shellSessions.length === 0 ? (
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
-                      No shell terminals
-                    </div>
-                  ) : (
-                    shellSessions.map(s => (
-                      <ShellTerminal
-                        key={s.id}
-                        session={s}
-                        onInput={onInput}
-                        onResize={onResize}
-                        writeData={writeBuffersRef.current[s.id] || ''}
-                        hidden={s.id !== activeShellId}
-                        onTerminalOutput={onTerminalOutput}
-                      />
-                    ))
-                  )}
-                </div>
-                <ShellTabList
-                  shells={shellSessions}
-                  activeShellId={activeShellId}
-                  onSelect={setActiveShellId}
-                  onClose={handleShellClose}
-                  header={
-                    <div className="shell-tab-list-header">
-                      <div className="shell-tab-list-header-actions">
-                        <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
-                        <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
-                          {terminalFullscreen ? '⊠' : '⊡'}
-                        </button>
-                        <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
-                      </div>
-                    </div>
-                  }
-                />
-              </div>
-            </div>
-          </>
-        ) : sessions.length === 0 ? (
+        {sessions.length === 0 ? (
           <>
             <div className="terminal-area-empty" style={!showAgents ? { display: 'none' } : {}}>
               <div className="empty-state">
@@ -498,7 +647,7 @@ export default function TerminalArea({
           <>
             {showAgents && (
               focusSessionId && splitLayout === 'grid' ? (
-                <div className="terminal-area" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+                <div className={`terminal-area${dragging ? ' no-transition' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0 }}>
                   {filteredSessions.filter(s => s.id === focusSessionId).map(session => (
                     <TerminalPane
                       key={session.id}
@@ -516,23 +665,26 @@ export default function TerminalArea({
                         else if (mode === 'focus') setFocusSessionId(null)
                         else { setFocusSessionId(session.id); setSplitLayout(mode) }
                       }}
-                      style={{ flex: 1 }}
+                      style={{ flex: paneSizes[session.id] || 1, willChange: 'transform' }}
                       onClose={onCloseTab}
                       dimmed={false}
                       onTerminalOutput={onTerminalOutput}
-                    />
+                      onResizeStart={handleResizeStart}
+                        onResizeMove={handleResizeMove}
+                        onResizeEnd={handleResizeEnd}
+                      />
                   ))}
                 </div>
               ) : splitLayout !== 'grid' && focusSessionId ? (
-                <div className="terminal-area" style={{ display: 'flex', flex: 1, minHeight: 0, gap: 4, padding: '0 4px 4px' }}>
+                <div className={`terminal-area${dragging ? ' no-transition' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, gap: 4, padding: '0 4px 4px' }}>
                   {splitLayout === 'side-left' ? (
                     <>
                       {filteredSessions.filter(s => s.id === focusSessionId).map(session => (
-                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-left" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: 1, minWidth: 0 }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} />
+                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-left" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, minWidth: 0, willChange: 'transform' }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                       ))}
                       <div className="terminal-area" style={{ flex: 1, minWidth: 0, display: 'grid', gap: 4, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', alignContent: 'start' }}>
                         {filteredSessions.filter(s => s.id !== focusSessionId).map(session => (
-                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{}} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} />
+                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, willChange: 'transform' }} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                         ))}
                       </div>
                     </>
@@ -540,19 +692,20 @@ export default function TerminalArea({
                     <>
                       <div className="terminal-area" style={{ flex: 1, minWidth: 0, display: 'grid', gap: 4, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', alignContent: 'start' }}>
                         {filteredSessions.filter(s => s.id !== focusSessionId).map(session => (
-                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{}} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} />
+                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, willChange: 'transform' }} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                         ))}
                       </div>
                       {filteredSessions.filter(s => s.id === focusSessionId).map(session => (
-                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-right" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: 1, minWidth: 0 }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} />
+                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-right" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, minWidth: 0, willChange: 'transform' }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                       ))}
                     </>
                   )}
                 </div>
               ) : (
                 <div
-                  className={useHorizontalScroll ? 'terminal-area-hscroll' : 'terminal-area'}
-                  style={useHorizontalScroll ? { flex: 1, minHeight: 0 } : tilingStyle}
+                  className={`${useHorizontalScroll ? 'terminal-area-hscroll' : `terminal-area${dragging ? ' no-transition' : ''}`}`}
+                  ref={gridContainerRef}
+                  style={useHorizontalScroll ? undefined : tilingStyle}
                 >
                   {filteredSessions.map((session, i) => (
                     <TerminalPane
@@ -570,10 +723,14 @@ export default function TerminalArea({
                         if (mode === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') }
                         else if (mode === 'side-left' || mode === 'side-right') { setFocusSessionId(session.id); setSplitLayout(mode) }
                       }}
-                      style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : getItemStyle(i, filteredSessions.length, activeIdx)}
+                      style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : { ...getItemStyle(i, filteredSessions.length, activeIdx), willChange: 'transform' }}
                       onClose={onCloseTab}
                       dimmed={focusMode && session.id !== activeSessionId}
                       onTerminalOutput={onTerminalOutput}
+                      onResizeStart={handleResizeStart}
+                      onResizeMove={handleResizeMove}
+                      onResizeEnd={handleResizeEnd}
+                      edgeHandles={getGridEdgeHandles(i, filteredSessions.length)}
                     />
                   ))}
                 </div>

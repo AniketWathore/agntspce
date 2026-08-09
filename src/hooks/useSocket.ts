@@ -4,11 +4,33 @@ import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchC
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
+export interface OrchestratorTaskStats {
+  total: number
+  open: number
+  claimed: number
+  in_progress: number
+  merging: number
+  setup_failed: number
+  done: number
+  abandoned: number
+  escalated: number
+}
+
 export interface OrchestratorStats {
   concurrency: { active: number, queued: number, max: number }
   sessionCount: number
   totalMemoryMB: number
   resourceUsage: { sessionId: string, pid: number, cpuPercent: number, memoryMB: number, collectedAt: number }[]
+  orchestration: {
+    agents: { total: number; active: number; idle: number; paused: number }
+    tasks: Record<string, number>
+    worktrees: number
+    sessions: number
+    messages: { pending: number; total: number }
+    escalations: number
+    gates: { blocked: number; approved: number; rejected: number }
+    completions: number
+  } | null
 }
 
 interface UseSocketReturn {
@@ -45,7 +67,7 @@ interface UseSocketReturn {
   executionHistory: ExecutionEvent[]
   sessionStartedAt: number
   requestFilterStats: () => void
-  createWorkspaceFromGit: (gitUrl: string, name?: string) => Promise<any>
+  createWorkspaceFromGit: (gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
   addWorktree: (workspaceId: string) => Promise<any>
   removeWorktree: (workspaceId: string, worktreeId: string) => Promise<any>
@@ -118,6 +140,19 @@ export function useSocket(): UseSocketReturn {
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
   const filterEventCbs = useRef<((data: FilterEvent) => void)[]>([])
   const sessionUnhealthyCbs = useRef<((data: { sessionId: string, reason: string, usage?: any }) => void)[]>([])
+  const outputBuffer = useRef<Record<string, string>>({})
+  const outputTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushOutput = useCallback(() => {
+    outputTimer.current = null
+    const buffer = outputBuffer.current
+    outputBuffer.current = {}
+    for (const [sessionId, data] of Object.entries(buffer)) {
+      if (!data) continue
+      const payload = { sessionId, data }
+      terminalOutputCbs.current.forEach(cb => cb(payload))
+    }
+  }, [])
 
   useEffect(() => {
     const socket = io(SERVER_URL)
@@ -146,7 +181,11 @@ export function useSocket(): UseSocketReturn {
     })
 
     socket.on('terminal-output', (data: TerminalOutput) => {
-      terminalOutputCbs.current.forEach(cb => cb(data))
+      const cur = outputBuffer.current[data.sessionId] || ''
+      outputBuffer.current[data.sessionId] = cur + data.data
+      if (!outputTimer.current) {
+        outputTimer.current = setTimeout(flushOutput, 30)
+      }
     })
 
     socket.on('status-change', (data: StatusChange) => {
@@ -200,8 +239,12 @@ export function useSocket(): UseSocketReturn {
     socket.on('backlog', (data: Record<string, string>) => {
       for (const [sessionId, buffered] of Object.entries(data)) {
         if (buffered) {
-          terminalOutputCbs.current.forEach(cb => cb({ sessionId, data: buffered }))
+          const cur = outputBuffer.current[sessionId] || ''
+          outputBuffer.current[sessionId] = cur + buffered
         }
+      }
+      if (!outputTimer.current) {
+        outputTimer.current = setTimeout(flushOutput, 30)
       }
     })
 
@@ -247,9 +290,13 @@ export function useSocket(): UseSocketReturn {
   })
 
   return () => {
+      if (outputTimer.current) {
+        clearTimeout(outputTimer.current)
+        flushOutput()
+      }
       socket.disconnect()
     }
-  }, [])
+  }, [flushOutput])
 
   const onTerminalOutput = useCallback((cb: (data: TerminalOutput) => void) => {
     terminalOutputCbs.current.push(cb)
@@ -387,9 +434,9 @@ export function useSocket(): UseSocketReturn {
     })
   }, [])
 
-  const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string): Promise<any> => {
+  const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }): Promise<any> => {
     return new Promise((resolve) => {
-      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name }, (res: any) => resolve(res))
+      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name, setupScript: scripts?.setupScript, teardownScript: scripts?.teardownScript }, (res: any) => resolve(res))
     })
   }, [])
 
@@ -418,7 +465,7 @@ export function useSocket(): UseSocketReturn {
     return new Promise((resolve) => {
       socketRef.current?.emit('get-orchestrator-stats', {}, (res: any) => {
         if (res?.ok) resolve(res)
-        else resolve({ concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [] })
+        else resolve({ concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [], orchestration: null })
       })
     })
   }, [])

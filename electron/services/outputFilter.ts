@@ -349,6 +349,11 @@ export class OutputFilterService {
         ? Math.round((1 - filteredTokens / originalTokens) * 10000) / 100
         : 0
       filtered = stripAllControl(cleanedOutput)
+      // Mark as recently reported so the wrapper's HTTP POST (reportTokenSavings)
+      // for the SAME command is skipped — otherwise raw/filtered tokens from the
+      // same spawnSync get double-counted in the cumulative stats.
+      const dedupKey = `${pending.rawTokens}-${pending.filteredTokens}`
+      this._recentTokenReports.set(dedupKey, Date.now())
       this._pendingStats.delete(sessionId)
     } else {
       debugLog(`FALLBACK no pending stats session=${sessionId.slice(0,8)} cmd="${cmdBuf.command}" rawLen=${cleanedOutput.length}`)
