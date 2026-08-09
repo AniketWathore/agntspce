@@ -6,6 +6,7 @@ import { ensureCoordinator, getWorkspaceRoot } from './services/orchestration/bo
 import type { Coordinator } from './services/orchestration'
 import type { StateManager } from './services/orchestration/stateManager'
 import { bootstrapServer } from './server'
+import { WorkspaceManager } from './services/workspaceManager'
 import { createWindow, getMainWindow, registerIpcHandlers, rebuildMenu } from './window'
 app.setName('AgntSpce')
 app.name = 'AgntSpce'
@@ -42,11 +43,17 @@ app.whenReady().then(async () => {
   initSearch()
   injectOpenCodeConfig()
 
+  // Initialize workspace manager early so orchestration can use its active workspace root
+  const workspaceManager = WorkspaceManager.getInstance()
+  try { await workspaceManager.initialize() } catch (e) { console.warn('Workspace manager init failed:', e) }
+
   // Initialize orchestration coordinator (zero-config bootstrap)
-  if (!getWorkspaceRoot()) {
+  const activeWs = workspaceManager.getActiveWorkspace()
+  const workspaceRoot = activeWs?.repository?.path ? getWorkspaceRoot(activeWs.repository.path) : getWorkspaceRoot()
+  if (!workspaceRoot) {
     console.warn('[orchestration] No workspace root found — skipping coordinator')
   } else {
-    const result = await ensureCoordinator()
+    const result = await ensureCoordinator({ workspaceRoot })
     if (result.status === 'started') {
       orchestrationCoordinator = result.coordinator
       orchestrationStateManager = result.stateManager
