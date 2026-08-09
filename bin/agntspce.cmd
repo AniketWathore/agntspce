@@ -5,4 +5,6 @@ rem Uses AGNTSPCE_NODE_PATH (set by the Electron host) when available.
 setlocal
 set "SCRIPT_DIR=%~dp0"
 if defined AGNTSPCE_NODE_PATH (set "NODE=%AGNTSPCE_NODE_PATH%") else (set "NODE=node")
+rem AGNTSPCE_NODE_PATH is the Electron binary (process.execPath); run it as plain Node.
+set "ELECTRON_RUN_AS_NODE=1"
 "%NODE%" "%SCRIPT_DIR%agntspce.mjs" %*
