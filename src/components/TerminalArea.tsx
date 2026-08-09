@@ -56,54 +56,27 @@ const AGENT_TYPES = [
   { id: 'gemini', label: 'Gemini CLI', icon: '✨' },
 ]
 
-function getTilingStyle(count: number): CSSProperties {
+function getTilingStyle(count: number, paneSizes: Record<string, number>, sessionIds: string[]): CSSProperties {
   const base: CSSProperties = { display: 'grid', gap: 4, padding: '0 4px 4px', minHeight: 0, flex: 1 }
+  const w = sessionIds.map(id => Math.max(0.3, paneSizes[id] || 1))
 
-  // Even counts: split evenly
   if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-
-  if (count === 2) {
-    return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr' }
-  }
-  if (count === 4) {
-    return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-  }
-  if (count === 6) {
-    return { ...base, gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)' }
-  }
-  if (count === 8) {
-    return { ...base, gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(2, 1fr)' }
-  }
-
-  // Odd counts: first takes 50%, rest split in right half
-  // 3: 50/25/25 (left full, right split 2 rows)
-  if (count === 3) {
-    return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-  }
-  // 5: 50/12.5/12.5/12.5/12.5 (left 50%, right 2x2 = 4x12.5%)
-  if (count === 5) {
-    return { ...base, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr' }
-  }
-  // 7: left 50%, right split into 3 columns x 2 rows (6 items in right)
-  if (count === 7) {
-    return { ...base, gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr' }
-  }
-
-  // Default grid for unusual counts
+  if (count === 2) return { ...base, gridTemplateColumns: `${w[0]}fr ${w[1]}fr`, gridTemplateRows: '1fr' }
+  if (count === 3) return { ...base, gridTemplateColumns: `${w[0]}fr ${w[1] + w[2]}fr`, gridTemplateRows: `${w[1]}fr ${w[2]}fr` }
+  if (count === 4) return { ...base, gridTemplateColumns: `${w[0] + w[2]}fr ${w[1] + w[3]}fr`, gridTemplateRows: `${w[0] + w[1]}fr ${w[2] + w[3]}fr` }
+  if (count === 5) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr`, gridTemplateRows: '1fr 1fr' }
+  if (count === 6) return { ...base, gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)' }
+  if (count === 7) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr 1fr`, gridTemplateRows: 'repeat(2, 1fr)' }
+  if (count === 9) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr 1fr 1fr`, gridTemplateRows: 'repeat(2, 1fr)' }
   const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
   const rows = Math.ceil(count / cols)
   return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
 }
 
 function getItemStyle(index: number, count: number, _activeIndex: number): CSSProperties {
-  if (count === 3 && index === 0) {
+  // First agent spans full height in its column (not 2 cols)
+  if ((count === 3 || count === 5 || count === 7 || count === 9) && index === 0) {
     return { gridRow: 'span 2' }
-  }
-  if (count === 5 && index === 0) {
-    return { gridColumn: 'span 2', gridRow: 'span 2' }
-  }
-  if (count === 7 && index === 0) {
-    return { gridColumn: 'span 2', gridRow: 'span 2' }
   }
   return {}
 }
@@ -481,6 +454,23 @@ export default function TerminalArea({
     } else if (count === 4) {
       container.style.gridTemplateColumns = `${w[0] + w[2]}fr ${w[1] + w[3]}fr`
       container.style.gridTemplateRows = `${w[0] + w[1]}fr ${w[2] + w[3]}fr`
+    } else if (count === 5) {
+      // 4 columns: first spans 2 cols (50%) — but user wants ~30%. Let's use 3 cols instead.
+      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr`
+      container.style.gridTemplateRows = '1fr 1fr'
+    } else if (count === 7) {
+      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr 1fr 1fr`
+      container.style.gridTemplateRows = '1fr 1fr'
+    } else if (count === 9) {
+      // 5 columns for simplicity (first = 20%, close to 10% approximate)
+      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr 1fr 1fr`
+      container.style.gridTemplateRows = '1fr 1fr'
+    } else {
+      // Default: split evenly with first column larger for odd counts
+      const cols = Math.ceil(Math.sqrt(count))
+      container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
+      const rows = Math.ceil(count / cols)
+      container.style.gridTemplateRows = `repeat(${rows}, 1fr)`
     }
   }
 
@@ -529,7 +519,8 @@ export default function TerminalArea({
   const activeIdx = activeSessionId
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
     : 0
-  const tilingStyle = getTilingStyle(filteredSessions.length)
+  const sessionIds = filteredSessions.map(s => s.id)
+  const tilingStyle = getTilingStyle(filteredSessions.length, paneSizes, sessionIds)
 
   return (
     <div className={`terminal-area-wrapper${terminalFullscreen ? ' fullscreen' : ''}`} style={{ position: 'relative' }}>
