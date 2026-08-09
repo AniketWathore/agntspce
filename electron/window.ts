@@ -106,11 +106,7 @@ export function rebuildMenu() {
             { label: 'Paste', accelerator: 'Cmd+V', role: 'paste' as const },
             { label: 'Select All', click: (item, focusedWindow) => focusedWindow?.webContents.selectAll() },
             { type: 'separator' as const },
-            { role: 'services' as const },
-            { type: 'separator' as const },
             { label: 'Auto Fill', click: () => {} },
-            { role: 'startDictation' as const },
-            { role: 'emojiAndSymbols' as const },
           ],
         },
         // ── View Menu (macOS) ──────────────────────────────────────────

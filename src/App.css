@@ -742,6 +742,7 @@
   font-size: 14px;
   width: 16px;
   text-align: center;
+  color: #CCCCCC !important;
 }
 
 .workspace-name {
@@ -1115,9 +1116,7 @@
   font-size: 12px;
 }
 
-.workspace-inline-tree .file-tree-item.selected {
-  background: rgba(34, 197, 94, 0.15);
-}
+
 
 /* ── Workspace Trash ───────────────────── */
 .workspace-trash {
@@ -1223,8 +1222,12 @@
 }
 
 .file-tree-item.selected {
-  background: rgba(255,255,255,0.1);
-  color: #FFFFFF;
+  /* selection highlight removed — keeps file/workspace icons unchanged */
+}
+
+.file-tree-item.selected .codicon,
+.file-tree-item.selected .codicon[class*='codicon-'] {
+  color: #CCCCCC !important;
 }
 
 .file-tree-label {
@@ -1288,7 +1291,10 @@
   overflow: hidden;
 }
 
-/* ── File Viewer Layout ─────────────────── */
+/* ── File Viewer Layout ───────────────────
+   The file viewer is a separate page/view: it fills 100% of the
+   available space and the agent section is completely hidden while a
+   file is open, so it reserves no space and shows no grey area. */
 .main-content.file-viewer {
   position: relative;
 }
@@ -1327,45 +1333,13 @@
   color: #6E6E6E;
 }
 
-.main-content.file-viewer .terminal-area-wrapper {
-  height: var(--terminal-height, 40%);
-  min-height: 80px;
-  border-top: 1px solid #3C3C3C;
-  display: flex;
-  flex-direction: column;
+/* The agent section is completely hidden while a file is open. */
+.main-content.file-viewer > .terminal-area-wrapper {
+  display: none;
 }
 
-.main-content.file-viewer .terminal-area-wrapper.fullscreen {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 100% !important;
-  z-index: 10;
-}
-
-.main-content.file-viewer .terminal-resizer {
-  height: 4px;
-  background: transparent;
-  cursor: ns-resize;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.main-content.file-viewer .terminal-resizer::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 1px;
-  height: 2px;
-  background: #3C3C3C;
-  transition: background 0.1s;
-}
-
-.main-content.file-viewer .terminal-resizer:hover::after {
-  background: #22C55E;
+.main-content.file-viewer > .terminal-resizer {
+  display: none;
 }
 
 /* ── Editor Tabs ────────────────────────── */
@@ -1572,6 +1546,15 @@
   overflow: hidden;
 }
 
+.terminal-area.no-transition {
+  transition: none !important;
+}
+
+.terminal-area.dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .grid-resizer {
   background: transparent;
   transition: background 0.1s;
@@ -1744,10 +1727,59 @@
   width: 100%;
   min-height: 0;
   min-width: 0;
+  position: relative;
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 .terminal-pane.dimmed {
   opacity: 0.3;
+}
+
+.pane-resize-handle {
+  position: absolute;
+  z-index: 10;
+  background: transparent;
+  transition: none;
+  touch-action: none;
+}
+
+.pane-resize-handle:hover,
+.terminal-area.no-transition .pane-resize-handle:hover {
+  background: var(--accent);
+}
+
+.pane-resize-left {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+}
+
+.pane-resize-right {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+}
+
+.pane-resize-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: row-resize;
+}
+
+.pane-resize-bottom {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: row-resize;
 }
 
 .terminal-header {
