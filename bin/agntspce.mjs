@@ -359,8 +359,8 @@ function cmdRun(args) {
   const binary = resolveBinary(normalizedArgs[0] || args[0])
 
   // Emit command marker so OutputFilterService can detect and track this command.
-  // Using process.stderr so it doesn't pollute the filtered stdout output.
-  process.stderr.write(`agntspce $ ${displayStr}\n`)
+  // Write to stdout so the user can see it in the terminal output.
+  process.stdout.write(`agntspce $ ${displayStr}\n`)
 
   const result = spawnSync(binary, args.slice(1), {
     stdio: ['inherit', 'pipe', 'pipe'],

@@ -63,9 +63,18 @@ function postBuildPlugin(): Plugin {
         mkdirSync(rtkDir, { recursive: true })
         const isWin = process.platform === 'win32'
         const rtkFiles = isWin ? ['rtk.exe'] : ['rtk']
-        const filesToCopy = [...rtkFiles, 'agntspce', 'agntspce.mjs']
+        const agentWrappers = [
+          'claude', 'claude.cmd', 'codex', 'codex.cmd', 'opencode', 'opencode.cmd',
+          'gemini', 'gemini.cmd', 'cursor-agent', 'cursor-agent.cmd', 'copilot', 'copilot.cmd',
+          'mastracode', 'mastracode.cmd', 'droid', 'droid.cmd', 'amp', 'amp.cmd',
+          'pi', 'pi.cmd', 'kilocode', 'kilocode.cmd', 'windsurf', 'windsurf.cmd',
+        ]
+        const commandWrappers = isWin
+          ? ['git.cmd', 'ls.cmd', 'npm.cmd', 'cargo.cmd', 'docker.cmd', 'pip.cmd', 'pytest.cmd', 'make.cmd', 'kubectl.cmd', 'terraform.cmd']
+          : ['git', 'ls', 'npm', 'cargo', 'docker', 'pip', 'pytest', 'make', 'kubectl', 'terraform', 'agntspce', 'agntspce.mjs']
+        const filesToCopy = [...rtkFiles, ...agentWrappers, ...commandWrappers]
         if (isWin) {
-          filesToCopy.push('agntspce.cmd', 'git.cmd', 'ls.cmd')
+          filesToCopy.push('agntspce.cmd')
         }
         for (const file of filesToCopy) {
           const srcFile = join(__dirname, 'bin', file)

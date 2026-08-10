@@ -1030,7 +1030,12 @@ export class SessionManager extends EventEmitter {
       console.warn(`[agntspce] Agent "${baseCmd}" not resolved — PATH may not include it: ${command}`)
     }
     const newline = process.platform === 'win32' ? '\r\n' : '\n'
-    this.writeToSession(sessionId, command + newline)
+    // Force-set session environment variables directly before launching agent,
+    // ensuring the agent CLI (claude, opencode, etc.) and any subprocesses inherit them.
+    const binDir = AGNTSPCE_BIN_DIR || path.resolve(__dirname, '..', '..', 'bin')
+    const wrapperPathEnv = AGNTSPCE_BIN_DIR ? path.join(AGNTSPCE_BIN_DIR, 'agntspce') : (process.resourcesPath ? path.join(process.resourcesPath, 'rtk', 'agntspce') : path.resolve(__dirname, '..', '..', 'bin', 'agntspce'))
+    const envPrefix = `export AGNTSPCE_ENABLED=1; export AGNTSPCE_WRAPPER_PATH="${wrapperPathEnv}"; export AGNTSPCE_RTK_SESSION="${rtkManager.generateRtkToken()}"; export PATH="${binDir}:$PATH"; `
+    this.writeToSession(sessionId, envPrefix + command + newline)
 
     // 2.1 dispatch preamble: deliver the shared orchestration state as the
     // agent's first input after it boots (agents are interactive CLIs that
