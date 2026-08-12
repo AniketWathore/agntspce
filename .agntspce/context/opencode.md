@@ -1,11 +1,11 @@
 # Agent context: opencode
-Status: exited
+Status: busy
 Branch: unknown
 
 ## Task
 
-[in_progress] Ad-hoc opencode session 850-cqss | agent: unassigned
+[in_progress] Ad-hoc opencode session 436-7jwa | agent: unassigned
 
 ## Recent activity
 
-255m[48;2;10;10;10m                                                                                           [38;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [39;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [40;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [41;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [42;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [43;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [44;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [45;1H[38;2;255;255;255m[48;2;10;10;10m                                                                                           [0m[?2026l]0;OpenCode
+[14t

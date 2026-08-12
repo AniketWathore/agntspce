@@ -512,8 +512,15 @@ export default function TerminalArea({
 
   function handleShellClose(sessionId: string) {
     const isLast = shellSessions.length <= 1
+    const remainingShells = shellSessions.filter(s => s.id !== sessionId)
     onCloseTab(sessionId)
-    if (isLast) onToggleShell()
+    if (isLast) {
+      onToggleShell()
+    } else if (remainingShells.length > 0) {
+      // Show the next remaining shell (or previous if closing last)
+      const nextShell = remainingShells[remainingShells.length - 1] || remainingShells[0]
+      if (nextShell) setActiveShellId(nextShell.id)
+    }
   }
 
   const activeIdx = activeSessionId
