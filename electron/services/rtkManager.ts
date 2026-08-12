@@ -234,6 +234,79 @@ function registerHooks(rtkBinaryPath: string): { registered: string[]; failed: s
 
 // ── Token Generation ─────────────────────────────────────────────
 
+// ── Hook Command Patching ────────────────────────────────────────
+//
+// `rtk init -g` registers hooks using a bare `rtk` command name. Claude Code
+// executes PreToolUse hooks through the Bash tool's environment, which is a
+// clean login shell — so `rtk` may resolve to a DIFFERENT binary than ours
+// (e.g. a homebrew-installed upstream rtk). That upstream binary rewrites
+// commands to `rtk git status` (its own engine) instead of `agntspce git
+// status`, silently breaking token stats.
+//
+// To guarantee the app's RTK fork runs, patch every registered hook command
+// to use the ABSOLUTE path of the active RTK binary.
+
+type HookPatchResult = { patched: string[] }
+
+function patchHookCommands(rtkBinaryPath: string): HookPatchResult {
+  const patched: string[] = []
+  if (!rtkBinaryPath) return { patched }
+  const binaryName = path.basename(rtkBinaryPath) // 'rtk' or 'rtk.exe'
+  // JSON-escaped absolute path. Spaces in userData dirs require shell quoting.
+  const absCommand = `"${rtkBinaryPath.replace(/"/g, '\\"')}"`
+
+  const candidates: { label: string; file: string; matcher: (data: any) => boolean }[] = [
+    {
+      label: 'claude',
+      file: path.join(os.homedir(), '.claude', 'settings.json'),
+      matcher: data => !!data?.hooks?.PreToolUse,
+    },
+    {
+      label: 'cursor',
+      file: path.join(os.homedir(), '.cursor', 'settings.json'),
+      matcher: () => true,
+    },
+    {
+      label: 'opencode',
+      file: path.join(os.homedir(), '.config', 'opencode', 'opencode.json'),
+      matcher: data => !!data?.hooks?.PreToolUse,
+    },
+  ]
+
+  for (const c of candidates) {
+    if (!fs.existsSync(c.file)) continue
+    try {
+      const raw = fs.readFileSync(c.file, 'utf-8')
+      const data = JSON.parse(raw)
+      if (!c.matcher(data)) continue
+      let changed = false
+      const hooks = data.hooks?.PreToolUse
+      if (Array.isArray(hooks)) {
+        for (const entry of hooks) {
+          const hookDefs = Array.isArray(entry?.hooks) ? entry.hooks : []
+          for (const h of hookDefs) {
+            if (typeof h?.command !== 'string') continue
+            const trimmed = h.command.trim()
+            // Match `rtk hook <anything>` or `<...>/rtk hook <anything>`
+            if (trimmed === `${binaryName} hook claude` || trimmed.endsWith(`${path.sep}${binaryName} hook claude`)) {
+              h.command = `${absCommand} hook claude`
+              changed = true
+            }
+          }
+        }
+      }
+      if (changed) {
+        fs.writeFileSync(c.file, JSON.stringify(data, null, 2), 'utf-8')
+        patched.push(c.label)
+        console.log(`[agntspce] Patched hook command → absolute path for ${c.label}`)
+      }
+    } catch (e: any) {
+      console.warn(`[agntspce] Failed to patch hook command for ${c.label}:`, e.message)
+    }
+  }
+  return { patched }
+}
+
 function generateRtkToken(): string {
   const now = Math.floor(Date.now() / 1000)
   const expiry = now + TOKEN_TTL_SECS
@@ -270,6 +343,9 @@ function initialize(): string | null {
     if (failed.length > 0) {
       console.warn(`[agntspce] Hook registration had failures: ${failed.join(', ')}`)
     }
+    // Force registered hooks to use the app's absolute RTK binary path so that
+    // agent Bash tools (clean login shell env) can't resolve a different `rtk`.
+    patchHookCommands(_activeRtkPath)
   }
 
   return _activeRtkPath
@@ -291,6 +367,7 @@ export {
   getInstalledRtkPath,
   detectInstalledAgents,
   registerHooks,
+  patchHookCommands,
   generateRtkToken,
   HMAC_SECRET,
   TOKEN_TTL_SECS,

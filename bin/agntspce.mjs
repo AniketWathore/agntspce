@@ -19,7 +19,7 @@ const BUILTIN_FILTERS = [
       { pattern: /^## (\S+?)\.\.\.\S+$/gm, replacement: '$1 [synced]' },
       { pattern: /^## (\S+)$/gm, replacement: '$1 (no upstream)' },
     ],
-    stripLinesMatching: [/^\(use "git/, /^\(create\/copy/, /^\(use "git restore/, /^\(use "git add /],
+    stripLinesMatching: [/^\s*\(use "git/, /^\s*\(create\/copy/, /^\s*\(use "git restore/, /^\s*\(use "git add /],
     headLines: 50,
     onEmpty: 'clean',
   },
