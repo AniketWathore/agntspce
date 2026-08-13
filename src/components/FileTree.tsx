@@ -6,8 +6,10 @@ interface FileTreeProps {
   nodes: FileTreeNode[]
   expandedFolders: Set<string>
   selectedFilePath: string | null
+  selectedFolderPath?: string | null
   onToggleFolder: (path: string) => void
   onSelectFile: (path: string) => void
+  onSelectFolder?: (path: string) => void
   onContextMenu?: (e: React.MouseEvent, path: string, isDirectory: boolean) => void
   depth?: number
 }
@@ -21,8 +23,10 @@ export function FileTree({
   nodes,
   expandedFolders,
   selectedFilePath,
+  selectedFolderPath,
   onToggleFolder,
   onSelectFile,
+  onSelectFolder,
   onContextMenu,
   depth = 0,
 }: FileTreeProps) {
@@ -38,8 +42,10 @@ export function FileTree({
           node={node}
           expandedFolders={expandedFolders}
           selectedFilePath={selectedFilePath}
+          selectedFolderPath={selectedFolderPath}
           onToggleFolder={onToggleFolder}
           onSelectFile={onSelectFile}
+          onSelectFolder={onSelectFolder}
           onContextMenu={onContextMenu}
           depth={depth}
         />
@@ -52,30 +58,36 @@ function TreeNode({
   node,
   expandedFolders,
   selectedFilePath,
+  selectedFolderPath,
   onToggleFolder,
   onSelectFile,
+  onSelectFolder,
   onContextMenu,
   depth,
 }: {
   node: FileTreeNode
   expandedFolders: Set<string>
   selectedFilePath: string | null
+  selectedFolderPath?: string | null
   onToggleFolder: (path: string) => void
   onSelectFile: (path: string) => void
+  onSelectFolder?: (path: string) => void
   onContextMenu?: (e: React.MouseEvent, path: string, isDirectory: boolean) => void
   depth: number
 }) {
   const isDirectory = node.type === 'directory'
   const isExpanded = expandedFolders.has(node.path)
   const isSelected = selectedFilePath === node.path
+  const isFolderSelected = isDirectory && selectedFolderPath === node.path
 
   const handleClick = useCallback(() => {
     if (isDirectory) {
       onToggleFolder(node.path)
+      onSelectFolder?.(node.path)
     } else {
       onSelectFile(node.path)
     }
-  }, [isDirectory, node.path, onToggleFolder, onSelectFile])
+  }, [isDirectory, node.path, onToggleFolder, onSelectFolder, onSelectFile])
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -85,7 +97,7 @@ function TreeNode({
   return (
     <div className="file-tree-node">
       <div
-        className={`file-tree-item ${isSelected ? 'selected' : ''}`}
+        className={`file-tree-item ${isSelected ? 'selected' : ''}${isFolderSelected ? ' folder-selected' : ''}`}
         style={{ paddingLeft: depth * 16 + 8 }}
         onClick={handleClick}
         onContextMenu={handleContextMenu}
@@ -115,8 +127,10 @@ function TreeNode({
             nodes={node.children}
             expandedFolders={expandedFolders}
             selectedFilePath={selectedFilePath}
+            selectedFolderPath={selectedFolderPath}
             onToggleFolder={onToggleFolder}
             onSelectFile={onSelectFile}
+            onSelectFolder={onSelectFolder}
             onContextMenu={onContextMenu}
             depth={depth + 1}
           />

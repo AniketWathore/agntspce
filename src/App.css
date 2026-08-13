@@ -1094,6 +1094,12 @@
   background: rgba(255,255,255,0.08);
 }
 
+.workspace-tree-menu-separator {
+  height: 1px;
+  background: #3C3C3C;
+  margin: 4px 0;
+}
+
 .workspace-tree-menu-item.danger {
   color: #EF4444;
 }
@@ -1228,6 +1234,10 @@
 .file-tree-item.selected .codicon,
 .file-tree-item.selected .codicon[class*='codicon-'] {
   color: #CCCCCC !important;
+}
+
+.file-tree-item.folder-selected {
+  background: rgba(255,255,255,0.06);
 }
 
 .file-tree-label {

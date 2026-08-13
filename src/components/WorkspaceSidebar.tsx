@@ -25,6 +25,7 @@ interface Props {
   onOpenCreateModal: () => void
   expandedFolders: Set<string>
   onToggleFolder: (path: string) => void
+  onExpandFolder: (path: string) => void
   selectedFilePath: string | null
   onSelectFile: (path: string) => void
   getWorkspaceTree: (worktreePath: string) => Promise<any>
@@ -42,11 +43,13 @@ export default function WorkspaceSidebar({
   workspaces, activeWorkspace, deletedWorkspaces,
   onSelect, onEdit, onDelete, onRestore, onPermanentDelete,
   onOpenCreateModal, showModal,
-  expandedFolders, onToggleFolder, selectedFilePath, onSelectFile,
+  expandedFolders, onToggleFolder, onExpandFolder, selectedFilePath, onSelectFile,
   getWorkspaceTree, createFile, createFolder, renameFile, deleteFile,
 }: Props) {
   const [showTrash, setShowTrash] = useState(false)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [selectedFolderPath, setSelectedFolderPath] = useState<Record<string, string | null>>({})
+  const [refreshSignal, setRefreshSignal] = useState(0)
 
   const closeContextMenu = useCallback(() => setMenuOpenId(null), [])
 
@@ -57,6 +60,36 @@ export default function WorkspaceSidebar({
       return () => document.removeEventListener('click', handler)
     }
   }, [menuOpenId, closeContextMenu])
+
+  const handleCreateFile = useCallback((ws: WorkspaceInfo) => {
+    setMenuOpenId(null)
+    const wsPath = ws.repository?.path || ''
+    if (!wsPath) return
+    const selectedFolder = selectedFolderPath[ws.id] || null
+    showModal('New file name:', (name) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      if (selectedFolder) onExpandFolder(selectedFolder)
+      onExpandFolder(wsExpandKey(ws.id))
+      const base = selectedFolder ? wsPath.replace(/\\/g, '/') + '/' + selectedFolder.replace(/\\/g, '/') : wsPath.replace(/\\/g, '/')
+      createFile(`${base}/${trimmed}`).then(() => setRefreshSignal(s => s + 1))
+    })
+  }, [showModal, selectedFolderPath, createFile, onExpandFolder])
+
+  const handleCreateFolder = useCallback((ws: WorkspaceInfo) => {
+    setMenuOpenId(null)
+    const wsPath = ws.repository?.path || ''
+    if (!wsPath) return
+    const selectedFolder = selectedFolderPath[ws.id] || null
+    showModal('New folder name:', (name) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      if (selectedFolder) onExpandFolder(selectedFolder)
+      onExpandFolder(wsExpandKey(ws.id))
+      const base = selectedFolder ? wsPath.replace(/\\/g, '/') + '/' + selectedFolder.replace(/\\/g, '/') : wsPath.replace(/\\/g, '/')
+      createFolder(`${base}/${trimmed}`).then(() => setRefreshSignal(s => s + 1))
+    })
+  }, [showModal, selectedFolderPath, createFolder, onExpandFolder])
 
   return (
     <aside className="sidebar">
@@ -113,6 +146,21 @@ export default function WorkspaceSidebar({
                       <div className="workspace-tree-menu" onClick={e => e.stopPropagation()}>
                         <button
                           className="workspace-tree-menu-item"
+                          onClick={() => handleCreateFile(ws)}
+                        >
+                          <i className="codicon codicon-new-file" style={{ fontSize: 13, marginRight: 6 }} />
+                          New File
+                        </button>
+                        <button
+                          className="workspace-tree-menu-item"
+                          onClick={() => handleCreateFolder(ws)}
+                        >
+                          <i className="codicon codicon-new-folder" style={{ fontSize: 13, marginRight: 6 }} />
+                          New Folder
+                        </button>
+                        <div className="workspace-tree-menu-separator" />
+                        <button
+                          className="workspace-tree-menu-item"
                           onClick={() => {
                             setMenuOpenId(null)
                             showModal('Rename workspace:', (name) => {
@@ -138,9 +186,12 @@ export default function WorkspaceSidebar({
                     <FileExplorer
                       workspacePath={wsPath}
                       selectedFilePath={selectedFilePath}
+                      selectedFolderPath={selectedFolderPath[ws.id] || null}
                       expandedFolders={expandedFolders}
                       onToggleFolder={onToggleFolder}
                       onSelectFile={onSelectFile}
+                      onSelectFolder={(path) => setSelectedFolderPath(prev => ({ ...prev, [ws.id]: path }))}
+                      refreshSignal={refreshSignal}
                       getWorkspaceTree={getWorkspaceTree}
                       createFile={createFile}
                       createFolder={createFolder}

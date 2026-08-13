@@ -5,9 +5,12 @@ import { FileTree } from './FileTree'
 interface FileExplorerProps {
   workspacePath: string
   selectedFilePath: string | null
+  selectedFolderPath?: string | null
   expandedFolders: Set<string>
   onToggleFolder: (path: string) => void
   onSelectFile: (path: string) => void
+  onSelectFolder?: (path: string) => void
+  refreshSignal?: number
   getWorkspaceTree: (worktreePath: string) => Promise<any>
   createFile: (absolutePath: string) => Promise<any>
   createFolder: (absolutePath: string) => Promise<any>
@@ -18,9 +21,12 @@ interface FileExplorerProps {
 export function FileExplorer({
   workspacePath,
   selectedFilePath,
+  selectedFolderPath,
   expandedFolders,
   onToggleFolder,
   onSelectFile,
+  onSelectFolder,
+  refreshSignal,
   getWorkspaceTree,
   createFile,
   createFolder,
@@ -57,7 +63,7 @@ export function FileExplorer({
 
   useEffect(() => {
     loadTree()
-  }, [loadTree])
+  }, [loadTree, refreshSignal])
 
   const closeContextMenu = useCallback(() => {
     setContextMenu(null)
@@ -138,8 +144,10 @@ export function FileExplorer({
           nodes={treeData}
           expandedFolders={expandedFolders}
           selectedFilePath={selectedFilePath}
+          selectedFolderPath={selectedFolderPath}
           onToggleFolder={onToggleFolder}
           onSelectFile={onSelectFile}
+          onSelectFolder={onSelectFolder}
           onContextMenu={handleTreeContextMenu}
         />
       )}

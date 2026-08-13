@@ -19,6 +19,15 @@ export default function InputModal({ open, title, defaultValue, onSubmit, onCanc
     }
   }, [open, defaultValue])
 
+  useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, onCancel])
+
   if (!open) return null
 
   function handleSubmit() {

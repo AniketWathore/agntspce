@@ -101,6 +101,13 @@ export function registerFileHandlers(ctx: ServerContext, socket: Socket): void {
         if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
         return
       }
+      try {
+        const existing = await fs.stat(absolutePath)
+        if (existing) {
+          if (callback) callback({ ok: false, error: 'A file or folder with this name already exists' })
+          return
+        }
+      } catch {}
       await fs.writeFile(absolutePath, '', 'utf-8')
       if (callback) callback({ ok: true })
     } catch (error: any) {
@@ -114,6 +121,13 @@ export function registerFileHandlers(ctx: ServerContext, socket: Socket): void {
         if (callback) callback({ ok: false, error: 'Path is outside the workspace' })
         return
       }
+      try {
+        const existing = await fs.stat(absolutePath)
+        if (existing) {
+          if (callback) callback({ ok: false, error: 'A file or folder with this name already exists' })
+          return
+        }
+      } catch {}
       await fs.mkdir(absolutePath, { recursive: true })
       if (callback) callback({ ok: true })
     } catch (error: any) {

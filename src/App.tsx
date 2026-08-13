@@ -290,6 +290,7 @@ function App() {
 
   function handleModalSubmit(value: string) {
     modal?.onSubmit(value)
+    closeModal()
   }
 
   function handleStartAgent(sessionId: string, config: AgentStartConfig) {
@@ -796,6 +797,14 @@ function App() {
     })
   }, [])
 
+  const expandFolder = useCallback((path: string) => {
+    setExpandedFolders(prev => {
+      const next = new Set(prev)
+      next.add(path)
+      return next
+    })
+  }, [])
+
   const detectLanguage = useCallback((filePath: string): string => {
     const ext = filePath.split('.').pop()?.toLowerCase() || ''
     const langMap: Record<string, string> = {
@@ -1054,6 +1063,7 @@ function App() {
               onOpenCreateModal={handleCreateWorkspace}
               expandedFolders={expandedFolders}
               onToggleFolder={toggleFolder}
+              onExpandFolder={expandFolder}
               selectedFilePath={selectedFilePath}
               onSelectFile={selectFile}
               getWorkspaceTree={getWorkspaceTree}
