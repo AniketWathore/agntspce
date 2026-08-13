@@ -487,6 +487,7 @@ function App() {
     switchWorkspace(id)
     setWorkspaceSidebarOpen(true)
     setViewMode('agents')
+    setSelectedFilePath(null)
     if (appBodyRef.current) {
       const totalW = appBodyRef.current.getBoundingClientRect().width
       setLeftWidth(Math.round(totalW * 0.12))
@@ -568,6 +569,7 @@ function App() {
     setViewMode('agents')
     setActiveView(null)
     setBottomShellOpen(false)
+    setSelectedFilePath(null)
     setAgentPickerTrigger(t => t + 1)
   }
 
@@ -832,8 +834,12 @@ function App() {
     if (gitDiffContents[tabId]) return
     const worktreePath = activeWorkspace?.repository?.path || ''
     if (!worktreePath) return
-    const base = commitHash ? `${commitHash}^` : '--cached'
-    const head = commitHash
+    const base = commitHash === 'working'
+      ? undefined
+      : commitHash === 'EMPTY'
+        ? 'EMPTY'
+        : commitHash ? `${commitHash}^` : '--cached'
+    const head = commitHash === 'working' || commitHash === 'EMPTY' ? undefined : commitHash
     getGitFileDiff(worktreePath, filePath, base, head).then(content => {
       if (content) {
         setGitDiffContents(prev => ({ ...prev, [tabId]: content }))
@@ -905,6 +911,7 @@ function App() {
     if (isLastFile) {
       setViewMode('agents')
     }
+    setSelectedFilePath(null)
   }, [activeFileId, openFiles])
 
   const handleFileContentChange = useCallback((value: string | undefined) => {

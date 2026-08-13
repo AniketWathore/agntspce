@@ -69,10 +69,15 @@ function statusBadge(code: string): string {
   }
 }
 
+function unstagedBadge(f: FileStatus): string {
+  if (f.status === 'U') return 'U'
+  return statusBadge(f.workingStatus || f.status)
+}
+
 export default function GitReviewPanel({
   worktreePath, onSelectDiff,
   getGitFullStatus, getGitLog, getGitBranches, getGitCommitFiles,
-  gitUnstageFile, gitCommit,
+  gitStageFile, gitUnstageFile, gitCommit,
 }: Props) {
   const [status, setStatus] = useState<FullStatus | null>(null)
   const [commitMsg, setCommitMsg] = useState('')
@@ -87,6 +92,7 @@ export default function GitReviewPanel({
   const dragging = useRef(false)
 
   const stagedFiles = status?.files?.filter(f => f.staged) || []
+  const unstagedFiles = status?.files?.filter(f => !f.staged) || []
 
   const loadStatus = useCallback(() => {
     if (!worktreePath) return
@@ -212,6 +218,39 @@ export default function GitReviewPanel({
                 title="Unstage"
               >
                 −
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Untracked / unstaged files */}
+      <div className="git-section-header">
+        <span className="git-section-title">Untracked Files</span>
+        {unstagedFiles.length > 0 && <span className="git-section-count">{unstagedFiles.length}</span>}
+      </div>
+      <div className="git-files-list">
+        {unstagedFiles.length === 0 ? (
+          <div className="git-files-empty">No untracked changes</div>
+        ) : (
+          unstagedFiles.map(f => (
+            <div
+              key={f.filePath}
+              className="git-file-item"
+              onClick={() => onSelectDiff(f.filePath, f.status, f.status === 'U' ? 'EMPTY' : 'working')}
+            >
+              <span className={`git-file-status git-status-${f.status}`}>
+                {unstagedBadge(f)}
+              </span>
+              <span className="git-file-name">{f.filePath}</span>
+              {f.additions > 0 && <span className="git-file-additions">+{f.additions}</span>}
+              {f.deletions > 0 && <span className="git-file-deletions">−{f.deletions}</span>}
+              <button
+                className="git-file-stage"
+                onClick={e => { e.stopPropagation(); gitStageFile(worktreePath, f.filePath).then(loadStatus) }}
+                title="Stage"
+              >
+                +
               </button>
             </div>
           ))

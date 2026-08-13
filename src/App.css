@@ -7343,13 +7343,41 @@
 .git-status-D { color: #F44336; }
 .git-status-R { color: #FF9800; }
 .git-status-C { color: #4CAF50; }
-.git-status-U { color: #FF9800; }
+.git-status-U { color: #F44336; }
 
 .git-file-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.git-file-stage {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #4CAF50;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s, color 0.1s;
+}
+
+.git-file-item:hover .git-file-stage {
+  opacity: 1;
+}
+
+.git-file-stage:hover {
+  background: rgba(76,175,80,0.15);
+  color: #6FDB79;
 }
 
 .git-file-unstage {
