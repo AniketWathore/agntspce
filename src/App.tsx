@@ -138,8 +138,9 @@ function App() {
     getGitFullStatus, gitStageFile, gitUnstageFile, gitCommit, gitPull, gitPush, gitFetch,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
-    emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatUpdateApiKey, chatDeleteThread,
-    onChatStreamChunk, onChatResponse, onChatError,
+    emit, chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatDeleteThread,
+    chatListThreads, chatCreateThread, chatRenameThread, chatClearThread,
+    onChatStreamChunk, onChatResponse, onChatError, onChatThreads,
     executionHistory,
     filterStats, commandHistory, searchEvents,
     getOrchestratorStats,
@@ -1199,7 +1200,7 @@ function App() {
                 </Suspense>
               )},
               { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
-                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} chatGetModels={chatGetModels} chatUpdateApiKey={chatUpdateApiKey} />
+                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
               )},
             ]}
             activeView={activeView}
@@ -1218,11 +1219,15 @@ function App() {
                   chatSendStream,
                   chatStopStream,
                   chatGetHistory,
-                  chatUpdateApiKey,
+                  chatListThreads,
+                  chatCreateThread,
+                  chatRenameThread,
+                  chatClearThread,
                   chatDeleteThread,
                   onChatStreamChunk,
                   onChatResponse,
                   onChatError,
+                  onChatThreads,
                 }}
               />
             </Suspense>

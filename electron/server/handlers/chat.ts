@@ -6,7 +6,30 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
     socket.emit('chat-models', { _reqId, models: ctx.chatManager.getModels() })
   })
 
-  socket.on('chat-send', async ({ _reqId, threadId, providerId, content }) => {
+  socket.on('chat-list-threads', ({ _reqId } = {}) => {
+    socket.emit('chat-threads', { _reqId, threads: ctx.chatManager.listThreads() })
+  })
+
+  socket.on('chat-create-thread', ({ _reqId, providerId, model } = {}) => {
+    try {
+      const thread = ctx.chatManager.createThread(providerId || '', model || '')
+      socket.emit('chat-thread-created', { _reqId, thread })
+    } catch (err: any) {
+      socket.emit('chat-error', { _reqId, threadId: null, error: err.message })
+    }
+  })
+
+  socket.on('chat-rename-thread', ({ threadId, title }) => {
+    ctx.chatManager.renameThread(threadId, title)
+    socket.emit('chat-threads', { threads: ctx.chatManager.listThreads() })
+  })
+
+  socket.on('chat-clear-thread', ({ threadId }) => {
+    ctx.chatManager.clearThread(threadId)
+    socket.emit('chat-history', { threadId, messages: [] })
+  })
+
+  socket.on('chat-send', async ({ _reqId, threadId, providerId, content, model }) => {
     try {
       const provider = ctx.chatManager.getProvider(providerId)
       if (!provider.isConfigured()) {
@@ -18,7 +41,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
       return
     }
 
-    const msg = await ctx.chatManager.sendMessage(threadId, providerId, content)
+    const msg = await ctx.chatManager.sendMessage(threadId, providerId, content, model)
     if (msg.error) {
       socket.emit('chat-error', { _reqId, threadId, error: msg.content })
     } else {
@@ -26,7 +49,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
     }
   })
 
-  socket.on('chat-send-stream', async ({ threadId, providerId, content }) => {
+  socket.on('chat-send-stream', async ({ threadId, providerId, content, model }) => {
     try {
       const provider = ctx.chatManager.getProvider(providerId)
       if (!provider.isConfigured()) {
@@ -38,7 +61,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
       return
     }
 
-    await ctx.chatManager.sendMessageStream(threadId, providerId, content, (chunk) => {
+    await ctx.chatManager.sendMessageStream(threadId, providerId, content, model, (chunk) => {
       if (chunk.error) {
         socket.emit('chat-error', { threadId, error: chunk.error })
       } else {
@@ -56,11 +79,8 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
     socket.emit('chat-history', { _reqId, threadId, messages })
   })
 
-  socket.on('chat-update-api-key', ({ providerId, apiKey }) => {
-    ctx.chatManager.updateApiKey(providerId, apiKey)
-  })
-
   socket.on('chat-delete-thread', ({ threadId }) => {
     ctx.chatManager.deleteThread(threadId)
+    socket.emit('chat-threads', { threads: ctx.chatManager.listThreads() })
   })
 }

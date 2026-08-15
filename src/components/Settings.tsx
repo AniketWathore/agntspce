@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
-import type { ChatModelInfo } from '../types'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import type { ProviderTemplate, KeySummary } from '../types'
+
+const SERVER_URL = 'http://127.0.0.1:9460'
 
 interface UserPrefs {
   fontSize: number
@@ -51,30 +53,65 @@ interface Props {
   onFontFamilyChange: (family: string) => void
   onPrefsChange: (prefs: Partial<UserPrefs>) => void
   onClose: () => void
-  chatGetModels: () => Promise<ChatModelInfo[]>
-  chatUpdateApiKey: (providerId: string, apiKey: string) => void
 }
 
-export default function Settings({ theme, onThemeChange, onFontSizeChange, onFontFamilyChange, onPrefsChange, onClose, chatGetModels, chatUpdateApiKey }: Props) {
-  const [prefs, setPrefs] = useState<UserPrefs>(loadPrefs)
-  const [models, setModels] = useState<ChatModelInfo[]>([])
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
-  const [saved, setSaved] = useState<Record<string, boolean>>({})
+interface KeyForm {
+  type: string
+  name: string
+  model: string
+  apiKey: string
+  baseUrl: string
+}
 
-  useEffect(() => {
-    chatGetModels().then(setModels)
-  }, [])
+function emptyForm(type = 'openai'): KeyForm {
+  return { type, name: '', model: '', apiKey: '', baseUrl: '' }
+}
+
+export default function Settings({ theme, onThemeChange, onFontSizeChange, onFontFamilyChange, onPrefsChange, onClose }: Props) {
+  const [prefs, setPrefs] = useState<UserPrefs>(loadPrefs)
+  const [templates, setTemplates] = useState<ProviderTemplate[]>([])
+  const [keys, setKeys] = useState<KeySummary[]>([])
+  const [form, setForm] = useState<KeyForm>(emptyForm())
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [models, setModels] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [status, setStatus] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  const initializedRef = useRef(false)
 
   useEffect(() => {
     savePrefs(prefs)
     onPrefsChange(prefs)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefs])
 
+  const refresh = useCallback(async () => {
+    try {
+      const [tRes, kRes] = await Promise.all([
+        fetch(`${SERVER_URL}/api/chat/providers`),
+        fetch(`${SERVER_URL}/api/chat/keys`),
+      ])
+      if (tRes.ok) setTemplates(await tRes.json())
+      if (kRes.ok) setKeys(await kRes.json())
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  useEffect(() => {
+    if (initializedRef.current) return
+    const t = templates.find(x => x.id === form.type)
+    if (t && !t.custom) {
+      initializedRef.current = true
+      setForm(f => ({ ...f, name: t.name, model: t.defaultModel, baseUrl: t.baseUrl || '' }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templates])
+
   function updatePrefs(partial: Partial<UserPrefs>) {
-    setPrefs(p => {
-      const next = { ...p, ...partial }
-      return next
-    })
+    setPrefs(p => ({ ...p, ...partial }))
   }
 
   function changeFontSize(delta: number) {
@@ -90,6 +127,163 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
       onFontFamilyChange(value)
       return { ...p, fontFamily: value }
     })
+  }
+
+  const selectedTemplate = templates.find(t => t.id === form.type)
+
+  function selectProvider(type: string) {
+    const t = templates.find(x => x.id === type)
+    setForm(f => ({
+      ...f,
+      type,
+      name: t?.custom ? f.name : t?.name || '',
+      model: t?.defaultModel || '',
+      baseUrl: t?.baseUrl || '',
+    }))
+    setModels([])
+  }
+
+  async function loadModelsFromEntered() {
+    if (selectedTemplate?.custom) return
+    const key = form.apiKey.trim()
+    if (!key) {
+      setStatus({ kind: 'err', text: 'Enter an API key first to fetch models.' })
+      return
+    }
+    setLoadingModels(true)
+    try {
+      const res = await fetch(`${SERVER_URL}/api/chat/models/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: selectedTemplate?.type || form.type,
+          apiKey: key,
+          baseUrl: form.baseUrl.trim() || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.ok && Array.isArray(data.models)) {
+        const sorted = [...data.models].sort((a, b) => a.localeCompare(b))
+        setModels(sorted)
+        setForm(f => ({ ...f, model: sorted[0] || f.model }))
+        setStatus({ kind: 'ok', text: sorted.length > 0 ? `${sorted.length} models loaded from API.` : 'Provider returned no models.' })
+      } else {
+        setStatus({ kind: 'err', text: data.error || 'Failed to fetch models.' })
+      }
+    } catch {
+      setStatus({ kind: 'err', text: 'Failed to fetch models.' })
+    }
+    setLoadingModels(false)
+  }
+
+  async function loadModelsFromSaved(providerId: string) {
+    if (selectedTemplate?.custom) return
+    setLoadingModels(true)
+    try {
+      const res = await fetch(`${SERVER_URL}/api/chat/models/${providerId}`)
+      const data = await res.json()
+      if (data.ok && Array.isArray(data.models)) {
+        const sorted = [...data.models].sort((a, b) => a.localeCompare(b))
+        setModels(sorted)
+        setForm(f => ({ ...f, model: sorted.includes(f.model) ? f.model : (sorted[0] || f.model) }))
+        setStatus({ kind: 'ok', text: `${sorted.length} models loaded from API.` })
+      } else {
+        setStatus({ kind: 'err', text: data.error || 'Failed to fetch models.' })
+      }
+    } catch {
+      setStatus({ kind: 'err', text: 'Failed to fetch models.' })
+    }
+    setLoadingModels(false)
+  }
+
+  function startEdit(key: KeySummary) {
+    setEditingId(key.id)
+    setShowKey(false)
+    let t = templates.find(x => x.type === key.type && !x.custom && x.baseUrl === (key.baseUrl || undefined))
+    if (!t) {
+      t = templates.find(x => !x.custom && x.name === key.name && x.type === key.type)
+    }
+    if (!t || t.custom) {
+      t = templates.find(x => x.custom)
+    }
+    setForm({
+      type: t?.id || key.type,
+      name: key.name || t?.name || '',
+      model: key.model || t?.defaultModel || '',
+      apiKey: '',
+      baseUrl: key.baseUrl || t?.baseUrl || '',
+    })
+    if (t && !t.custom) loadModelsFromSaved(key.id)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setForm(emptyForm())
+    setModels([])
+    setStatus(null)
+  }
+
+  async function handleSave() {
+    const t = templates.find(x => x.id === form.type)
+    if (t?.custom && !form.name.trim()) {
+      setStatus({ kind: 'err', text: 'Custom providers require a name.' })
+      return
+    }
+    if (!form.apiKey.trim()) {
+      setStatus({ kind: 'err', text: 'API key is required.' })
+      return
+    }
+    if (t?.custom && !form.baseUrl.trim()) {
+      setStatus({ kind: 'err', text: 'Custom providers require a base URL (e.g. https://api.example.com/v1).' })
+      return
+    }
+    const body = {
+      templateId: form.type,
+      type: selectedTemplate?.type || form.type,
+      name: form.name.trim(),
+      model: form.model.trim() || selectedTemplate?.defaultModel || 'gpt-4o',
+      apiKey: form.apiKey.trim(),
+      baseUrl: form.baseUrl.trim() || undefined,
+    }
+    try {
+      let ok = false
+      if (editingId) {
+        const res = await fetch(`${SERVER_URL}/api/chat/keys/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        ok = res.ok
+      } else {
+        const res = await fetch(`${SERVER_URL}/api/chat/keys`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        ok = res.ok
+      }
+      if (ok) {
+        setStatus({ kind: 'ok', text: editingId ? 'API key updated.' : 'API key added.' })
+        cancelEdit()
+        await refresh()
+      } else {
+        setStatus({ kind: 'err', text: 'Failed to save API key.' })
+      }
+    } catch (e) {
+      setStatus({ kind: 'err', text: `Error: ${(e as Error).message}` })
+    }
+  }
+
+  async function handleDelete(key: KeySummary) {
+    if (!window.confirm(`Delete API key "${key.name}"?`)) return
+    try {
+      const res = await fetch(`${SERVER_URL}/api/chat/keys/${key.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (data.ok) {
+        if (editingId === key.id) cancelEdit()
+        await refresh()
+      }
+    } catch {}
   }
 
   return (
@@ -219,38 +413,166 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
         <div className="settings-section">
           <div className="settings-section-header">
             <h2>API Keys</h2>
+            <span className="settings-label-desc">Used by the AI chat assistant</span>
           </div>
-          {models.map(m => (
-            <div key={m.id} className="settings-row">
-              <div>
-                <span className="settings-label">{m.name}</span>
-                <span className="settings-label-desc">{m.model}{m.configured ? ' — configured' : ''}</span>
-              </div>
-              <div className="settings-api-key-field">
-                <input
-                  className="settings-input settings-api-key-input"
-                  type="password"
-                  placeholder={m.configured ? '••••••••' : `Enter ${m.name} API key...`}
-                  value={apiKeys[m.id] || ''}
-                  onChange={e => {
-                    setApiKeys(prev => ({ ...prev, [m.id]: e.target.value }))
-                    setSaved(prev => ({ ...prev, [m.id]: false }))
-                  }}
-                />
-                <button
-                  className="settings-api-key-save"
-                  disabled={!apiKeys[m.id]?.trim()}
-                  onClick={() => {
-                    chatUpdateApiKey(m.id, apiKeys[m.id].trim())
-                    setSaved(prev => ({ ...prev, [m.id]: true }))
-                    setTimeout(() => chatGetModels().then(setModels), 300)
-                  }}
+
+          <div className="api-form">
+            <div className="api-form-row">
+              <div className="api-form-field api-form-field-grow">
+                <span className="settings-label">Provider</span>
+                <select
+                  className="settings-select"
+                  value={form.type}
+                  onChange={e => selectProvider(e.target.value)}
                 >
-                  {saved[m.id] ? 'Saved' : 'Save'}
-                </button>
+                  {templates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}{t.custom ? ' (custom)' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              {selectedTemplate?.custom && (
+                <div className="api-form-field api-form-field-grow">
+                  <span className="settings-label">Name</span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="e.g. My Local LLM"
+                    value={form.name}
+                    onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  />
+                </div>
+              )}
+              <div className="api-form-field">
+                <span className="settings-label">API Key</span>
+                <div className="settings-api-key-field">
+                  <input
+                    className="settings-input settings-api-key-input"
+                    type={showKey ? 'text' : 'password'}
+                    placeholder={editingId ? 'Leave blank to keep current' : 'sk-...'}
+                    value={form.apiKey}
+                    onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))}
+                  />
+                  <button className="settings-api-eye" onClick={() => setShowKey(s => !s)} title={showKey ? 'Hide key' : 'Show key'}>
+                    <i className={`codicon ${showKey ? 'codicon-eye-closed' : 'codicon-eye'}`}></i>
+                  </button>
+                </div>
               </div>
             </div>
-          ))}
+
+            <div className="api-form-row">
+              <div className="api-form-field api-form-field-grow">
+                <span className="settings-label">Model</span>
+                <div className="settings-api-key-field">
+                  <select
+                    className="settings-select settings-input api-model-pick"
+                    value={form.model}
+                    onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                    disabled={models.length === 0}
+                  >
+                    {models.length > 0 ? (
+                      [...models].sort((a, b) => a.localeCompare(b)).map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))
+                    ) : (
+                      <option value={form.model}>{form.model || selectedTemplate?.defaultModel || 'No models loaded'}</option>
+                    )}
+                  </select>
+                  <button
+                    className="settings-api-eyesave"
+                    disabled={loadingModels || !!selectedTemplate?.custom}
+                    onClick={() => {
+                      if (form.apiKey.trim()) loadModelsFromEntered()
+                      else if (editingId) loadModelsFromSaved(editingId)
+                      else setStatus({ kind: 'err', text: 'Enter an API key first to fetch models.' })
+                    }}
+                    title="Fetch available models from the provider API"
+                  >
+                    <i className={`codicon ${loadingModels ? 'codicon-loading codicon-spin' : 'codicon-refresh'}`}></i>
+                  </button>
+                </div>
+                <span className="settings-label-desc">
+                  {selectedTemplate?.custom
+                    ? 'Custom providers use the model id you specify.'
+                    : models.length > 0
+                      ? 'Models fetched from the provider API.'
+                      : 'Click refresh to load models from the provider API.'}
+                </span>
+              </div>
+              {selectedTemplate?.custom && (
+                <div className="api-form-field api-form-field-grow">
+                  <span className="settings-label">Model ID</span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="e.g. my-model"
+                    value={form.model}
+                    onChange={e => setForm(f => ({ ...f, model: e.target.value }))}
+                  />
+                </div>
+              )}
+              {selectedTemplate?.custom && (
+                <div className="api-form-field api-form-field-grow">
+                  <span className="settings-label">Base URL</span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    placeholder="https://api.example.com/v1"
+                    value={form.baseUrl}
+                    onChange={e => setForm(f => ({ ...f, baseUrl: e.target.value }))}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="api-form-actions">
+              {status && <span className={`api-status ${status.kind === 'ok' ? 'api-status-ok' : 'api-status-err'}`}>{status.text}</span>}
+              {editingId ? (
+                <>
+                  <button className="settings-api-key-save" onClick={handleSave}>Update Key</button>
+                  <button className="settings-btn-ghost" onClick={cancelEdit}>Cancel</button>
+                </>
+              ) : (
+                <button className="settings-api-key-save" onClick={handleSave} disabled={!form.apiKey.trim()}>
+                  <i className="codicon codicon-add" style={{ fontSize: 12 }}></i> Add API Key
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="api-key-list">
+            {keys.length === 0 ? (
+              <div className="api-key-empty">
+                No API keys configured. Select a provider above to get started.
+              </div>
+            ) : (
+              keys.map(key => (
+                <div key={key.id} className="api-key-card">
+                  <div className="api-key-card-icon">
+                    <i className="codicon codicon-key"></i>
+                  </div>
+                  <div className="api-key-card-info">
+                    <div className="api-key-card-name">
+                      {key.name}
+                      {key.id === editingId && <span className="api-key-badge">editing</span>}
+                    </div>
+                    <div className="api-key-card-meta">
+                      <span className="api-key-card-type">{key.type}</span>
+                      <span className="api-key-card-model">{key.model}</span>
+                      {key.maskedKey && <span className="api-key-card-masked">{key.maskedKey}</span>}
+                    </div>
+                  </div>
+                  <div className="api-key-card-actions">
+                    <button className="api-key-card-btn" onClick={() => startEdit(key)} title="Edit">
+                      <i className="codicon codicon-edit"></i>
+                    </button>
+                    <button className="api-key-card-btn api-key-card-btn-danger" onClick={() => handleDelete(key)} title="Delete">
+                      <i className="codicon codicon-trash"></i>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -4868,6 +4868,258 @@
   cursor: default;
 }
 
+.settings-api-eye {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.settings-api-eye:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.settings-api-eyesave {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.settings-api-eyesave:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.settings-api-eyesave:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.settings-btn-ghost {
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+}
+
+.settings-btn-ghost:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.api-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.api-form-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.api-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.api-form-field-grow {
+  flex: 1;
+  min-width: 200px;
+}
+
+.api-form-field .settings-label {
+  font-size: 11px;
+}
+
+.api-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.api-status {
+  font-size: 12px;
+}
+
+.api-status-ok {
+  color: var(--success);
+}
+
+.api-status-err {
+  color: var(--danger);
+}
+
+.api-model-pick {
+  margin-top: 4px;
+}
+
+.api-key-list {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.api-key-empty {
+  padding: 18px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.api-key-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color 0.12s;
+}
+
+.api-key-card:hover {
+  border-color: var(--accent-border);
+}
+
+.api-key-card-icon {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.api-key-card-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.api-key-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.api-key-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.api-key-card-type {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.api-key-card-model {
+  color: var(--text-secondary);
+}
+
+.api-key-card-masked {
+  font-family: 'JetBrains Mono', Menlo, monospace;
+  color: var(--text-secondary);
+}
+
+.api-key-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.api-key-card-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.api-key-card-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+}
+
+.api-key-card-btn-danger:hover {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-subtle);
+}
+
+.api-key-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+}
+
 .chat-stop-btn {
   padding: 8px 14px;
   background: var(--danger);
@@ -4895,6 +5147,36 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.chat-messages-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.chat-clear-btn:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-subtle);
+}
+
+.chat-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .chat-msg {
@@ -5044,6 +5326,152 @@
 .chat-send-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.chat-header-btn-active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+}
+
+.chat-setup-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.chat-setup-btn:hover {
+  background: var(--accent-hover);
+}
+
+.chat-input {
+  resize: none;
+  min-height: 36px;
+  max-height: 160px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.chat-history-panel {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  max-height: 45%;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.chat-history-header {
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-history-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.chat-history-list {
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background 0.12s;
+}
+
+.chat-history-item:hover {
+  background: var(--bg-elevated);
+}
+
+.chat-history-item.active {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+.chat-history-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-history-item-title {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-history-item-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-history-item-del {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+
+.chat-history-item:hover .chat-history-item-del,
+.chat-history-item.active .chat-history-item-del {
+  opacity: 1;
+}
+
+.chat-history-item-del:hover {
+  color: var(--danger);
+}
+
+.codicon-spin {
+  animation: codicon-spin 1s linear infinite;
+}
+
+@keyframes codicon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* ── Bottom Shell Panel ─────────────────── */

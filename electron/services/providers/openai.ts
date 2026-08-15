@@ -1,37 +1,63 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { streamText } from 'ai'
-import type { AIProvider, ChatMessage, ProviderConfig } from './chatTypes'
+import type { AIProvider, ApiKeyEntry, ChatMessage } from '../chatTypes'
 
-export class OpenAIProvider implements AIProvider {
-  readonly id = 'openai' as const
-  readonly name = 'OpenAI'
-  readonly model = 'gpt-4o'
-  private config: ProviderConfig
+export class OpenAICompatibleProvider implements AIProvider {
+  readonly id: string
+  readonly name: string
+  readonly model: string
+  readonly baseUrl?: string
+  private apiKey: string
 
-  constructor(config: ProviderConfig) {
-    this.config = config
+  constructor(config: ApiKeyEntry) {
+    this.id = config.id
+    this.name = config.name
+    this.model = config.model
+    this.baseUrl = config.baseUrl
+    this.apiKey = config.apiKey
   }
 
   isConfigured(): boolean {
-    return !!this.config.apiKey && this.config.apiKey.length > 0
+    return !!this.apiKey && this.apiKey.length > 0
   }
 
   private getClient() {
     return createOpenAI({
-      apiKey: this.config.apiKey,
-      baseURL: this.config.baseUrl,
+      apiKey: this.apiKey,
+      baseURL: this.baseUrl || undefined,
     })
   }
 
-  async chat(messages: ChatMessage[]): Promise<string> {
-    if (!this.isConfigured()) throw new Error('OpenAI API key is not configured')
+  async listModels(): Promise<string[]> {
+    if (!this.isConfigured()) return []
+    try {
+      const base = (this.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')
+      const res = await fetch(`${base}/models`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      const models = data?.data?.map((m: any) => m.id).filter(Boolean)
+      return Array.isArray(models) ? models : []
+    } catch {
+      return []
+    }
+  }
+
+  async chat(
+    messages: ChatMessage[],
+    model: string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    if (!this.isConfigured()) throw new Error(`${this.name} API key is not configured`)
 
     const client = this.getClient()
-    const result = await streamText({
-      model: client.chat(this.model),
+    const result = streamText({
+      model: client.chat(model || this.model),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
-      maxTokens: this.config.maxTokens ?? 4096,
-      temperature: this.config.temperature ?? 0.7,
+      maxTokens: 4096,
+      temperature: 0.7,
+      abortSignal: signal,
     })
 
     let fullText = ''
@@ -43,17 +69,19 @@ export class OpenAIProvider implements AIProvider {
 
   async chatStream(
     messages: ChatMessage[],
+    model: string,
     onChunk: (chunk: string) => void,
     signal?: AbortSignal
   ): Promise<string> {
-    if (!this.isConfigured()) throw new Error('OpenAI API key is not configured')
+    if (!this.isConfigured()) throw new Error(`${this.name} API key is not configured`)
 
     const client = this.getClient()
     const result = streamText({
-      model: client.chat(this.model),
+      model: client.chat(model || this.model),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
-      maxTokens: this.config.maxTokens ?? 4096,
-      temperature: this.config.temperature ?? 0.7,
+      maxTokens: 4096,
+      temperature: 0.7,
+      abortSignal: signal,
     })
 
     let fullText = ''

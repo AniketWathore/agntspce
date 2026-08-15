@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CommandEvent, ExecutionEvent } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CommandEvent, ExecutionEvent, ChatModelInfo, ChatThread } from '../types'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -104,18 +104,22 @@ interface UseSocketReturn {
   createFolder: (absolutePath: string) => Promise<any>
   renameFile: (oldPath: string, newPath: string) => Promise<any>
   deleteFile: (absolutePath: string) => Promise<any>
-  chatGetModels: () => Promise<any[]>
-  chatSend: (threadId: string, providerId: string, content: string) => Promise<any>
-  chatSendStream: (threadId: string, providerId: string, content: string) => void
+  chatGetModels: () => Promise<ChatModelInfo[]>
+  chatSend: (threadId: string, providerId: string, content: string, model?: string) => Promise<any>
+  chatSendStream: (threadId: string, providerId: string, content: string, model?: string) => void
   chatStopStream: (threadId: string) => void
   chatGetHistory: (threadId: string) => Promise<any>
-  chatUpdateApiKey: (providerId: string, apiKey: string) => void
+  chatListThreads: () => Promise<ChatThread[]>
+  chatCreateThread: (providerId: string, model: string) => Promise<ChatThread | null>
+  chatRenameThread: (threadId: string, title: string) => void
+  chatClearThread: (threadId: string) => void
   chatDeleteThread: (threadId: string) => void
   onChatStreamChunk: (cb: (data: any) => void) => () => void
   onChatResponse: (cb: (data: any) => void) => () => void
   onChatError: (cb: (data: any) => void) => () => void
   onChatModels: (cb: (data: any[]) => void) => () => void
   onChatHistory: (cb: (data: any) => void) => () => void
+  onChatThreads: (cb: (data: any) => void) => () => void
 }
 
 export function useSocket(): UseSocketReturn {
@@ -718,7 +722,7 @@ export function useSocket(): UseSocketReturn {
     })
   }, [])
 
-  const chatGetModels = useCallback((): Promise<any[]> => {
+  const chatGetModels = useCallback((): Promise<ChatModelInfo[]> => {
     return new Promise((resolve) => {
       const id = ++chatReqId.current
       registerOneShot('chat-models', id, 10000).then(data => {
@@ -728,18 +732,18 @@ export function useSocket(): UseSocketReturn {
     })
   }, [registerOneShot])
 
-  const chatSend = useCallback((threadId: string, providerId: string, content: string): Promise<any> => {
+  const chatSend = useCallback((threadId: string, providerId: string, content: string, model?: string): Promise<any> => {
     return new Promise((resolve) => {
       const id = ++chatReqId.current
       registerOneShot('chat-response', id, 60000).then(data => {
         resolve(data ?? null)
       })
-      socketRef.current?.emit('chat-send', { _reqId: id, threadId, providerId, content })
+      socketRef.current?.emit('chat-send', { _reqId: id, threadId, providerId, content, model })
     })
   }, [registerOneShot])
 
-  const chatSendStream = useCallback((threadId: string, providerId: string, content: string) => {
-    socketRef.current?.emit('chat-send-stream', { threadId, providerId, content })
+  const chatSendStream = useCallback((threadId: string, providerId: string, content: string, model?: string) => {
+    socketRef.current?.emit('chat-send-stream', { threadId, providerId, content, model })
   }, [])
 
   const chatStopStream = useCallback((threadId: string) => {
@@ -756,8 +760,32 @@ export function useSocket(): UseSocketReturn {
     })
   }, [registerOneShot])
 
-  const chatUpdateApiKey = useCallback((providerId: string, apiKey: string) => {
-    socketRef.current?.emit('chat-update-api-key', { providerId, apiKey })
+  const chatListThreads = useCallback((): Promise<ChatThread[]> => {
+    return new Promise((resolve) => {
+      const id = ++chatReqId.current
+      registerOneShot('chat-threads', id, 10000).then(data => {
+        resolve(data?.threads ?? [])
+      })
+      socketRef.current?.emit('chat-list-threads', { _reqId: id })
+    })
+  }, [registerOneShot])
+
+  const chatCreateThread = useCallback((providerId: string, model: string): Promise<ChatThread | null> => {
+    return new Promise((resolve) => {
+      const id = ++chatReqId.current
+      registerOneShot('chat-thread-created', id, 10000).then(data => {
+        resolve(data?.thread ?? null)
+      })
+      socketRef.current?.emit('chat-create-thread', { _reqId: id, providerId, model })
+    })
+  }, [registerOneShot])
+
+  const chatRenameThread = useCallback((threadId: string, title: string) => {
+    socketRef.current?.emit('chat-rename-thread', { threadId, title })
+  }, [])
+
+  const chatClearThread = useCallback((threadId: string) => {
+    socketRef.current?.emit('chat-clear-thread', { threadId })
   }, [])
 
   const chatDeleteThread = useCallback((threadId: string) => {
@@ -787,6 +815,11 @@ export function useSocket(): UseSocketReturn {
   const onChatHistory = useCallback((cb: (data: any) => void) => {
     socketRef.current?.on('chat-history', cb)
     return () => { socketRef.current?.off('chat-history', cb) }
+  }, [])
+
+  const onChatThreads = useCallback((cb: (data: any) => void) => {
+    socketRef.current?.on('chat-threads', cb)
+    return () => { socketRef.current?.off('chat-threads', cb) }
   }, [])
 
   return {
@@ -865,12 +898,16 @@ export function useSocket(): UseSocketReturn {
     chatSendStream,
     chatStopStream,
     chatGetHistory,
-    chatUpdateApiKey,
+    chatListThreads,
+    chatCreateThread,
+    chatRenameThread,
+    chatClearThread,
     chatDeleteThread,
     onChatStreamChunk,
     onChatResponse,
     onChatError,
     onChatModels,
     onChatHistory,
+    onChatThreads,
   }
 }

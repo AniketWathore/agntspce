@@ -1,43 +1,78 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { streamText } from 'ai'
-import type { AIProvider, ChatMessage, ProviderConfig } from '../chatTypes'
+import type { AIProvider, ApiKeyEntry, ChatMessage } from '../chatTypes'
+
+const ANTHROPIC_API = 'https://api.anthropic.com'
 
 export class AnthropicProvider implements AIProvider {
-  readonly id = 'anthropic' as const
-  readonly name = 'Anthropic'
-  readonly model = 'claude-sonnet-4-20250514'
-  private config: ProviderConfig
+  readonly id: string
+  readonly name: string
+  readonly model: string
+  readonly baseUrl?: string
+  private apiKey: string
 
-  constructor(config: ProviderConfig) {
-    this.config = config
+  constructor(config: ApiKeyEntry) {
+    this.id = config.id
+    this.name = config.name
+    this.model = config.model
+    this.baseUrl = config.baseUrl
+    this.apiKey = config.apiKey
   }
 
   isConfigured(): boolean {
-    return !!this.config.apiKey && this.config.apiKey.length > 0
+    return !!this.apiKey && this.apiKey.length > 0
   }
 
   private getClient() {
     return createAnthropic({
-      apiKey: this.config.apiKey,
-      baseURL: this.config.baseUrl,
+      apiKey: this.apiKey,
+      baseURL: this.baseUrl || undefined,
     })
   }
 
-  async chat(messages: ChatMessage[]): Promise<string> {
-    if (!this.isConfigured()) throw new Error('Anthropic API key is not configured')
+  async listModels(): Promise<string[]> {
+    if (!this.isConfigured()) return []
+    try {
+      const base = (this.baseUrl || ANTHROPIC_API).replace(/\/$/, '')
+      const res = await fetch(`${base}/v1/models`, {
+        headers: {
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+      })
+      if (!res.ok) return []
+      const data = await res.json()
+      const models = data?.data?.map((m: any) => m.id).filter(Boolean)
+      return Array.isArray(models) ? models : []
+    } catch {
+      return []
+    }
+  }
 
-    const client = this.getClient()
+  private buildMessages(messages: ChatMessage[]) {
     const sysMsg = messages.filter(m => m.role === 'system').pop()
     const chatMessages = messages
       .filter(m => m.role !== 'system')
       .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    return { sysMsg, chatMessages }
+  }
 
+  async chat(
+    messages: ChatMessage[],
+    model: string,
+    signal?: AbortSignal
+  ): Promise<string> {
+    if (!this.isConfigured()) throw new Error(`${this.name} API key is not configured`)
+
+    const client = this.getClient()
+    const { sysMsg, chatMessages } = this.buildMessages(messages)
     const result = streamText({
-      model: client.chat(this.model),
+      model: client.chat(model || this.model),
       messages: chatMessages,
       ...(sysMsg ? { system: sysMsg.content } : {}),
-      maxTokens: this.config.maxTokens ?? 4096,
-      temperature: this.config.temperature ?? 0.7,
+      maxTokens: 4096,
+      temperature: 0.7,
+      abortSignal: signal,
     })
 
     let fullText = ''
@@ -49,23 +84,21 @@ export class AnthropicProvider implements AIProvider {
 
   async chatStream(
     messages: ChatMessage[],
+    model: string,
     onChunk: (chunk: string) => void,
     signal?: AbortSignal
   ): Promise<string> {
-    if (!this.isConfigured()) throw new Error('Anthropic API key is not configured')
+    if (!this.isConfigured()) throw new Error(`${this.name} API key is not configured`)
 
     const client = this.getClient()
-    const sysMsg = messages.filter(m => m.role === 'system').pop()
-    const chatMessages = messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-
+    const { sysMsg, chatMessages } = this.buildMessages(messages)
     const result = streamText({
-      model: client.chat(this.model),
+      model: client.chat(model || this.model),
       messages: chatMessages,
       ...(sysMsg ? { system: sysMsg.content } : {}),
-      maxTokens: this.config.maxTokens ?? 4096,
-      temperature: this.config.temperature ?? 0.7,
+      maxTokens: 4096,
+      temperature: 0.7,
+      abortSignal: signal,
     })
 
     let fullText = ''

@@ -176,24 +176,72 @@ export interface OpenFile {
   commitHash?: string
 }
 
-export type ProviderId = 'openai' | 'anthropic' | 'google' | 'deepseek'
+export type ProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'openai-compatible'
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  provider?: ProviderId
+  provider?: string
   model?: string
   timestamp: number
   streaming?: boolean
   error?: boolean
 }
 
+export interface ChatThread {
+  id: string
+  title: string
+  providerId: string
+  model: string
+  messages: ChatMessage[]
+  createdAt: number
+  updatedAt: number
+}
+
 export interface ChatModelInfo {
-  id: ProviderId
+  id: string
+  type: ProviderType
   name: string
   model: string
+  baseUrl?: string
+  hasKey: boolean
   configured: boolean
+}
+
+export interface ProviderTemplate {
+  id: string
+  type: ProviderType
+  name: string
+  defaultModel: string
+  baseUrl?: string
+  custom?: boolean
+  requiresBaseUrl?: boolean
+}
+
+export interface ApiKeyEntry {
+  id: string
+  type: ProviderType
+  name: string
+  model: string
+  apiKey: string
+  baseUrl?: string
+  expiresAt?: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface KeySummary {
+  id: string
+  type: ProviderType
+  name: string
+  model: string
+  baseUrl?: string
+  hasKey: boolean
+  maskedKey?: string
+  expiresAt?: number | null
+  createdAt: number
+  updatedAt: number
 }
 
 export interface StreamChunk {
