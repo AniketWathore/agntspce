@@ -41,6 +41,15 @@ const AGNTSPCE_CMD_RE = /^agntspce\s+\$\s+(.+)$/
 const AGNTSPCE_STATS_RE = /^AGNTSPCE_STATS raw=(\d+) filtered=(\d+)$/
 const SHELL_CMD_RE = /[$#%❯➜]\s+(.+)$/
 const SHELL_ECHO_RE = /^\$\s+agntspce\s+run\s+/
+// Wrapper system lines (marker, token stats, diagnostics) that must be
+// consumed for RTK tracking but hidden from the terminal screen.
+const AGNTSPCE_DIAG_RE = /^\[agntspce\]/
+const toPlainLine = (raw: string) => raw
+  .replace(/\x1b\[[\d;]*[A-Za-z]/g, '')
+  .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07)/g, '')
+  .replace(/[\x00-\x08\x0b\x0c\r\x0e-\x1f\x7f]/g, '')
+const isSystemLine = (plain: string) =>
+  AGNTSPCE_CMD_RE.test(plain) || AGNTSPCE_STATS_RE.test(plain) || AGNTSPCE_DIAG_RE.test(plain)
 export class OutputFilterService {
   private commandBuffers = new Map<string, {
     command: string
@@ -50,6 +59,9 @@ export class OutputFilterService {
     exitCode: number | null
   }>()
   private lineBuffer = new Map<string, string>()
+  // True when the buffered partial line is the start of a wrapper system line
+  // (marker/stats/diag) that must be hidden from the terminal display.
+  private _systemPartial = new Map<string, boolean>()
   private outputAccum = new Map<string, string[]>()
   private insideCommand = new Map<string, boolean>()
   private finalizeTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -114,7 +126,8 @@ export class OutputFilterService {
   // Process incoming PTY data. Returns data for the frontend.
   // VT sequences MUST pass through unmodified — xterm.js's parser depends on
   // receiving the exact stream. Marker detection and command accumulation
-  // happen independently without altering the display data.
+  // happen independently. Wrapper system lines (marker, stats, diag) are
+  // stripped from the display stream but still consumed for RTK tracking.
   processOutput(sessionId: string, data: string): string {
     debugLog(`DATA CHUNK session=${sessionId.slice(0,8)} len=${data.length} preview="${data.slice(0,100).replace(/\n/g,'\\n').replace(/\r/g,'\\r')}"`)
     // Buffer partial lines across chunks (PTY data can split lines)
@@ -122,12 +135,39 @@ export class OutputFilterService {
     const full = prevPartial + data
     const parts = full.split(/\r?\n/)
     // Last element may be incomplete — save for next chunk
-    const completeLines = parts.slice(0, -1)
     this.lineBuffer.set(sessionId, parts[parts.length - 1])
 
-    for (const rawLine of completeLines) {
+    // Split keeping separators so we can rebuild the display byte-for-byte
+    // (only emitting the portion of `full` that belongs to this chunk).
+    const segs = full.split(/(\r?\n)/)
+    const emitFrom = prevPartial.length
+    let displayOut = ''
+    let dropping = this._systemPartial.get(sessionId) || false
+    let consumed = 0
+
+    for (let i = 0; i + 1 < segs.length; i += 2) {
+      const rawLine = segs[i]
+      const sep = segs[i + 1]
+      const segStart = consumed
+      consumed += rawLine.length + sep.length
       // Strip ANSI for command detection (line itself goes to terminal raw)
-      const plain = rawLine.replace(/\x1b\[[\d;]*[A-Za-z]/g, '').replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07)/g, '').replace(/[\x00-\x08\x0b\x0c\r\x0e-\x1f\x7f]/g, '')
+      const plain = toPlainLine(rawLine)
+
+      // Display: exclude wrapper system lines (marker/stats/diag) and any
+      // continuation of a system line started in a previous chunk. Detection
+      // below still runs on every line regardless of display exclusion.
+      const showLine = !dropping && !isSystemLine(plain)
+      if (dropping) dropping = false
+
+      if (showLine) {
+        // Emit only the bytes of this line+sep that belong to `data` (not the
+        // buffered partial from the previous chunk, which was never displayed).
+        const emitStart = Math.max(segStart, emitFrom)
+        const emitEnd = segStart + rawLine.length + sep.length
+        if (emitEnd > emitStart) {
+          displayOut += full.slice(emitStart, emitEnd)
+        }
+      }
 
       // Detect wrapper markers: "agntspce $ <command>"
       const tagMatch = plain.match(AGNTSPCE_CMD_RE)
@@ -220,9 +260,18 @@ export class OutputFilterService {
       this.scheduleFinalize(sessionId)
     }
 
-    // Pass raw data through unmodified — any change to the VT stream
-    // desynchronizes xterm.js's internal buffer (cursor, scroll regions, colors).
-    return data
+    // Trailing partial (buffered for next chunk). Determine whether it is the
+    // start of a system line that must be hidden from the display.
+    const partial = parts[parts.length - 1]
+    const partialPlain = toPlainLine(partial)
+    const partialIsSystem = isSystemLine(partialPlain)
+    this._systemPartial.set(sessionId, dropping || partialIsSystem)
+    if (!dropping && !partialIsSystem) {
+      const emitStart = Math.max(consumed, emitFrom)
+      displayOut += full.slice(emitStart)
+    }
+
+    return displayOut
   }
 
   private _detectCommand(cmdStr: string): { command: string; args: string[] } | null {
@@ -519,6 +568,7 @@ export class OutputFilterService {
     this.commandBuffers.delete(sessionId)
     this.outputAccum.delete(sessionId)
     this.lineBuffer.delete(sessionId)
+    this._systemPartial.delete(sessionId)
     this.insideCommand.delete(sessionId)
     this.clearTimer(sessionId)
     this._commandHistory.delete(sessionId)
@@ -529,6 +579,7 @@ export class OutputFilterService {
     this.commandBuffers.clear()
     this.outputAccum.clear()
     this.lineBuffer.clear()
+    this._systemPartial.clear()
     this.insideCommand.clear()
     this._commandHistory.clear()
     this._pendingStats.clear()

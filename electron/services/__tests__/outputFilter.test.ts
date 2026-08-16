@@ -35,6 +35,55 @@ describe('OutputFilterService', () => {
     })
   })
 
+  describe('system line display stripping', () => {
+    it('strips wrapper marker from display but still detects the command', () => {
+      const markerLine = 'agntspce $ git status\r\n'
+      const display = filter.processOutput('s1', markerLine)
+      expect(display).not.toContain('agntspce $ git status')
+      // Detection must still fire (marker consumed for RTK tracking)
+      filter.processOutput('s1', ' M src/App.tsx\r\n')
+      filter.processOutput('s1', '$ \r\n')
+      vi.advanceTimersByTime(2000)
+      expect(emitted[emitted.length - 1]?.command).toBe('git')
+    })
+
+    it('strips AGNTSPCE_STATS and [agntspce] diag lines from display', () => {
+      const statsLine = '\x1b[2K\rAGNTSPCE_STATS raw=1000 filtered=300\r\n'
+      const diag1 = '[agntspce] reporting stats raw=1000 filtered=300 port=9460\r\n'
+      const diag2 = '[agntspce] POST response status=200\r\n'
+      const out1 = filter.processOutput('s1', statsLine)
+      const out2 = filter.processOutput('s1', diag1)
+      const out3 = filter.processOutput('s1', diag2)
+      expect(out1).not.toContain('AGNTSPCE_STATS')
+      expect(out2).not.toContain('[agntspce]')
+      expect(out3).not.toContain('[agntspce]')
+    })
+
+    it('passes through normal output lines unchanged', () => {
+      const data = 'On branch gitdemo23\r\nnothing to commit\r\n'
+      expect(filter.processOutput('s1', data)).toBe(data)
+    })
+
+    it('preserves normal output around stripped system lines', () => {
+      const data = 'agntspce $ git status\r\nOn branch main\r\nAGNTSPCE_STATS raw=10 filtered=5\r\n'
+      const display = filter.processOutput('s1', data)
+      expect(display).toContain('On branch main')
+      expect(display).not.toContain('agntspce $ git status')
+      expect(display).not.toContain('AGNTSPCE_STATS')
+    })
+
+    it('hides a system line split across chunks', () => {
+      // Marker split mid-line: first chunk is a partial marker line
+      const out1 = filter.processOutput('s1', 'agntspce $ git st')
+      expect(out1).not.toContain('agntspce')
+      const out2 = filter.processOutput('s1', 'atus\r\n M x.ts\r\n$ \r\n')
+      expect(out2).not.toContain('agntspce')
+      expect(out2).toContain(' M x.ts')
+      vi.advanceTimersByTime(2000)
+      expect(emitted[emitted.length - 1]?.command).toBe('git')
+    })
+  })
+
   describe('wrapper marker detection (agntspce $ <cmd>)', () => {
     it('detects a command from the agntspce wrapper marker', () => {
       const event = runCommand(['agntspce $ git status\r\n', ' M src/App.tsx\r\n', '$ \r\n'])
