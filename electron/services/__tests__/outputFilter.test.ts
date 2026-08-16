@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { OutputFilterService } from '../outputFilter'
 
 describe('OutputFilterService', () => {
@@ -188,12 +191,18 @@ describe('OutputFilterService', () => {
       expect(filter.getAllStats()[0].stats.eventsProcessed).toBe(0)
     })
 
-    it('cleanup removes a session and merges into cumulative stats', () => {
+    it('cleanup keeps command history so per-session stats survive', () => {
       runCommand(['agntspce $ git status\r\n', '$ \r\n'])
-      const cumulativeBefore = filter.getCumulativeStats().eventsProcessed
       filter.cleanup('s1')
-      expect(filter.getCommandHistory('s1').length).toBe(0)
-      expect(filter.getCumulativeStats().eventsProcessed).toBe(cumulativeBefore + 1)
+      expect(filter.getCommandHistory('s1').length).toBe(1)
+      expect(filter.getAllStats()[0].stats.eventsProcessed).toBe(1)
+    })
+
+    it('cleanup removes transient per-session state', () => {
+      filter.processOutput('s1', 'agntspce $ git status\r\n')
+      filter.processOutput('s1', 'output\r\n')
+      filter.cleanup('s1')
+      expect(filter.hasPendingTimer('s1')).toBe(false)
     })
 
     it('hasPendingTimer reflects scheduled finalize', () => {
@@ -236,6 +245,58 @@ describe('OutputFilterService', () => {
       const event = filter.finalizeCommand('s1', 0)
       expect(event).not.toBeNull()
       expect(event!.filteredOutput).not.toMatch(/\n\n\n\n/)
+    })
+  })
+
+  describe('persistence across restart', () => {
+    let dir: string
+    let persisted: OutputFilterService
+
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agntspce-filter-test-'))
+    })
+
+    afterEach(() => {
+      if (persisted) {
+        if (persisted['_historySaveTimer' as keyof OutputFilterService]) {
+          const t = persisted['_historySaveTimer' as keyof OutputFilterService] as ReturnType<typeof setTimeout>
+          clearTimeout(t)
+        }
+      }
+      fs.rmSync(dir, { recursive: true, force: true })
+    })
+
+    it('reloads command history and totals on a new instance', () => {
+      const f1 = new OutputFilterService(dir)
+      f1.setOnCommandEvent(() => {})
+      f1.processOutput('s1', 'agntspce $ git status\r\n')
+      f1.processOutput('s1', 'AGNTSPCE_STATS raw=1000 filtered=300\r\n')
+      f1.processOutput('s1', ' M x.ts\r\n')
+      f1.processOutput('s1', '$ \r\n')
+      vi.advanceTimersByTime(2000)
+      f1.persistCumulativeStats()
+
+      const f2 = new OutputFilterService(dir)
+      persisted = f2
+      expect(f2.getAllCommandHistory().length).toBe(1)
+      expect(f2.getAllStats()[0].stats.eventsProcessed).toBe(1)
+      expect(f2.getAllStats()[0].stats.totalOriginalTokens).toBe(1000)
+      expect(f2.getCommandHistory('s1').length).toBe(1)
+    })
+
+    it('getAllStats reflects persisted history across instances', () => {
+      const f1 = new OutputFilterService(dir)
+      f1.setOnCommandEvent(() => {})
+      f1.processOutput('s1', 'agntspce $ git status\r\n',)
+      f1.processOutput('s1', '$ \r\n')
+      vi.advanceTimersByTime(2000)
+      f1.persistCumulativeStats()
+      f1.cleanup('s1')
+
+      const f2 = new OutputFilterService(dir)
+      persisted = f2
+      expect(f2.getCommandHistory('s1').length).toBe(1)
+      expect(f2.getAllStats()[0].stats.eventsProcessed).toBe(1)
     })
   })
 })

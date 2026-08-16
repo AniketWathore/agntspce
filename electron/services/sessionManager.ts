@@ -178,10 +178,8 @@ export class SessionManager extends EventEmitter {
     super()
     this.io = io
     this.outputFilter = new OutputFilterService(dataDir)
-    // Start each app run with a clean slate: cumulative stats previously
-    // persisted inflated (ANSI/control-counted and double-counted) totals that
-    // never dropped across restarts, making the token dashboard unrealistic.
-    this.outputFilter.resetCumulativeStats()
+    // Cumulative token savings persist across app restarts (filter-history.json
+    // + filter-stats.json in the user data dir). Do NOT reset on startup.
     if (agentManager) this.agentManager = agentManager
     if (dataDir) this.cavemanService.setDataDir(dataDir)
     this.outputFilter.setOnCommandEvent((event) => {

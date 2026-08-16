@@ -273,23 +273,25 @@ export default function Dashboard(props: Props) {
                 </div>
                 <div className="dashboard-savings-table">
                   {(() => {
-                    const bySession = new Map<string, { commands: number; orig: number; filt: number }>()
+                    const bySession = new Map<string, { commands: number; orig: number; filt: number; firstTs: number }>()
                     for (const e of commandHistory) {
                       if (e.command.startsWith('agntspce-search')) continue
-                      const s = bySession.get(e.sessionId) || { commands: 0, orig: 0, filt: 0 }
+                      const s = bySession.get(e.sessionId) || { commands: 0, orig: 0, filt: 0, firstTs: e.timestamp }
                       s.commands++
                       s.orig += e.originalTokens
                       s.filt += e.filteredTokens
+                      if (e.timestamp < s.firstTs) s.firstTs = e.timestamp
                       bySession.set(e.sessionId, s)
                     }
                     const sorted = [...bySession.entries()].sort((a, b) => b[1].orig - a[1].orig)
                     return sorted.map(([sid, stats]) => {
                       const saved = stats.orig - stats.filt
                       const pct = stats.orig > 0 ? Math.round((saved / stats.orig) * 100) : 0
+                      const ts = new Date(stats.firstTs).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                       return (
                         <div key={sid} className="savings-row" style={{ fontSize: 12, padding: '4px 0' }}>
                           <span style={{ color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 11 }}>
-                            {sid.slice(0, 8)}
+                            {sid.slice(0, 12)} <span style={{ opacity: 0.7 }}>&middot; {ts}</span>
                           </span>
                           <span style={{ marginLeft: 8 }}>
                             {stats.commands} cmd{stats.commands !== 1 ? 's' : ''} &mdash;

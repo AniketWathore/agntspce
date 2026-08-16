@@ -171,7 +171,8 @@ export function useSocket(): UseSocketReturn {
       setCommandHistory([])
       setSearchEvents([])
       setExecutionHistory([])
-      socket.emit('get-cumulative-stats', {})
+socket.emit('get-cumulative-stats', {})
+      socket.emit('get-filter-stats', {})
     })
     socket.on('disconnect', () => setConnected(false))
 
@@ -278,7 +279,7 @@ export function useSocket(): UseSocketReturn {
 
   socket.on('command-filter-event', (event: CommandEvent) => {
     const isSearch = event.command.startsWith('agntspce-search')
-    setCommandHistory(prev => [event, ...prev].slice(0, 200))
+    setCommandHistory(prev => [event, ...prev].slice(0, 5000))
     if (isSearch) {
       setSearchEvents(prev => [event, ...prev].slice(0, 100))
     }
@@ -291,6 +292,15 @@ export function useSocket(): UseSocketReturn {
 
   socket.on('cumulative-stats', (data: { stats: FilterStats }) => {
     setFilterStats(data.stats)
+  })
+
+  socket.on('filter-stats', (data: { stats: FilterStats; history: FilterEvent[]; commandHistory: CommandEvent[] }) => {
+    setFilterStats(data.stats)
+    setFilterHistory(data.history || [])
+    const all = data.commandHistory || []
+    // Newest first to match live command-filter-event ordering
+    setCommandHistory([...all].reverse())
+    setSearchEvents(all.filter(e => e.command.startsWith('agntspce-search')).reverse())
   })
 
   return () => {

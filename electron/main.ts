@@ -115,8 +115,8 @@ app.on('will-quit', () => {
       const sessions = ctx.sessionManager.getSessionSaveData()
       ctx.workspaceManager.saveSessionStateSync(ws.id, sessions)
       ctx.sessionManager.saveAllSessionBuffersSync()
-      ctx.sessionManager.outputFilter.persistCumulativeStats()
     }
+    ctx.sessionManager.outputFilter.persistCumulativeStats()
   }
 })
 

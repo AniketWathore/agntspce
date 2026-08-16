@@ -71,11 +71,15 @@ export class OutputFilterService {
   private _recentTokenReports = new Map<string, number>() // key: "raw-filtered" → timestamp
   private _cumulativeStats: CumulativeStats = { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 }
   private _statsFilePath: string = ''
+  private _historyFilePath: string = ''
+  private _historySaveTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(dataDir?: string) {
     if (dataDir) {
       this._statsFilePath = path.join(dataDir, 'filter-stats.json')
+      this._historyFilePath = path.join(dataDir, 'filter-history.json')
       this._loadCumulativeStats()
+      this._loadHistory()
     }
   }
 
@@ -102,6 +106,43 @@ export class OutputFilterService {
     } catch {}
   }
 
+  private _loadHistory() {
+    if (!this._historyFilePath) return
+    try {
+      const data = fs.readFileSync(this._historyFilePath, 'utf-8')
+      const events = JSON.parse(data) as CommandEvent[]
+      if (!Array.isArray(events)) return
+      this._commandHistory.clear()
+      for (const e of events) {
+        if (!e || typeof e.sessionId !== 'string') continue
+        const hist = this._commandHistory.get(e.sessionId) || []
+        hist.push(e)
+        if (hist.length > 200) hist.shift()
+        this._commandHistory.set(e.sessionId, hist)
+      }
+    } catch {}
+  }
+
+  private _saveHistory() {
+    if (!this._historyFilePath) return
+    try {
+      const all: CommandEvent[] = []
+      for (const [, hist] of this._commandHistory) all.push(...hist)
+      if (all.length > 5000) all.splice(0, all.length - 5000)
+      fs.mkdirSync(path.dirname(this._historyFilePath), { recursive: true })
+      fs.writeFileSync(this._historyFilePath, JSON.stringify(all), 'utf-8')
+    } catch {}
+  }
+
+  private _scheduleHistorySave() {
+    if (!this._historyFilePath) return
+    if (this._historySaveTimer) clearTimeout(this._historySaveTimer)
+    this._historySaveTimer = setTimeout(() => {
+      this._historySaveTimer = null
+      this._saveHistory()
+    }, 1000)
+  }
+
   setOnCommandEvent(cb: (event: CommandEvent) => void) {
     this.onCommandEvent = cb
   }
@@ -116,6 +157,7 @@ export class OutputFilterService {
     if (hist.length > 200) hist.shift()
     this._commandHistory.set(event.sessionId, hist)
     this.onCommandEvent?.(event)
+    this._scheduleHistorySave()
   }
 
   private clearTimer(sessionId: string) {
@@ -476,26 +518,21 @@ export class OutputFilterService {
   }
 
   getAllStats(): { stats: { totalOriginalBytes: number; totalFilteredBytes: number; totalOriginalTokens: number; totalFilteredTokens: number; eventsProcessed: number } }[] {
+    // Command history (persisted + live) is the single source of truth for
+    // totals. Avoids double counting between _cumulativeStats and history.
     const sessionEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
-    const sessionStats = {
+    const stats = {
       totalOriginalBytes: sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0),
       totalFilteredBytes: sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0),
       totalOriginalTokens: sessionEvents.reduce((s, e) => s + e.originalTokens, 0),
       totalFilteredTokens: sessionEvents.reduce((s, e) => s + e.filteredTokens, 0),
       eventsProcessed: sessionEvents.length,
     }
-    const stats = {
-      totalOriginalBytes: this._cumulativeStats.totalOriginalBytes + sessionStats.totalOriginalBytes,
-      totalFilteredBytes: this._cumulativeStats.totalFilteredBytes + sessionStats.totalFilteredBytes,
-      totalOriginalTokens: this._cumulativeStats.totalOriginalTokens + sessionStats.totalOriginalTokens,
-      totalFilteredTokens: this._cumulativeStats.totalFilteredTokens + sessionStats.totalFilteredTokens,
-      eventsProcessed: this._cumulativeStats.eventsProcessed + sessionStats.eventsProcessed,
-    }
     return [{ stats }]
   }
 
   getCumulativeStats(): CumulativeStats {
-    return { ...this._cumulativeStats }
+    return this.getAllStats()[0].stats
   }
 
   getAllHistory(): any[] {
@@ -556,23 +593,16 @@ export class OutputFilterService {
   }
 
   cleanup(sessionId: string) {
-    const events = (this._commandHistory.get(sessionId) || []).filter(e => !e.command.startsWith('agntspce-search'))
-    if (events.length > 0) {
-      this._cumulativeStats.totalOriginalBytes += events.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0)
-      this._cumulativeStats.totalFilteredBytes += events.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0)
-      this._cumulativeStats.totalOriginalTokens += events.reduce((s, e) => s + e.originalTokens, 0)
-      this._cumulativeStats.totalFilteredTokens += events.reduce((s, e) => s + e.filteredTokens, 0)
-      this._cumulativeStats.eventsProcessed += events.length
-      this._saveCumulativeStats()
-    }
+    // Keep command history so per-session breakdowns survive session close
+    // and app restarts. Only clear transient per-session state.
     this.commandBuffers.delete(sessionId)
     this.outputAccum.delete(sessionId)
     this.lineBuffer.delete(sessionId)
     this._systemPartial.delete(sessionId)
     this.insideCommand.delete(sessionId)
     this.clearTimer(sessionId)
-    this._commandHistory.delete(sessionId)
     this._pendingStats.delete(sessionId)
+    this._scheduleHistorySave()
   }
 
   reset() {
@@ -585,20 +615,25 @@ export class OutputFilterService {
     this._pendingStats.clear()
     for (const [, t] of this.finalizeTimers) clearTimeout(t)
     this.finalizeTimers.clear()
+    if (this._historySaveTimer) {
+      clearTimeout(this._historySaveTimer)
+      this._historySaveTimer = null
+    }
+    this._saveHistory()
   }
 
   resetCumulativeStats() {
     this._cumulativeStats = { totalOriginalBytes: 0, totalFilteredBytes: 0, totalOriginalTokens: 0, totalFilteredTokens: 0, eventsProcessed: 0 }
     this._saveCumulativeStats()
+    this.reset()
   }
 
   persistCumulativeStats() {
-    const sessionEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
-    this._cumulativeStats.totalOriginalBytes += sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0)
-    this._cumulativeStats.totalFilteredBytes += sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0)
-    this._cumulativeStats.totalOriginalTokens += sessionEvents.reduce((s, e) => s + e.originalTokens, 0)
-    this._cumulativeStats.totalFilteredTokens += sessionEvents.reduce((s, e) => s + e.filteredTokens, 0)
-    this._cumulativeStats.eventsProcessed += sessionEvents.length
-    this._saveCumulativeStats()
+    // Command history is the source of truth; flush any pending history save.
+    if (this._historySaveTimer) {
+      clearTimeout(this._historySaveTimer)
+      this._historySaveTimer = null
+      this._saveHistory()
+    }
   }
 }
