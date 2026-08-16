@@ -176,13 +176,13 @@ describe('AgentManager', () => {
     })
 
     it('rejects unknown agent', () => {
-      const result = manager.validateConfig({ agentId: 'nope', mode: 'fresh' })
+      const result = manager.validateConfig({ agentId: 'nope', mode: 'fresh', flags: [] })
       expect(result.valid).toBe(false)
       expect(result.error).toContain('Unknown agent')
     })
 
     it('rejects unknown mode', () => {
-      const result = manager.validateConfig({ agentId: 'claude', mode: 'nope' })
+      const result = manager.validateConfig({ agentId: 'claude', mode: 'nope', flags: [] })
       expect(result.valid).toBe(false)
       expect(result.error).toContain("Unknown mode 'nope'")
     })

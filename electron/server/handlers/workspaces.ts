@@ -99,7 +99,7 @@ export function registerWorkspaceHandlers(ctx: ServerContext, socket: Socket): v
       const worktreeId = (ws.worktrees?.namingPattern || 'work{n}').replace('{n}', String(nextIndex))
       const path = await ctx.worktreeHelper.createWorktree(ws, worktreeId)
       await ctx.workspaceManager.updateWorkspace(workspaceId, {
-        worktrees: { ...ws.worktrees, enabled: true, count: nextIndex, autoCreate: true },
+        worktrees: { ...ws.worktrees, enabled: true, count: nextIndex, autoCreate: true, namingPattern: ws.worktrees?.namingPattern || 'work{n}' },
       })
       if (callback) callback({ ok: true, worktree: { id: worktreeId, path } })
     } catch (error: any) {

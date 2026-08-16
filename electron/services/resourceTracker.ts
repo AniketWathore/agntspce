@@ -1,4 +1,7 @@
-import { execFile } from 'child_process'
+import { execFile as execFileCb } from 'child_process'
+import { promisify } from 'util'
+
+const execFile = promisify(execFileCb)
 
 export interface SessionResourceUsage {
   sessionId: string

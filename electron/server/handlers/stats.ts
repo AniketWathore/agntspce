@@ -40,22 +40,21 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
 
   socket.on('reset-filter-stats', () => {
     ctx.sessionManager.outputFilter.reset()
-    ctx.sessionManager.clearAllExecutions()
   })
 
   socket.on('get-command-filter-history', ({ sessionId }: { sessionId?: string }, callback?: Function) => {
     if (sessionId) {
       const history = ctx.sessionManager.outputFilter.getCommandHistory(sessionId)
-      if (callback) callback({ ok: true, history })
+      if (callback) callback?.({ ok: true, history })
     } else {
       const allHistory = ctx.sessionManager.outputFilter.getAllCommandHistory()
-      if (callback) callback({ ok: true, history: allHistory })
+      if (callback) callback?.({ ok: true, history: allHistory })
     }
   })
 
   socket.on('get-orchestrator-stats', async (_data: any, callback?: Function) => {
     try {
-      callback({
+      callback?.({
         ok: true,
         concurrency: ctx.agentOrchestrator.getConcurrencyLoad(),
         sessionCount: ctx.agentOrchestrator.getSessionCount(),
@@ -64,24 +63,24 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
         orchestration: ctx.agentOrchestrator.getOrchestrationStats(),
       })
     } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+      if (callback) callback?.({ ok: false, error: error.message })
     }
   })
 
   socket.on('get-session-usage', async ({ sessionId }: { sessionId: string }, callback?: Function) => {
     try {
       const usage = ctx.agentOrchestrator.getResourceUsage(sessionId)
-      callback({ ok: true, usage })
+      callback?.({ ok: true, usage })
     } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+      if (callback) callback?.({ ok: false, error: error.message })
     }
   })
 
   socket.on('get-session-history', async (_data: any, callback?: Function) => {
     try {
-      callback({ ok: true, history: ctx.sessionManager.getSessionHistory() })
+      callback?.({ ok: true, history: ctx.sessionManager.getSessionHistory() })
     } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+      if (callback) callback?.({ ok: false, error: error.message })
     }
   })
 
@@ -89,12 +88,12 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
     try {
       const all = ctx.sessionManager.tokenUsageTracker.getAllUsage()
       if (sessionId) {
-        callback({ ok: true, usage: ctx.sessionManager.tokenUsageTracker.getUsage(sessionId) })
+        callback?.({ ok: true, usage: ctx.sessionManager.tokenUsageTracker.getUsage(sessionId) })
       } else {
-        callback({ ok: true, usage: all, totalTokens: all.reduce((s: number, u: any) => s + u.totalTokens, 0), totalCost: all.reduce((s: number, u: any) => s + u.estimatedCost, 0) })
+        callback?.({ ok: true, usage: all, totalTokens: all.reduce((s: number, u: any) => s + u.totalTokens, 0), totalCost: all.reduce((s: number, u: any) => s + u.estimatedCost, 0) })
       }
     } catch (error: any) {
-      if (callback) callback({ ok: false, error: error.message })
+      if (callback) callback?.({ ok: false, error: error.message })
     }
   })
 }

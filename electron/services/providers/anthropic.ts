@@ -70,7 +70,7 @@ export class AnthropicProvider implements AIProvider {
       model: client.chat(model || this.model),
       messages: chatMessages,
       ...(sysMsg ? { system: sysMsg.content } : {}),
-      maxTokens: 4096,
+      maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
     })
@@ -96,7 +96,7 @@ export class AnthropicProvider implements AIProvider {
       model: client.chat(model || this.model),
       messages: chatMessages,
       ...(sysMsg ? { system: sysMsg.content } : {}),
-      maxTokens: 4096,
+      maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
     })

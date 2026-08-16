@@ -54,7 +54,7 @@ export class GitHelper {
     })
   }
 
-  private getPathState(worktreePath: string | undefined | null): { ok: boolean; reason: string; normalized: string } {
+  private getPathState(worktreePath: string | undefined | null): { ok: boolean; reason: string | null; normalized: string } {
     const raw = String(worktreePath || '').trim()
     if (!raw) return { ok: false, reason: 'empty', normalized: '' }
     let normalized = raw
@@ -418,7 +418,7 @@ export class GitHelper {
 
   async commit(worktreePath: string, message: string): Promise<{ ok: boolean; hash?: string; error?: string }> {
     const state = this.getPathState(worktreePath)
-    if (!state.ok) return { ok: false, error: state.reason }
+    if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout } = await this.execGit(['commit', '-m', message], { cwd: state.normalized, timeout: 15000 })
       const match = stdout.match(/\[[\w-]+ ([a-f0-9]+)\]/)
@@ -430,7 +430,7 @@ export class GitHelper {
 
   async pull(worktreePath: string): Promise<{ ok: boolean; output?: string; error?: string }> {
     const state = this.getPathState(worktreePath)
-    if (!state.ok) return { ok: false, error: state.reason }
+    if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout, stderr } = await this.execGit(['pull'], { cwd: state.normalized, timeout: 60000 })
       return { ok: true, output: stdout + stderr }
@@ -441,7 +441,7 @@ export class GitHelper {
 
   async push(worktreePath: string): Promise<{ ok: boolean; output?: string; error?: string }> {
     const state = this.getPathState(worktreePath)
-    if (!state.ok) return { ok: false, error: state.reason }
+    if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout, stderr } = await this.execGit(['push'], { cwd: state.normalized, timeout: 60000 })
       return { ok: true, output: stdout + stderr }
@@ -452,7 +452,7 @@ export class GitHelper {
 
   async fetch(worktreePath: string): Promise<{ ok: boolean; output?: string; error?: string }> {
     const state = this.getPathState(worktreePath)
-    if (!state.ok) return { ok: false, error: state.reason }
+    if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout, stderr } = await this.execGit(['fetch'], { cwd: state.normalized, timeout: 60000 })
       return { ok: true, output: stdout + stderr }

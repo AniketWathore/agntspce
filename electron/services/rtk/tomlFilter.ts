@@ -15,6 +15,8 @@ export interface FilterDefinition {
   description?: string
   matchCommand: string
   stripAnsi?: boolean
+  stripEmpty?: boolean
+  collapseEmpty?: boolean
   replace?: ReplaceRule[]
   matchOutput?: MatchOutputRule[]
   stripLinesMatching?: string[]
@@ -31,6 +33,8 @@ export interface CompiledFilter {
   description?: string
   matchRegex: RegExp
   stripAnsi: boolean
+  stripEmpty?: boolean
+  collapseEmpty?: boolean
   replace: CompiledReplaceRule[]
   matchOutput: CompiledMatchOutputRule[]
   lineFilter: LineFilter
@@ -136,9 +140,11 @@ export function applyFilter(filter: CompiledFilter, stdout: string): string {
   }
 
   if (filter.lineFilter.type === 'strip') {
-    lines = lines.filter(line => !filter.lineFilter!.patterns.some(p => p.test(line)))
+    const patterns = filter.lineFilter.patterns
+    lines = lines.filter(line => !patterns.some(p => p.test(line)))
   } else if (filter.lineFilter.type === 'keep') {
-    lines = lines.filter(line => filter.lineFilter!.patterns.some(p => p.test(line)))
+    const patterns = filter.lineFilter.patterns
+    lines = lines.filter(line => patterns.some(p => p.test(line)))
   }
 
   if (filter.stripEmpty) {

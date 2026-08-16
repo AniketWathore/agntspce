@@ -104,7 +104,7 @@ export function rebuildMenu() {
             { label: 'Cut', accelerator: 'Cmd+X', role: 'cut' as const },
             { label: 'Copy', accelerator: 'Cmd+C', role: 'copy' as const },
             { label: 'Paste', accelerator: 'Cmd+V', role: 'paste' as const },
-            { label: 'Select All', click: (item, focusedWindow) => focusedWindow?.webContents.selectAll() },
+            { label: 'Select All', click: (item, focusedWindow) => (focusedWindow as BrowserWindow | undefined)?.webContents.selectAll() },
             { type: 'separator' as const },
             { label: 'Auto Fill', click: () => {} },
           ],
@@ -251,10 +251,10 @@ export function rebuildMenu() {
             // No accelerators on clipboard items — the implicit accelerators
             // from role would intercept Ctrl+C/V/A before xterm.js's textarea
             // can handle them, breaking terminal copy/paste.
-            { label: 'Cut', click: (item, focusedWindow) => focusedWindow?.webContents.cut() },
-            { label: 'Copy', click: (item, focusedWindow) => focusedWindow?.webContents.copy() },
-            { label: 'Paste', click: (item, focusedWindow) => focusedWindow?.webContents.paste() },
-            { label: 'Select All', click: (item, focusedWindow) => focusedWindow?.webContents.selectAll() },
+            { label: 'Cut', click: (item, focusedWindow) => (focusedWindow as BrowserWindow | undefined)?.webContents.cut() },
+            { label: 'Copy', click: (item, focusedWindow) => (focusedWindow as BrowserWindow | undefined)?.webContents.copy() },
+            { label: 'Paste', click: (item, focusedWindow) => (focusedWindow as BrowserWindow | undefined)?.webContents.paste() },
+            { label: 'Select All', click: (item, focusedWindow) => (focusedWindow as BrowserWindow | undefined)?.webContents.selectAll() },
             { type: 'separator' as const },
           ],
         },
@@ -417,7 +417,7 @@ export function registerIpcHandlers(rebuildMenuFn: () => void) {
         const opts: Electron.MenuItemConstructorOptions = {
           label: i.label,
           type: i.type,
-          accelerator: i.accelerator,
+          accelerator: i.accelerator ?? undefined,
           enabled: i.enabled,
           visible: i.visible,
           checked: i.checked,

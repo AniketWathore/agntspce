@@ -57,7 +57,7 @@ export class DeepSeekProvider implements AIProvider {
     const result = streamText({
       model: client.chat(model || this.model),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
-      maxTokens: 4096,
+      maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
     })
@@ -81,7 +81,7 @@ export class DeepSeekProvider implements AIProvider {
     const result = streamText({
       model: client.chat(model || this.model),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
-      maxTokens: 4096,
+      maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
     })

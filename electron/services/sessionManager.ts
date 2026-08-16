@@ -249,7 +249,7 @@ export class SessionManager extends EventEmitter {
     } else if (repository && wtConfig?.enabled) {
       const pairs = terminals?.pairs || 1
       for (let i = 1; i <= pairs; i++) {
-        const wtId = wtConfig.namingPattern.replace('{n}', i)
+        const wtId = wtConfig.namingPattern.replace('{n}', String(i))
         this.worktrees.push({ id: wtId, path: path.join(repository.path, wtId) })
       }
     }

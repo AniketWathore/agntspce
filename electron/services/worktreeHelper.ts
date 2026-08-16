@@ -76,7 +76,7 @@ export class WorktreeHelper {
     const created: string[] = []
     for (let i = 1; i <= (workspace.terminals?.pairs || 1); i++) {
       const worktreeId = `work${i}`
-      const worktreeName = workspace.worktrees.namingPattern.replace('{n}', i)
+      const worktreeName = workspace.worktrees.namingPattern.replace('{n}', String(i))
       const worktreePath = path.join(workspace.repository.path, worktreeName)
       try {
         await fs.access(worktreePath)

@@ -69,6 +69,7 @@ describe('SessionManager (orchestration logic)', () => {
     it('dedupes identical terminal worktree keys', () => {
       const workspace: Workspace = {
         id: 'ws1',
+        name: 'test',
         workspaceType: 'mixed-repo',
         terminals: [
           { terminalType: 'claude', worktree: 'main', repository: { name: 'repo', path: '/repo', type: 'git' }, worktreePath: '/repo/main' },
@@ -82,6 +83,7 @@ describe('SessionManager (orchestration logic)', () => {
     it('falls back to wtConfig pairs when no terminals array', () => {
       const workspace: Workspace = {
         id: 'ws1',
+        name: 'test',
         workspaceType: 'single-repo',
         repository: { path: '/repo', type: 'git' },
         worktrees: { enabled: true, count: 2, namingPattern: 'wt-{n}', autoCreate: true },
@@ -96,6 +98,7 @@ describe('SessionManager (orchestration logic)', () => {
     it('does not generate wtConfig worktrees when disabled', () => {
       const workspace: Workspace = {
         id: 'ws1',
+        name: 'test',
         workspaceType: 'single-repo',
         repository: { path: '/repo', type: 'git' },
         worktrees: { enabled: false, count: 2, namingPattern: 'wt-{n}', autoCreate: true },
@@ -120,7 +123,7 @@ describe('SessionManager (orchestration logic)', () => {
     })
 
     it('switchWorkspacePreservingSessions reuses session map for same id', async () => {
-      const ws: Workspace = { id: 'ws1', workspaceType: 'single-repo' }
+      const ws: Workspace = { id: 'ws1', name: 'test', workspaceType: 'single-repo' }
       sm.setWorkspace(ws)
       sm.sessions.set('s1', makeFakeSession())
       const result = await sm.switchWorkspacePreservingSessions(ws)
@@ -128,8 +131,8 @@ describe('SessionManager (orchestration logic)', () => {
     })
 
     it('restores sessions from previous workspace map', async () => {
-      const ws1: Workspace = { id: 'ws1', workspaceType: 'single-repo' }
-      const ws2: Workspace = { id: 'ws2', workspaceType: 'single-repo' }
+      const ws1: Workspace = { id: 'ws1', name: 'test', workspaceType: 'single-repo' }
+      const ws2: Workspace = { id: 'ws2', name: 'test', workspaceType: 'single-repo' }
       sm.setWorkspace(ws1)
       sm.sessions.set('s1', makeFakeSession({ id: 's1' }))
       const result = await sm.switchWorkspacePreservingSessions(ws2)

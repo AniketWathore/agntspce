@@ -38,17 +38,12 @@ electron/services/
   outputCompressor.ts         — Token usage tracking and compression stats
   outputFilter.ts             — Command output filtering pipeline
   cavemanService.ts           — "Caveman" panel service
-  rtkBridge.ts                — Bridge between RTK system and session manager
-  rtk/                        — Real-Time Kernel: output filtering, command detection, tracking
-    index.ts                  — RTK entry: registry, tracker, command detection, filter application
-    tee.ts, stream.ts         — Output stream splitting and streaming
-    runner.ts, guard.ts       — Command execution and safety guards
-    tracking.ts               — Command/execution event tracking and stats
+  rtk/                        — Real-Time Kernel: output filtering and token reduction
+    index.ts                  — RTK entry: FilterRegistry, filter application
     tomlFilter.ts             — TOML-based filter definition and compilation
-    codeFilter.ts             — Code-block-aware output filtering
     filters.ts                — Built-in filter definitions
     formatter.ts              — Output formatting utilities
-    constants.ts, utils.ts    — Shared constants and utilities
+    utils.ts                  — ANSI stripping, truncation, token estimation
   providers/
     anthropic.ts, openai.ts   — AI SDK provider wrappers for chat (using @ai-sdk/* packages)
     gemini.ts, deepseek.ts
@@ -65,7 +60,6 @@ src/App.tsx                    — Root: 3-pane resizable layout, socket wiring,
 src/App.css                    — All app styles (~780 lines)
 src/hooks/useSocket.ts         — Socket.IO connection + event listeners + cleanup
 src/types/index.ts             — Frontend TypeScript types + Window.electronAPI declarations
-src/utils/stripAnsi.ts         — ANSI escape sequence stripping
 src/utils/fileIcons.ts         — File icon mapping by extension
 src/components/
   Header.tsx                   — Top bar: +Agent, +Workspace, Shell toggle
@@ -95,7 +89,6 @@ src/components/
   EditorTabs.tsx               — Editor tab management
   HistoryPanel.tsx             — Session history
   PRPanel.tsx                  — PR listing for workspace repos
-  Profile.tsx                  — User profile panel
   Settings.tsx                 — User settings panel
   NotificationPanel.tsx        — Notification slide-out
   ActivityFeed.tsx             — Activity event feed
@@ -121,13 +114,12 @@ Socket events: `terminal-input`, `terminal-output`, `create-raw-session`, `start
 
 ## RTK (Real-Time Kernel) System
 
-The RTK subsystem detects commands typed in terminals, captures their output, applies per-command output filters, and reports token reduction stats. Key flow:
+The RTK subsystem filters terminal output per-command to reduce token usage. Key flow:
 
-1. PTY output is tee'd into a stream
-2. `detectCommand()` identifies when a command is entered (terminals send `\r` for Enter, not `\n`)
-3. The appropriate filter is selected from the `FilterRegistry` (TOML-defined filters + built-ins from `filters.ts`)
-4. Filtered output, original output, token counts, and reduction percentage are emitted as `CommandEvent`
-5. `Tracker` aggregates stats across commands and execution events
+1. `OutputFilterService` (in `electron/services/outputFilter.ts`) identifies commands as terminal input arrives
+2. `filterCommandOutput()` selects a filter from the `FilterRegistry` (TOML-defined filters + built-ins from `filters.ts`)
+3. Filtered output, original output, and token counts are emitted as `CommandEvent`
+4. `outputCompressor.ts` aggregates compression/token stats
 
 ## Agent Management
 

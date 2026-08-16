@@ -147,15 +147,6 @@ export function getAllAgentBinaryDirs(): string[] {
   return Array.from(dirs)
 }
 
-export function getAllAgentPaths(): Record<string, string | null> {
-  resolveAllAgents()
-  const result: Record<string, string | null> = {}
-  for (const cmdName of Object.values(AGENT_COMMANDS)) {
-    result[cmdName] = RESOLVED_PATHS.get(cmdName) || null
-  }
-  return result
-}
-
 export function getLoginPath(): string {
   return _loginShellPath || resolveLoginShellPath()
 }
@@ -174,9 +165,4 @@ export function checkAgentsInstalled(agentIds: string[]): Record<string, boolean
     result[id] = RESOLVED_PATHS.get(cmdName) !== null
   }
   return result
-}
-
-export function resetCache(): void {
-  RESOLVED_PATHS.clear()
-  _loginShellPath = null
 }

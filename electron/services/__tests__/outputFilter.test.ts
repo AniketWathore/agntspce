@@ -258,10 +258,8 @@ describe('OutputFilterService', () => {
 
     afterEach(() => {
       if (persisted) {
-        if (persisted['_historySaveTimer' as keyof OutputFilterService]) {
-          const t = persisted['_historySaveTimer' as keyof OutputFilterService] as ReturnType<typeof setTimeout>
-          clearTimeout(t)
-        }
+        const t = (persisted as any)['_historySaveTimer']
+        clearTimeout(t)
       }
       fs.rmSync(dir, { recursive: true, force: true })
     })
