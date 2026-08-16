@@ -359,8 +359,11 @@ function cmdRun(args) {
   const binary = resolveBinary(normalizedArgs[0] || args[0])
 
   // Emit command marker so OutputFilterService can detect and track this command.
-  // Write to stdout so the user can see it in the terminal output.
-  process.stdout.write(`agntspce $ ${displayStr}\n`)
+  // Write to stderr, not stdout: node-pty merges both streams into the same
+  // onData stream, so OutputFilterService still sees the marker, but programs
+  // that capture stdout (e.g. opencode's internal `git rev-parse` calls that go
+  // through the bin/git wrapper) receive clean output.
+  process.stderr.write(`agntspce $ ${displayStr}\n`)
 
   const result = spawnSync(binary, args.slice(1), {
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -421,7 +424,7 @@ function cmdRun(args) {
   // the accumulated output or terminal display.
   const rawTokens = estimateTokens(raw)
   const filteredTokens = estimateTokens(filtered)
-  process.stdout.write(`\x1b[2K\rAGNTSPCE_STATS raw=${rawTokens} filtered=${filteredTokens}\n`)
+  process.stderr.write(`\x1b[2K\rAGNTSPCE_STATS raw=${rawTokens} filtered=${filteredTokens}\n`)
   if (filtered) {
     process.stdout.write(filtered + '\n')
   }

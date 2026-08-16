@@ -28,6 +28,10 @@ let AGNTSPCE_BIN_DIR = ''
 for (const dir of [
   path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bin'),
   path.resolve(process.resourcesPath || '', 'bin'),
+  // Dev: bundle lives at dist-electron/main.js, so __dirname = dist-electron.
+  // One level up is the project root, then bin/. (../.. would resolve to the
+  // parent of the project root and miss the repo's bin directory.)
+  path.resolve(__dirname, '..', 'bin'),
   path.resolve(__dirname, '..', '..', 'bin'),
 ]) {
   if (fs.existsSync(dir) && fs.existsSync(path.join(dir, 'agntspce'))) {
