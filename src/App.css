@@ -1343,9 +1343,15 @@
   color: #6E6E6E;
 }
 
-/* The agent section is completely hidden while a file is open. */
+/* The agent terminal section is completely hidden while a file is open.
+   Only the bottom shell panel (rendered by TerminalArea in shellOnly
+   mode) is shown, anchored to the bottom of the file viewer. */
 .main-content.file-viewer > .terminal-area-wrapper {
-  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
 }
 
 .main-content.file-viewer > .terminal-resizer {

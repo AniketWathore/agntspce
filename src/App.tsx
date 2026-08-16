@@ -860,6 +860,7 @@ function App() {
   const selectFile = useCallback(async (filePath: string) => {
     setSelectedFilePath(filePath)
     setViewMode('files')
+    setActiveView(null)
     const absPath = wsPath ? wsPath.replace(/\\/g, '/') + '/' + filePath : filePath
 
     const existingFile = openFiles.find(f => f.filePath === filePath)
@@ -1146,9 +1147,6 @@ function App() {
                 </div>
               )}
             </div>
-          )}
-          {(viewMode === 'files' || openFiles.some(f => f.isDiff)) && (!activeView || activeView === 'git-review') && bottomShellOpen && (
-            <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
           )}
           <TerminalArea
             sessions={agentSessions}

@@ -529,6 +529,80 @@ export default function TerminalArea({
   const sessionIds = filteredSessions.map(s => s.id)
   const tilingStyle = getTilingStyle(filteredSessions.length, paneSizes, sessionIds)
 
+  if (shellOnly) {
+    return (
+      <div
+        className="terminal-area-wrapper"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 5,
+          height: activePage || terminalFullscreen ? '100%' : bottomShellOpen ? `${terminalHeight}%` : 0,
+          overflow: 'hidden',
+        }}
+      >
+        <div className="bottom-shell" style={{ flex: 1, height: '100%' }}>
+          {onTerminalResizerMouseDown && bottomShellOpen && (
+            <div className="terminal-resizer" onMouseDown={onTerminalResizerMouseDown} />
+          )}
+          <div className="bottom-shell-body" style={{ display: bottomShellOpen ? 'flex' : 'none' }}>
+            <div className="bottom-shell-terminal-area">
+              {shellSessions.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 12 }}>
+                  No shell terminals
+                </div>
+              ) : (
+                shellSessions.map(s => (
+                  <ShellTerminal
+                    key={s.id}
+                    session={s}
+                    onInput={onInput}
+                    onResize={onResize}
+                    writeData={writeBuffersRef.current[s.id] || ''}
+                    hidden={s.id !== activeShellId}
+                    onTerminalOutput={onTerminalOutput}
+                  />
+                ))
+              )}
+            </div>
+            <ShellTabList
+              shells={shellSessions}
+              activeShellId={activeShellId}
+              onSelect={setActiveShellId}
+              onClose={handleShellClose}
+              header={
+                <div className="shell-tab-list-header">
+                  <div className="shell-tab-list-header-actions">
+                    <button className="shell-header-btn" onClick={() => onNewShell()} title="New terminal">+</button>
+                    <button className={`shell-header-btn ${terminalFullscreen ? 'active' : ''}`} onClick={() => setTerminalFullscreen(o => !o)} title={terminalFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+                      {terminalFullscreen ? '⊠' : '⊡'}
+                    </button>
+                    <button className="shell-header-btn" onClick={onToggleShell} title="Close terminal panel">✕</button>
+                  </div>
+                </div>
+              }
+            />
+          </div>
+        </div>
+        {activePage && (
+          <div className="terminal-area-page-content" style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 10,
+            background: 'var(--bg-primary)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            {activePage.render()}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={`terminal-area-wrapper${terminalFullscreen ? ' fullscreen' : ''}`} style={{ position: 'relative' }}>
       {/* Terminal content — always mounted, never unmounted */}
