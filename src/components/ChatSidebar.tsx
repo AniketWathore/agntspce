@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import useSocketEvent from '../hooks/useSocketEvent'
 import type { ChatMessage, ChatModelInfo, ChatThread, StreamChunk } from '../types'
 
@@ -48,6 +48,11 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   const [showHistory, setShowHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
+  // Virtualized list state: render only the visible slice of messages.
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportH, setViewportH] = useState(0)
+  const [measuredHeights, setMeasuredHeights] = useState<number[]>([])
 
   const configured = providers.filter(p => p.configured && p.hasKey)
   const anyConfigured = configured.length > 0
@@ -86,8 +91,26 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   }, [socket, threadId, threads])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Only auto-scroll to bottom when the user is already near the bottom,
+    // so scrolling up through history isn't yanked back down on new output.
+    const el = messagesScrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom < 80) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages, streaming])
+
+  useEffect(() => {
+    const el = messagesScrollRef.current
+    if (!el) return
+    setViewportH(el.clientHeight)
+    const ro = new ResizeObserver(() => {
+      setViewportH(el.clientHeight)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loading, anyConfigured, threadId])
 
   useEffect(() => {
     if (selectedProvider) {
@@ -293,8 +316,8 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     }
   }
 
-  const renderMessage = (msg: ChatMessage, i: number) => (
-    <div key={msg.id || i} className={`chat-msg ${msg.role}${msg.error ? ' chat-msg-error' : ''}`}>
+  const renderMessage = (msg: ChatMessage, i: number, measureRefCallback?: (el: HTMLDivElement | null) => void) => (
+    <div key={msg.id || i} ref={measureRefCallback} className={`chat-msg ${msg.role}${msg.error ? ' chat-msg-error' : ''}`}>
       <div className="chat-msg-avatar">
         <i className={`codicon ${msg.role === 'assistant' ? 'codicon-robot' : 'codicon-person'}`} style={{ fontSize: 14 }}></i>
       </div>
@@ -310,6 +333,53 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
       </div>
     </div>
   )
+
+  // Virtualization: compute which messages to render based on scroll position.
+  // Uses measured heights (updated via onScroll observer) with a fallback
+  // estimate so only the visible slice is mounted in the DOM.
+  const ESTIMATED_ROW_HEIGHT = 48
+  const ROW_GAP = 12
+  const OVERSCAN = 300
+  const measureRef = (index: number) => (el: HTMLDivElement | null) => {
+    if (!el) return
+    const h = el.getBoundingClientRect().height + ROW_GAP
+    if (Math.abs(h - (measuredHeights[index] || 0)) > 1) {
+      setMeasuredHeights(prev => {
+        const next = [...prev]
+        next[index] = h
+        return next
+      })
+    }
+  }
+  const offsets = useMemo(() => {
+    const arr: number[] = new Array(messages.length + 1)
+    arr[0] = 0
+    for (let i = 0; i < messages.length; i++) {
+      const h = measuredHeights[i] || ESTIMATED_ROW_HEIGHT + ROW_GAP
+      arr[i + 1] = arr[i] + h
+    }
+    return arr
+  }, [messages.length, measuredHeights])
+  const totalHeight = offsets[offsets.length - 1] || 0
+  let startIdx = 0
+  let endIdx = messages.length
+  if (messages.length > 0) {
+    const top = scrollTop - OVERSCAN
+    const bottom = scrollTop + viewportH + OVERSCAN
+    let lo = 0, hi = messages.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (offsets[mid] < top) lo = mid + 1
+      else hi = mid
+    }
+    startIdx = Math.max(0, lo)
+    let e = startIdx
+    while (e < messages.length && offsets[e + 1] < bottom) e++
+    endIdx = Math.min(messages.length, e + 1)
+  }
+  const visibleMessages = startIdx < endIdx ? messages.slice(startIdx, endIdx) : []
+  const topPad = offsets[startIdx] || 0
+  const bottomPad = totalHeight - (offsets[endIdx] || 0)
 
   return (
     <aside className="chat-sidebar">
@@ -409,7 +479,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
             </select>
           </div>
 
-          <div className="chat-messages">
+          <div className="chat-messages" ref={messagesScrollRef} onScroll={(e) => { setScrollTop(e.currentTarget.scrollTop); setViewportH(e.currentTarget.clientHeight) }}>
             {messages.length > 0 && (
               <div className="chat-messages-toolbar">
                 <button className="chat-clear-btn" onClick={clearThread} disabled={streaming}>
@@ -428,7 +498,13 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
                 </div>
               </div>
             ) : (
-              messages.map(renderMessage)
+              <>
+                <div style={{ height: topPad, flexShrink: 0 }} />
+                {visibleMessages.map((msg, idx) =>
+                  renderMessage(msg, startIdx + idx, measureRef(startIdx + idx))
+                )}
+                <div style={{ height: bottomPad, flexShrink: 0 }} />
+              </>
             )}
             <div ref={messagesEndRef} />
           </div>

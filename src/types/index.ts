@@ -34,6 +34,7 @@ export interface SessionState {
   branch: string
   lastActivity: number
   sessionGroupId?: string
+  restorable?: boolean
 }
 
 export interface TerminalOutput {

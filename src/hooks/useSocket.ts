@@ -45,6 +45,7 @@ interface UseSocketReturn {
   sendTerminalInput: (sessionId: string, data: string) => void
   sendTerminalResize: (sessionId: string, cols: number, rows: number) => void
   restartSession: (sessionId: string) => void
+  resumeSession: (sessionId: string) => void
   switchWorkspace: (workspaceId: string) => void
   createWorkspace: (data: any) => Promise<any>
   deleteWorkspace: (workspaceId: string) => void
@@ -187,7 +188,7 @@ socket.emit('get-cumulative-stats', {})
 
     socket.on('terminal-output', (data: TerminalOutput) => {
       const cur = outputBuffer.current[data.sessionId] || ''
-      outputBuffer.current[data.sessionId] = cur + data.data
+      outputBuffer.current[data.sessionId] = (cur + data.data).slice(-65536)
       if (!outputTimer.current) {
         outputTimer.current = setTimeout(flushOutput, 30)
       }
@@ -237,6 +238,14 @@ socket.emit('get-cumulative-stats', {})
       })
     })
 
+    socket.on('session-resumed', ({ sessionId, sessions: newSessions }: { sessionId: string, sessions: Record<string, SessionState> }) => {
+      setSessions(prev => {
+        const session = newSessions[sessionId]
+        if (!session) return prev
+        return { ...prev, [sessionId]: session }
+      })
+    })
+
     socket.on('error', (err: any) => {
       console.error('[socket error]', err?.message || err)
     })
@@ -259,6 +268,7 @@ socket.emit('get-cumulative-stats', {})
         delete next[sessionId]
         return next
       })
+      delete outputBuffer.current[sessionId]
     })
 
     socket.on('session-unhealthy', (data: { sessionId: string, reason: string, usage?: any }) => {
@@ -273,13 +283,13 @@ socket.emit('get-cumulative-stats', {})
       totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
       eventsProcessed: prev.eventsProcessed + 1,
     }))
-    setFilterHistory(prev => [event, ...prev].slice(0, 500))
+    setFilterHistory(prev => [event, ...prev].slice(0, 200))
     filterEventCbs.current.forEach(cb => cb(event))
   })
 
   socket.on('command-filter-event', (event: CommandEvent) => {
     const isSearch = event.command.startsWith('agntspce-search')
-    setCommandHistory(prev => [event, ...prev].slice(0, 5000))
+    setCommandHistory(prev => [event, ...prev].slice(0, 500))
     if (isSearch) {
       setSearchEvents(prev => [event, ...prev].slice(0, 100))
     }
@@ -350,6 +360,10 @@ socket.emit('get-cumulative-stats', {})
 
   const restartSession = useCallback((sessionId: string) => {
     socketRef.current?.emit('restart-session', { sessionId })
+  }, [])
+
+  const resumeSession = useCallback((sessionId: string) => {
+    socketRef.current?.emit('resume-session', { sessionId })
   }, [])
 
   const switchWorkspace = useCallback((workspaceId: string) => {
@@ -844,6 +858,7 @@ socket.emit('get-cumulative-stats', {})
     sendTerminalInput,
     sendTerminalResize,
     restartSession,
+    resumeSession,
     switchWorkspace,
     createWorkspace,
     deleteWorkspace,

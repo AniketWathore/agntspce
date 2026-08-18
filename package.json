@@ -59,6 +59,10 @@
       "!bin/rtk.exe"
     ],
     "asarUnpack": [
+      "**/*.node",
+      "prebuilds/**",
+      "search/**",
+      "rtk/**",
       "bin/agntspce",
       "bin/agntspce.mjs",
       "bin/cargo",

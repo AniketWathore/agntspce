@@ -173,6 +173,7 @@ export class SessionManager extends EventEmitter {
   outputFilter: OutputFilterService
   cavemanService = new CavemanService()
   private contextWriter: ContextWriter | null = null
+  private lastStatusRefresh = new Map<string, number>()
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
@@ -648,7 +649,14 @@ export class SessionManager extends EventEmitter {
         } catch { }
         session.deliveredBufferLength = session.buffer.totalBytes
       }
-      this.refreshSessionStatus(sessionId)
+      // Status detection joins the full buffer and runs regexes — throttle it
+      // on the hot output path (processMonitor still refreshes every 5s).
+      const lastRefresh = this.lastStatusRefresh.get(sessionId) || 0
+      const now = Date.now()
+      if (now - lastRefresh >= 500) {
+        this.lastStatusRefresh.set(sessionId, now)
+        this.refreshSessionStatus(sessionId)
+      }
       this.updateSessionContext(sessionId, data)
     })
 
@@ -781,6 +789,7 @@ export class SessionManager extends EventEmitter {
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)
     this.statusDetector?.reset(sessionId)
+    this.lastStatusRefresh.delete(sessionId)
     return true
   }
 
@@ -842,6 +851,7 @@ export class SessionManager extends EventEmitter {
     if (!this.workspace?.id) return
     const snapshots = new Map<string, string>()
     for (const [id, s] of this.sessions) {
+      if (!s.pty || s.restorable) continue
       const buf = s.buffer.snapshot()
       if (buf) snapshots.set(id, buf)
     }
@@ -852,6 +862,7 @@ export class SessionManager extends EventEmitter {
     if (!this.workspace?.id) return
     const snapshots = new Map<string, string>()
     for (const [id, s] of this.sessions) {
+      if (!s.pty || s.restorable) continue
       const buf = s.buffer.snapshot()
       if (buf) snapshots.set(id, buf)
     }
@@ -901,23 +912,72 @@ export class SessionManager extends EventEmitter {
   }
 
   async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
-    const restorePromises: Promise<void>[] = []
+    // Lazy restore: register metadata-only placeholders (no PTY, no agent
+    // process). Real sessions are spawned on demand via resumeSession().
     for (const saved of sessions) {
       if (this.sessions.has(saved.id)) continue
-      const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
-      const result = await this.createRawSession(saved.type, cwd, saved.id)
-      if (result) {
-        if (saved.agentConfig) {
-          setTimeout(() => {
-            try {
-              this.startAgentWithConfig(result.sessionId, saved.agentConfig)
-            } catch {}
-          }, 300)
-        }
-        restorePromises.push(this.restoreSessionBuffer(result.sessionId))
+      this.registerRestorableSession(saved)
+    }
+  }
+
+  private registerRestorableSession(saved: SavedSessionData): void {
+    const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+    const session: Session = {
+      id: saved.id,
+      pty: null,
+      type: saved.type as any,
+      worktreeId: '',
+      repositoryName: '',
+      repositoryType: '',
+      status: 'idle',
+      branch: 'unknown',
+      buffer: new RingBuffer(),
+      deliveredBufferLength: 0,
+      lastActivity: Date.now(),
+      tokenUsage: 0,
+      config: {
+        command: getDefaultShell(),
+        args: buildShellArgs(`cd "${cwd}"`),
+        cwd,
+        type: saved.type,
+        worktreeId: '',
+        repositoryName: '',
+        repositoryType: '',
+      },
+      statusChangedAt: Date.now(),
+      pendingStatus: null,
+      pendingStatusTimer: null,
+      cwdState: { current: cwd, previous: null, stack: [] },
+      autoStarted: false,
+      claudeLaunchState: null,
+      restorable: true,
+      agentStartConfig: saved.agentConfig,
+      workspace: this.workspace?.id || null,
+    }
+    this.sessions.set(saved.id, session)
+  }
+
+  async resumeSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.pty || !session.restorable) return false
+
+    const savedType = session.type
+    const savedCwd = session.config?.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+    const savedAgentConfig = session.agentStartConfig
+
+    // Spawn the real PTY for this session id.
+    const result = await this.createRawSession(savedType, savedCwd, sessionId)
+    if (!result) return false
+
+    if (savedAgentConfig) {
+      try {
+        this.startAgentWithConfig(sessionId, savedAgentConfig)
+      } catch (e: any) {
+        console.error('resumeSession: agent start failed:', sessionId, e?.message || e)
       }
     }
-    await Promise.all(restorePromises)
+    await this.restoreSessionBuffer(sessionId)
+    return true
   }
 
   async createParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number, model?: string, reasoning?: string, verbosity?: string, declaredFiles?: string[] }): Promise<{ sessionIds: string[], groupId: string }> {
@@ -1122,6 +1182,7 @@ export class SessionManager extends EventEmitter {
         branch: s.branch,
         lastActivity: s.lastActivity,
         sessionGroupId: s.sessionGroupId,
+        restorable: !!s.restorable,
       }
     }
     return states

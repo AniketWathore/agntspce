@@ -209,6 +209,7 @@ export class CoordinatorError extends Error {
 export class StateManager {
   private db: Database.Database
   private workspaceRepoPath: string
+  private lastTouchAt = new Map<string, number>()
 
   constructor(dbPath: string, workspaceRepoPath: string) {
     this.db = new Database(dbPath)
@@ -665,6 +666,10 @@ export class StateManager {
   }
 
   touchSession(id: string, lastActivity: number = Date.now()): void {
+    // Called on every output chunk; throttle the sync DB write to once/sec per session.
+    const last = this.lastTouchAt.get(id) || 0
+    if (lastActivity - last < 1000) return
+    this.lastTouchAt.set(id, lastActivity)
     this.db.prepare('UPDATE sessions SET last_activity = ? WHERE id = ?').run(lastActivity, id)
   }
 

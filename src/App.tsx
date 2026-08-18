@@ -130,7 +130,7 @@ function App() {
   const {
     sessions, workspaces, activeWorkspace,
     onTerminalOutput, sendTerminalInput, sendTerminalResize,
-    restartSession, switchWorkspace, createWorkspace,
+    restartSession, resumeSession, switchWorkspace, createWorkspace,
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, fetchInstalledAgents, createRawSession, createAgentSession,
     createWorkspaceFromGit,
@@ -151,7 +151,7 @@ function App() {
     return orig - filt
   }, [executionHistory])
   const writeBuffersRef = useRef<Record<string, string>>({})
-  const MAX_BUFFER_BYTES = 65536
+  const MAX_BUFFER_BYTES = 16384
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [agentConfigs, setAgentConfigs] = useState<AgentConfig[]>([])
@@ -1154,6 +1154,7 @@ function App() {
             onInput={sendTerminalInput}
             onResize={sendTerminalResize}
             onRestart={restartSession}
+            onResumeSession={resumeSession}
             onStartAgent={handleStartAgent}
             onShowAgentModal={handleShowAgentModal}
             onNewAgent={() => {}}

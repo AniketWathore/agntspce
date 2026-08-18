@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, memo } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import StatusDot from './StatusDot'
@@ -13,6 +14,7 @@ interface Props {
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
   onRestart: (sessionId: string) => void
+  onResumeSession?: (sessionId: string) => void
   onStartAgent: (sessionId: string, config: AgentStartConfig) => void
   onShowAgentModal: (sessionId: string) => void
   onClose?: (sessionId: string) => void
@@ -29,12 +31,15 @@ interface Props {
   edgeHandles?: ('left' | 'right' | 'top' | 'bottom')[]
 }
 
-export default function TerminalPane({ session, onInput, onResize, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles }: Props) {
+export default memo(function TerminalPane(props: Props) {
+  const { session, onInput, onResize, onResumeSession, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles } = props
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
   const [showStartup, setShowStartup] = useState(false)
+  const onTerminalOutputRef = useRef(onTerminalOutput)
+  useEffect(() => { onTerminalOutputRef.current = onTerminalOutput })
 
   const isAgentType = session.type === 'claude' || session.type === 'codex' || session.type === 'opencode' || session.type === 'gemini'
   const shouldShowStartup = isAgentType && session.status === 'waiting' && showStartup
@@ -82,6 +87,9 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
 
   useEffect(() => {
     if (!terminalRef.current) return
+    // Restorable placeholders have no PTY — skip creating an xterm instance
+    // (saves GPU/memory for many saved-but-not-running sessions).
+    if (session.restorable) return
 
     const term = new Terminal({
       cursorBlink: true,
@@ -90,6 +98,7 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       theme: buildTheme(),
       allowTransparency: false,
+      scrollback: 200,
     })
 
     const fitAddon = new FitAddon()
@@ -97,6 +106,17 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
     fitAddonRef.current = fitAddon
 
     term.open(terminalRef.current)
+
+    // GPU-accelerated rendering: dramatically faster for large scrollback and
+    // multi-terminal layouts. Falls back to the default renderer on failure.
+    try {
+      const webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        try { webglAddon.dispose() } catch {}
+        try { term.loadAddon(new WebglAddon()) } catch {}
+      })
+      term.loadAddon(webglAddon)
+    } catch {}
 
     function doFit() {
       try { fitAddon.fit() } catch { }
@@ -152,9 +172,22 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
       })
     }
 
-    if (writeData) term.write(writeData)
+    if (writeData) {
+      // Clear scrollback before loading saved buffer
+      term.write('\x1b[3J')
+      // Chunk large buffers to avoid blocking the renderer thread
+      const chunkSize = 4096
+      let offset = 0
+      function loadChunk() {
+        const chunk = writeData.slice(offset, offset + chunkSize)
+        if (chunk) term.write(chunk)
+        offset += chunkSize
+        if (offset < writeData.length) requestAnimationFrame(loadChunk)
+      }
+      loadChunk()
+    }
 
-    const unsub = onTerminalOutput?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
+    const unsub = onTerminalOutputRef.current?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
       if (sid === session.id && termInstance.current) {
         termInstance.current.write(data)
       }
@@ -172,7 +205,7 @@ export default function TerminalPane({ session, onInput, onResize, onStartAgent,
       term.dispose()
       termInstance.current = null
     }
-  }, [session.id, onTerminalOutput])
+  }, [session.id, session.restorable])
 
   useEffect(() => {
     if (!fitAddonRef.current || !paneRef.current) return
@@ -264,6 +297,24 @@ function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.Mo
       </div>
       <div className="terminal-body">
         <div ref={terminalRef} className="terminal-instance" />
+        {session.restorable && (
+          <div className="terminal-resume-overlay">
+            <div className="terminal-resume-content">
+              <div className="terminal-resume-icon">
+                <i className="codicon codicon-history" style={{ fontSize: 28 }}></i>
+              </div>
+              <div className="terminal-resume-title">Session saved — not running</div>
+              <div className="terminal-resume-desc">Start this agent again to continue where it left off.</div>
+              <button
+                className="terminal-resume-btn"
+                onClick={(e) => { e.stopPropagation(); onResumeSession?.(session.id) }}
+              >
+                <i className="codicon codicon-play" style={{ fontSize: 12 }}></i>
+                Resume Session
+              </button>
+            </div>
+          </div>
+        )}
         {shouldShowStartup && (
           <div className="terminal-startup-overlay">
             <StartupUI
@@ -278,4 +329,18 @@ function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.Mo
       </div>
     </div>
   )
+}, areTerminalPanePropsEqual)
+
+// Custom memo comparator: volatile props (inline callbacks, fresh style objects,
+// writeData strings) change on every parent render and would defeat memo,
+// forcing ALL panes to re-render when any session updates. Only re-render when
+// the things that actually affect this pane change.
+function areTerminalPanePropsEqual(prev: Props, next: Props): boolean {
+  if (prev.session !== next.session) return false
+  if (prev.writeData !== next.writeData) return false
+  if (prev.dimmed !== next.dimmed) return false
+  if (prev.layoutMode !== next.layoutMode) return false
+  if (prev.agentConfigs !== next.agentConfigs) return false
+  if (prev.style?.flex !== next.style?.flex) return false
+  return true
 }

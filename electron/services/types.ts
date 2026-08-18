@@ -29,6 +29,7 @@ export interface Session {
   workspace?: string | null
   sessionGroupId?: string
   slotRelease?: (() => void) | null
+  restorable?: boolean
 }
 
 export interface SessionConfig {

@@ -63,6 +63,21 @@ export function registerSessionHandlers(ctx: ServerContext, socket: Socket): voi
     }
   })
 
+  socket.on('resume-session', async ({ sessionId }) => {
+    try {
+      const ok = await ctx.sessionManager.resumeSession(sessionId)
+      if (ok) {
+        const states = ctx.sessionManager.getSessionStates()
+        socket.emit('session-resumed', { sessionId, sessions: states })
+        await ctx.autoSaveSessions()
+      } else {
+        socket.emit('error', { message: 'Failed to resume session - session not restorable' })
+      }
+    } catch (error: any) {
+      socket.emit('error', { message: 'Failed to resume session', error: error.message })
+    }
+  })
+
   socket.on('close-tab', async ({ sessionIds }) => {
     try {
       const ids = Array.isArray(sessionIds) ? sessionIds : []
