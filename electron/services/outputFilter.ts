@@ -73,6 +73,7 @@ export class OutputFilterService {
   private _statsFilePath: string = ''
   private _historyFilePath: string = ''
   private _historySaveTimer: ReturnType<typeof setTimeout> | null = null
+  private _statsCache: { stats: { totalOriginalBytes: number; totalFilteredBytes: number; totalOriginalTokens: number; totalFilteredTokens: number; eventsProcessed: number } } | null = null
 
   constructor(dataDir?: string) {
     if (dataDir) {
@@ -120,6 +121,7 @@ export class OutputFilterService {
         if (hist.length > 200) hist.shift()
         this._commandHistory.set(e.sessionId, hist)
       }
+      this._statsCache = null
     } catch {}
   }
 
@@ -156,6 +158,7 @@ export class OutputFilterService {
     hist.push(event)
     if (hist.length > 200) hist.shift()
     this._commandHistory.set(event.sessionId, hist)
+    this._statsCache = null
     this.onCommandEvent?.(event)
     this._scheduleHistorySave()
   }
@@ -518,6 +521,7 @@ export class OutputFilterService {
   }
 
   getAllStats(): { stats: { totalOriginalBytes: number; totalFilteredBytes: number; totalOriginalTokens: number; totalFilteredTokens: number; eventsProcessed: number } }[] {
+    if (this._statsCache) return [{ stats: this._statsCache.stats }]
     // Command history (persisted + live) is the single source of truth for
     // totals. Avoids double counting between _cumulativeStats and history.
     const sessionEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
@@ -528,6 +532,7 @@ export class OutputFilterService {
       totalFilteredTokens: sessionEvents.reduce((s, e) => s + e.filteredTokens, 0),
       eventsProcessed: sessionEvents.length,
     }
+    this._statsCache = { stats }
     return [{ stats }]
   }
 

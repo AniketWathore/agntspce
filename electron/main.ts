@@ -110,6 +110,7 @@ app.on('will-quit', () => {
   const ctx = serverHandle?.ctx
   if (ctx) {
     ctx.agentOrchestrator.shutdownAll()
+    ctx.chatManager.flushThreads()
     const ws = ctx.sessionManager.getWorkspace()
     if (ws?.id) {
       const sessions = ctx.sessionManager.getSessionSaveData()

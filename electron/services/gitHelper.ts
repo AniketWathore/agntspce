@@ -39,6 +39,7 @@ export interface FullStatus {
 
 export class GitHelper {
   private branchCache = new Map<string, { branch: string; timestamp: number }>()
+  private fullStatusCache = new Map<string, { status: FullStatus | null; timestamp: number }>()
   private cacheTimeout = GIT_CACHE_TIMEOUT_MS
   private basePath: string
 
@@ -88,6 +89,13 @@ export class GitHelper {
 
   private setCachedBranch(p: string, branch: string): void {
     this.branchCache.set(p, { branch, timestamp: Date.now() })
+  }
+
+  private invalidateStatusCache(worktreePath: string): void {
+    const state = this.getPathState(worktreePath)
+    if (!state.ok) return
+    this.fullStatusCache.delete(state.normalized)
+    this.branchCache.delete(state.normalized)
   }
 
   async getCurrentBranch(worktreePath: string, skipCache = false): Promise<string> {
@@ -287,6 +295,13 @@ export class GitHelper {
     const state = this.getPathState(worktreePath)
     if (!state.ok) return null
 
+    // TTL cache: getFullStatus spawns up to 5 git subprocesses. The renderer
+    // polls every 5s even with no git view open, so dedupe within a window.
+    const cached = this.fullStatusCache.get(state.normalized)
+    if (cached && Date.now() - cached.timestamp < GIT_CACHE_TIMEOUT_MS) {
+      return cached.status
+    }
+
     try {
       const [branchOut, statusOut, stagedOut, unstagedOut] = await Promise.all([
         this.execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: state.normalized, timeout: 5000 }),
@@ -360,7 +375,7 @@ export class GitHelper {
         })
       }
 
-      return {
+      const result: FullStatus = {
         branch,
         ahead,
         behind,
@@ -368,6 +383,8 @@ export class GitHelper {
         clean: statusLines.length === 0,
         total: statusLines.length,
       }
+      this.fullStatusCache.set(state.normalized, { status: result, timestamp: Date.now() })
+      return result
     } catch { return null }
   }
 
@@ -376,6 +393,7 @@ export class GitHelper {
     if (!state.ok) return false
     try {
       await this.execGit(['checkout', '--', filePath], { cwd: state.normalized, timeout: 10000 })
+      this.invalidateStatusCache(state.normalized)
       return true
     } catch { return false }
   }
@@ -385,6 +403,7 @@ export class GitHelper {
     if (!state.ok) return false
     try {
       await this.execGit(['add', filePath], { cwd: state.normalized, timeout: 10000 })
+      this.invalidateStatusCache(state.normalized)
       return true
     } catch { return false }
   }
@@ -394,6 +413,7 @@ export class GitHelper {
     if (!state.ok) return false
     try {
       await this.execGit(['reset', 'HEAD', '--', filePath], { cwd: state.normalized, timeout: 10000 })
+      this.invalidateStatusCache(state.normalized)
       return true
     } catch { return false }
   }
@@ -403,6 +423,7 @@ export class GitHelper {
     if (!state.ok) return false
     try {
       await this.execGit(['add', '-A'], { cwd: state.normalized, timeout: 30000 })
+      this.invalidateStatusCache(state.normalized)
       return true
     } catch { return false }
   }
@@ -412,6 +433,7 @@ export class GitHelper {
     if (!state.ok) return false
     try {
       await this.execGit(['reset'], { cwd: state.normalized, timeout: 10000 })
+      this.invalidateStatusCache(state.normalized)
       return true
     } catch { return false }
   }
@@ -421,6 +443,7 @@ export class GitHelper {
     if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout } = await this.execGit(['commit', '-m', message], { cwd: state.normalized, timeout: 15000 })
+      this.invalidateStatusCache(state.normalized)
       const match = stdout.match(/\[[\w-]+ ([a-f0-9]+)\]/)
       return { ok: true, hash: match?.[1] }
     } catch (e: any) {
@@ -433,6 +456,7 @@ export class GitHelper {
     if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout, stderr } = await this.execGit(['pull'], { cwd: state.normalized, timeout: 60000 })
+      this.invalidateStatusCache(state.normalized)
       return { ok: true, output: stdout + stderr }
     } catch (e: any) {
       return { ok: false, error: e?.message || 'pull failed' }
@@ -444,6 +468,7 @@ export class GitHelper {
     if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout, stderr } = await this.execGit(['push'], { cwd: state.normalized, timeout: 60000 })
+      this.invalidateStatusCache(state.normalized)
       return { ok: true, output: stdout + stderr }
     } catch (e: any) {
       return { ok: false, error: e?.message || 'push failed' }
@@ -455,6 +480,7 @@ export class GitHelper {
     if (!state.ok) return { ok: false, error: state.reason || undefined }
     try {
       const { stdout, stderr } = await this.execGit(['fetch'], { cwd: state.normalized, timeout: 60000 })
+      this.invalidateStatusCache(state.normalized)
       return { ok: true, output: stdout + stderr }
     } catch (e: any) {
       return { ok: false, error: e?.message || 'fetch failed' }
@@ -467,15 +493,18 @@ export class GitHelper {
     try {
       await this.execGit(['checkout', '--', '.'], { cwd: state.normalized, timeout: 30000 })
       await this.execGit(['clean', '-fd'], { cwd: state.normalized, timeout: 30000 }).catch(() => {})
+      this.invalidateStatusCache(state.normalized)
       return true
     } catch { return false }
   }
 
   clearCacheForPath(p: string): void {
     this.branchCache.delete(p)
+    this.fullStatusCache.delete(p)
   }
 
   clearCache(): void {
     this.branchCache.clear()
+    this.fullStatusCache.clear()
   }
 }

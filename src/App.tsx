@@ -126,6 +126,9 @@ interface ModalState {
   onSubmit: (value: string) => void
 }
 
+const AGENT_TYPE_SET = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'kilocode', 'windsurf'])
+const NOOP = () => {}
+
 function App() {
   const {
     sessions, workspaces, activeWorkspace,
@@ -134,7 +137,7 @@ function App() {
     deleteWorkspace, listDeletedWorkspaces, restoreWorkspace, permanentDeleteWorkspace,
     closeTab, startAgent, fetchAgentConfigs, fetchInstalledAgents, createRawSession, createAgentSession,
     createWorkspaceFromGit,
-    getSessionHistory, getGitFileDiff, getGitLog, getGitBranches, getGitCommitFiles,
+    getGitFileDiff, getGitLog, getGitBranches, getGitCommitFiles,
     getGitFullStatus, gitStageFile, gitUnstageFile, gitCommit, gitPull, gitPush, gitFetch,
     setUserSettings, updateWorkspaceConfig, refreshWorkspaces,
     getWorkspaceTree, readFile, writeFile, createFile, createFolder, renameFile, deleteFile,
@@ -179,13 +182,15 @@ function App() {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
   const [fileContents, setFileContents] = useState<Record<string, string>>({})
   const [dirtyFiles, setDirtyFiles] = useState<Set<string>>(new Set())
+  const dirtyFilesRef = useRef<Set<string>>(new Set())
+  useEffect(() => { dirtyFilesRef.current = dirtyFiles }, [dirtyFiles])
   const [editorScrollPositions, setEditorScrollPositions] = useState<Record<string, { line: number; column: number }>>({})
+  const scrollPositionsRef = useRef<Record<string, { line: number; column: number }>>({})
   const [viewMode, setViewMode] = useState<'agents' | 'files'>('agents')
 
   const [agentPickerTrigger, setAgentPickerTrigger] = useState(0)
 
   const [notifications, setNotifications] = useState<Notification[]>([])
-  const [, setSessionHistory] = useState<any[]>([])
 
   const [fontSize, setFontSize] = useState(() => {
     try { return parseInt(localStorage.getItem('agent-workspace-font-size') || '16') } catch { return 16 }
@@ -271,10 +276,6 @@ function App() {
   }, [terminalHeight])
 
   useEffect(() => {
-    getSessionHistory().then(h => setSessionHistory(h))
-  }, [sessions])
-
-  useEffect(() => {
     if (appBodyRef.current) {
       const totalW = appBodyRef.current.getBoundingClientRect().width
       setLeftWidth(Math.round(totalW * 0.12))
@@ -294,13 +295,13 @@ function App() {
     closeModal()
   }
 
-  function handleStartAgent(sessionId: string, config: AgentStartConfig) {
+  const handleStartAgent = useCallback((sessionId: string, config: AgentStartConfig) => {
     startAgent(sessionId, config)
-  }
+  }, [startAgent])
 
-  function handleShowAgentModal(sessionId: string) {
+  const handleShowAgentModal = useCallback((sessionId: string) => {
     setAgentModalSession(sessionId)
-  }
+  }, [])
 
   useSocketEvent<TerminalOutput>(onTerminalOutput, (data) => {
     const current = (writeBuffersRef.current[data.sessionId] || '') + data.data
@@ -358,11 +359,11 @@ function App() {
     }
   }, [activeWorkspace])
 
-  function editWorkspace(id: string, name: string, _path: string) {
+  const editWorkspace = useCallback((id: string, name: string, _path: string) => {
     updateWorkspaceConfig(id, { name }).then(() => refreshWorkspaces())
-  }
+  }, [updateWorkspaceConfig, refreshWorkspaces])
 
-  function addWorkspace(name: string, path: string, scripts?: { setupScript?: string; teardownScript?: string }) {
+  const addWorkspace = useCallback((name: string, path: string, scripts?: { setupScript?: string; teardownScript?: string }) => {
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     createWorkspace({
       id,
@@ -377,9 +378,9 @@ function App() {
         switchWorkspace(id)
       }
     })
-  }
+  }, [createWorkspace, switchWorkspace])
 
-  function removeWorkspace(id: string) {
+  const removeWorkspace = useCallback((id: string) => {
     const wsSessions = Object.entries(sessions)
       .filter(([, s]) => s.repositoryName === id || s.id.startsWith(id))
       .map(([sid]) => sid)
@@ -387,7 +388,7 @@ function App() {
     if (activeWorkspaceId === id) {
       setActiveWorkspaceId(workspaces.length > 1 ? workspaces.find(w => w.id !== id)?.id ?? null : null)
     }
-  }
+  }, [sessions, closeTab, activeWorkspaceId, workspaces])
 
   const wsPath = activeWorkspace?.repository?.path
 
@@ -396,16 +397,15 @@ function App() {
     let active = true
     const poll = async () => {
       const s = await getGitFullStatus(wsPath)
-      if (active) setGitChangeCount(s?.total ?? 0)
+      if (active && s) setGitChangeCount(prev => (prev === s.total ? prev : s.total))
     }
     poll()
     const id = setInterval(poll, 5000)
     return () => { active = false; clearInterval(id) }
   }, [wsPath, getGitFullStatus])
 
-  const agentTypes = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'kilocode', 'windsurf'])
   const agentSessions = useMemo(
-    () => Object.values(sessions).filter(s => agentTypes.has(s.type)).slice(0, 12),
+    () => Object.values(sessions).filter(s => AGENT_TYPE_SET.has(s.type)).slice(0, 12),
     [sessions]
   )
   const shellSessions = useMemo(
@@ -417,9 +417,44 @@ function App() {
     createRawSession(type, wsPath)
   }, [createRawSession, wsPath])
 
-  function handleCreateWorkspace() {
+  const handleToggleChatSidebar = useCallback(() => {
+    setChatSidebarOpen(o => {
+      if (!o && appBodyRef.current) {
+        const totalW = appBodyRef.current.getBoundingClientRect().width
+        setChatWidth(Math.round(totalW * 0.15))
+      }
+      return !o
+    })
+  }, [])
+
+  const handleToggleWorkspaceSidebar = useCallback(() => {
+    setWorkspaceSidebarOpen(o => {
+      if (!o && appBodyRef.current) {
+        const totalW = appBodyRef.current.getBoundingClientRect().width
+        setLeftWidth(Math.round(totalW * 0.12))
+      }
+      return !o
+    })
+  }, [])
+
+  const handleToggleBottomShell = useCallback(() => {
+    if (!bottomShellOpen && shellSessions.length === 0) {
+      handleNewTerminal('shell')
+    }
+    setBottomShellOpen(o => !o)
+  }, [bottomShellOpen, shellSessions.length, handleNewTerminal])
+
+  const handleToggleNewAgentPicker = useCallback(() => {
+    setViewMode('agents')
+    setActiveView(null)
+    setBottomShellOpen(false)
+    setSelectedFilePath(null)
+    setAgentPickerTrigger(t => t + 1)
+  }, [])
+
+  const handleCreateWorkspace = useCallback(() => {
     setCreateWorkspaceModalOpen(true)
-  }
+  }, [])
 
   async function handleCreateWorkspaceLocal(name: string, path: string, scripts?: { setupScript?: string; teardownScript?: string }) {
     addWorkspace(name, path, scripts)
@@ -434,13 +469,27 @@ function App() {
     }
   }
 
-  async function handleLoadWorkspace() {
+  const handleSelectWorkspace = useCallback((id: string) => {
+    switchWorkspace(id)
+    setWorkspaceSidebarOpen(true)
+    setViewMode('agents')
+    setSelectedFilePath(null)
+    if (appBodyRef.current) {
+      const totalW = appBodyRef.current.getBoundingClientRect().width
+      setLeftWidth(Math.round(totalW * 0.12))
+    }
+  }, [switchWorkspace])
+
+  const handleToggleView = useCallback((view: 'dashboard' | 'settings' | 'git-review') => {
+    setActiveView(prev => prev === view ? null : view)
+  }, [])
+
+  const handleLoadWorkspace = useCallback(async () => {
     const result = await window.electronAPI?.importWorkspace()
     if (result?.workspace) {
       handleSelectWorkspace(result.workspace.id)
     }
-  }
-
+  }, [handleSelectWorkspace])
 
   function dismissNotification(id: string) {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
@@ -485,41 +534,30 @@ function App() {
     })
   }, [commanderCommands])
 
-  function handleSelectWorkspace(id: string) {
-    switchWorkspace(id)
-    setWorkspaceSidebarOpen(true)
-    setViewMode('agents')
-    setSelectedFilePath(null)
-    if (appBodyRef.current) {
-      const totalW = appBodyRef.current.getBoundingClientRect().width
-      setLeftWidth(Math.round(totalW * 0.12))
-    }
-  }
-
-  function handleDeleteWorkspace(id: string) {
+  const handleDeleteWorkspace = useCallback((id: string) => {
     deleteWorkspace(id)
     removeWorkspace(id)
     setTimeout(refreshDeleted, 500)
-  }
+  }, [deleteWorkspace, removeWorkspace, refreshDeleted])
 
-  function handleRestoreWorkspace(id: string) {
+  const handleRestoreWorkspace = useCallback((id: string) => {
     restoreWorkspace(id).then(ok => {
       if (ok) refreshDeleted()
     })
-  }
+  }, [restoreWorkspace, refreshDeleted])
 
-  function handlePermanentDelete(id: string) {
+  const handlePermanentDelete = useCallback((id: string) => {
     permanentDeleteWorkspace(id).then(() => refreshDeleted())
-  }
+  }, [permanentDeleteWorkspace, refreshDeleted])
 
-  function handleSelectAgent(agentId: string) {
-    if (agentTypes.has(agentId)) {
+  const handleSelectAgent = useCallback((agentId: string) => {
+    if (AGENT_TYPE_SET.has(agentId)) {
       const defaultConfig = { agentId, mode: 'fresh', flags: [] }
       createAgentSession(agentId, defaultConfig, wsPath)
     } else {
       handleNewTerminal(agentId)
     }
-  }
+  }, [createAgentSession, wsPath, handleNewTerminal])
 
   useEffect(() => {
     if (!activeSessionId && agentSessions.length > 0) {
@@ -527,57 +565,18 @@ function App() {
     }
   }, [agentSessions.length])
 
-  function handleCloseAgentTab(sessionId: string) {
+  const handleCloseAgentTab = useCallback((sessionId: string) => {
     closeTab([sessionId])
     if (activeSessionId === sessionId) {
       const remaining = agentSessions.filter(s => s.id !== sessionId)
       setActiveSessionId(remaining.length > 0 ? remaining[0].id : null)
     }
-  }
+  }, [closeTab, activeSessionId, agentSessions])
 
-  function handleNewShell() {
+  const handleNewShell = useCallback(() => {
     handleNewTerminal('shell')
     setBottomShellOpen(true)
-  }
-
-  function handleToggleChatSidebar() {
-    setChatSidebarOpen(o => {
-      if (!o && appBodyRef.current) {
-        const totalW = appBodyRef.current.getBoundingClientRect().width
-        setChatWidth(Math.round(totalW * 0.15))
-      }
-      return !o
-    })
-  }
-
-  function handleToggleWorkspaceSidebar() {
-    setWorkspaceSidebarOpen(o => {
-      if (!o && appBodyRef.current) {
-        const totalW = appBodyRef.current.getBoundingClientRect().width
-        setLeftWidth(Math.round(totalW * 0.12))
-      }
-      return !o
-    })
-  }
-
-  function handleToggleBottomShell() {
-    if (!bottomShellOpen && shellSessions.length === 0) {
-      handleNewTerminal('shell')
-    }
-    setBottomShellOpen(o => !o)
-  }
-
-  function handleToggleNewAgentPicker() {
-    setViewMode('agents')
-    setActiveView(null)
-    setBottomShellOpen(false)
-    setSelectedFilePath(null)
-    setAgentPickerTrigger(t => t + 1)
-  }
-
-  function handleToggleView(view: 'dashboard' | 'settings' | 'git-review') {
-    setActiveView(prev => prev === view ? null : view)
-  }
+  }, [handleNewTerminal])
 
   const menuActionRef = useRef<Record<string, (...args: any[]) => void>>({})
   menuActionRef.current = {
@@ -928,6 +927,7 @@ function App() {
   const handleFileContentChange = useCallback((value: string | undefined) => {
     if (!activeFileId || value === undefined) return
     setFileContents(prev => ({ ...prev, [activeFileId]: value }))
+    if (dirtyFilesRef.current.has(activeFileId)) return
     setDirtyFiles(prev => {
       const next = new Set(prev)
       next.add(activeFileId)
@@ -962,6 +962,9 @@ function App() {
 
   const handleEditorScrollChange = useCallback((line: number, column: number) => {
     if (!activeFileId) return
+    const prev = scrollPositionsRef.current[activeFileId]
+    if (prev && prev.line === line && prev.column === column) return
+    scrollPositionsRef.current = { ...scrollPositionsRef.current, [activeFileId]: { line, column } }
     setEditorScrollPositions(prev => ({
       ...prev,
       [activeFileId]: { line, column },
@@ -974,6 +977,54 @@ function App() {
   )
   const activeFileContent = activeFileId ? fileContents[activeFileId] : ''
   const isActiveFileDirty = activeFileId ? dirtyFiles.has(activeFileId) : false
+
+  const pageViews = useMemo(() => [
+    { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
+      <Suspense fallback={<div className="panel-suspense-fallback" />}>
+        <Dashboard
+          workspaces={workspaces}
+          sessions={sessions}
+          activeWorkspace={activeWorkspace}
+          deletedWorkspaces={deletedWorkspaces}
+          onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+          onDelete={handleDeleteWorkspace}
+          onRestore={handleRestoreWorkspace}
+          onPermanentDelete={handlePermanentDelete}
+          onNewWorkspace={handleCreateWorkspace}
+          onClose={() => setActiveView(null)}
+          filterStats={filterStats}
+          searchEvents={searchEvents}
+          commandHistory={commandHistory}
+          getOrchestratorStats={getOrchestratorStats}
+        />
+      </Suspense>
+    )},
+    { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
+      <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
+    )},
+  ], [workspaces, sessions, activeWorkspace, deletedWorkspaces, switchWorkspace, handleDeleteWorkspace, handleRestoreWorkspace, handlePermanentDelete, handleCreateWorkspace, filterStats, searchEvents, commandHistory, getOrchestratorStats, theme, setUserSettings])
+
+  const agentsList = useMemo(() => AGENTS_LIST.filter(a => installedAgents.has(a.id)), [installedAgents])
+
+  const chatSocket = useMemo(() => ({
+    chatGetModels,
+    chatSendStream,
+    chatStopStream,
+    chatGetHistory,
+    chatListThreads,
+    chatCreateThread,
+    chatRenameThread,
+    chatClearThread,
+    chatDeleteThread,
+    onChatStreamChunk,
+    onChatResponse,
+    onChatError,
+    onChatThreads,
+  }), [chatGetModels, chatSendStream, chatStopStream, chatGetHistory, chatListThreads, chatCreateThread, chatRenameThread, chatClearThread, chatDeleteThread, onChatStreamChunk, onChatResponse, onChatError, onChatThreads])
+
+  const handleViewChange = useCallback((view: string | null) => {
+    setActiveView(view as typeof activeView)
+  }, [])
 
   return (
     <div className="app">
@@ -1125,7 +1176,7 @@ function App() {
                   ) : activeFile ? (
                     <Suspense fallback={<div className="editor-suspense-fallback" />}>
                       <CodeEditor
-                        key={activeFile.id + (activeFileContent ? '' : '-empty')}
+                        key={activeFile.id}
                         filePath={activeFile.filePath}
                         content={activeFileContent}
                         language={activeFile.language}
@@ -1157,7 +1208,7 @@ function App() {
             onResumeSession={resumeSession}
             onStartAgent={handleStartAgent}
             onShowAgentModal={handleShowAgentModal}
-            onNewAgent={() => {}}
+            onNewAgent={NOOP}
             onSelectAgent={handleSelectAgent}
             onNewShell={handleNewShell}
             onCloseTab={handleCloseAgentTab}
@@ -1166,7 +1217,7 @@ function App() {
             writeBuffersRef={writeBuffersRef}
             agentConfigs={agentConfigs}
             focusMode={focusMode}
-            agentsList={AGENTS_LIST.filter(a => installedAgents.has(a.id))}
+            agentsList={agentsList}
             bottomShellOpen={bottomShellOpen}
             onToggleShell={handleToggleBottomShell}
             chatSidebarOpen={chatSidebarOpen}
@@ -1177,33 +1228,9 @@ function App() {
             terminalHeight={terminalHeight}
             terminalDrag={terminalDrag}
             agentPickerTrigger={agentPickerTrigger}
-            pageViews={[
-              { id: 'dashboard', label: 'Dashboard', icon: '◉', render: () => (
-                <Suspense fallback={<div className="panel-suspense-fallback" />}>
-                  <Dashboard
-                    workspaces={workspaces}
-                    sessions={sessions}
-                    activeWorkspace={activeWorkspace}
-                    deletedWorkspaces={deletedWorkspaces}
-                    onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
-                    onDelete={handleDeleteWorkspace}
-                    onRestore={handleRestoreWorkspace}
-                    onPermanentDelete={handlePermanentDelete}
-                    onNewWorkspace={handleCreateWorkspace}
-                    onClose={() => setActiveView(null)}
-                    filterStats={filterStats}
-                    searchEvents={searchEvents}
-                    commandHistory={commandHistory}
-                    getOrchestratorStats={getOrchestratorStats}
-                  />
-                </Suspense>
-              )},
-              { id: 'settings', label: 'Settings', icon: '⚙', render: () => (
-                <Settings theme={theme} onThemeChange={setTheme} onFontSizeChange={setFontSize} onFontFamilyChange={setFontFamily} onPrefsChange={(prefs) => { setUserSettings({ autoRestartSessions: prefs.autoStart }) }} onClose={() => setActiveView(null)} />
-              )},
-            ]}
+            pageViews={pageViews}
             activeView={activeView}
-            onViewChange={(view) => setActiveView(view as typeof activeView)}
+            onViewChange={handleViewChange}
           />
         </main>
         <div className="resizer" style={{ opacity: chatSidebarOpen ? 1 : 0, pointerEvents: chatSidebarOpen ? 'auto' : 'none' }} onMouseDown={onResizerMouseDown('right')} />
@@ -1213,21 +1240,7 @@ function App() {
               <ChatSidebar
                 onClose={() => setChatSidebarOpen(false)}
                 onNavigateToSettings={() => setActiveView('settings')}
-                socket={{
-                  chatGetModels,
-                  chatSendStream,
-                  chatStopStream,
-                  chatGetHistory,
-                  chatListThreads,
-                  chatCreateThread,
-                  chatRenameThread,
-                  chatClearThread,
-                  chatDeleteThread,
-                  onChatStreamChunk,
-                  onChatResponse,
-                  onChatError,
-                  onChatThreads,
-                }}
+                socket={chatSocket}
               />
             </Suspense>
           )}

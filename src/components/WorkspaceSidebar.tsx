@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, memo } from 'react'
 import type { WorkspaceInfo, SessionState } from '../types'
 import { FileExplorer } from './FileExplorer'
 
@@ -39,7 +39,7 @@ function wsExpandKey(wsId: string) {
   return `ws:${wsId}`
 }
 
-export default function WorkspaceSidebar({
+export default memo(function WorkspaceSidebar({
   workspaces, activeWorkspace, deletedWorkspaces,
   onSelect, onEdit, onDelete, onRestore, onPermanentDelete,
   onOpenCreateModal, showModal,
@@ -242,4 +242,4 @@ export default function WorkspaceSidebar({
       </div>
     </aside>
   )
-}
+})

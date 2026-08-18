@@ -174,6 +174,7 @@ export class SessionManager extends EventEmitter {
   cavemanService = new CavemanService()
   private contextWriter: ContextWriter | null = null
   private lastStatusRefresh = new Map<string, number>()
+  private lastStatusBytes = new Map<string, number>()
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
@@ -784,12 +785,14 @@ export class SessionManager extends EventEmitter {
     this.outputFilter.finalizeCommand(sessionId)
     this.outputFilter.cleanup(sessionId)
     this.cavemanService.cleanup(sessionId)
+    this.tokenUsageTracker.cleanup(sessionId)
     this.finalizeSessionContext(sessionId)
     this.sessions.delete(sessionId)
     this.cleanupSessionBuffer(sessionId)
     this.orchestrator?.unregisterSession(sessionId)
     this.statusDetector?.reset(sessionId)
     this.lastStatusRefresh.delete(sessionId)
+    this.lastStatusBytes.delete(sessionId)
     return true
   }
 
@@ -1218,6 +1221,7 @@ cleanupAllSessions() {
     const branch = await this.gitHelper.getCurrentBranch(cwd, force)
     for (const [, s] of this.sessions) {
       if (s.worktreeId === worktreeId || s.config?.cwd === cwd) {
+        if (s.branch === branch) continue
         s.branch = branch
         try {
           this.io.emit('branch-change', { sessionId: s.id, branch, worktreeId })
@@ -1230,6 +1234,15 @@ cleanupAllSessions() {
     if (!this.statusDetector) return
     const session = this.sessions.get(sessionId)
     if (!session || session.status === 'exited') return
+
+    // Idle guard: if no new output arrived since the last scan and the session
+    // is already idle, the expensive buffer snapshot + detectStatus regex scan
+    // cannot change anything — skip it entirely. New output (onData) forces a
+    // refresh via lastStatusRefresh throttle, and processMonitor still runs the
+    // full scan when buffer bytes changed (catches silent transitions).
+    const bytes = session.buffer.totalBytes
+    if (session.status === 'idle' && this.lastStatusBytes.get(sessionId) === bytes) return
+    this.lastStatusBytes.set(sessionId, bytes)
 
     const oldStatus = session.status
     const isAgentType = (AGENT_TYPES as readonly string[]).includes(session.type)

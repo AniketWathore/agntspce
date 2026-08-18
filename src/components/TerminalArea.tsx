@@ -114,7 +114,7 @@ function getGridEdgeHandles(index: number, count: number): ('left' | 'right' | '
   return ['left', 'right', 'top', 'bottom']
 }
 
-function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTerminalOutput }: {
+const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTerminalOutput }: {
   session: SessionState
   onInput: (sessionId: string, data: string) => void
   onResize: (sessionId: string, cols: number, rows: number) => void
@@ -271,7 +271,7 @@ function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTermin
       <div ref={terminalRef} className="shell-terminal-instance" />
     </div>
   )
-}
+})
 
 function ShellTabList({ shells, activeShellId, onSelect, onClose, header }: {
   shells: SessionState[]

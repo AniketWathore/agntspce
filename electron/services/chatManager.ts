@@ -47,6 +47,8 @@ export class ChatManager {
   private activeAborts: Map<string, AbortController> = new Map()
   private configFilePath = path.join(app.getPath('userData'), 'chat-config.json')
   private historyFilePath = path.join(app.getPath('userData'), 'chat-history.json')
+  private saveTimer: NodeJS.Timeout | null = null
+  private readonly MAX_THREAD_MESSAGES = 2000
 
   constructor() {
     this.loadConfigs()
@@ -128,13 +130,27 @@ export class ChatManager {
       const parsed = JSON.parse(content)
       if (parsed && Array.isArray(parsed.threads)) {
         for (const t of parsed.threads) {
-          if (t && typeof t.id === 'string') this.threads.set(t.id, t as ChatThread)
+          if (t && typeof t.id === 'string') {
+            this.trimThreadMessages(t)
+            this.threads.set(t.id, t as ChatThread)
+          }
         }
       }
     } catch {}
   }
 
   private saveThreads() {
+    // Debounced: full-file sync writes on every streamed message are expensive
+    // for long histories. Coalesce writes so at most one write every 2s, and
+    // flush on quit (see flushThreads).
+    if (this.saveTimer) clearTimeout(this.saveTimer)
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null
+      this.writeThreads()
+    }, 2000)
+  }
+
+  private writeThreads() {
     try {
       fs.mkdirSync(path.dirname(this.historyFilePath), { recursive: true })
       fs.writeFileSync(
@@ -144,6 +160,20 @@ export class ChatManager {
       )
     } catch (e) {
       console.error('Failed to save chat history:', e)
+    }
+  }
+
+  flushThreads(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    this.writeThreads()
+  }
+
+  private trimThreadMessages(thread: ChatThread): void {
+    if (thread.messages.length > this.MAX_THREAD_MESSAGES) {
+      thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES)
     }
   }
 
@@ -370,6 +400,7 @@ export class ChatManager {
 
   private persistMessage(thread: ChatThread) {
     thread.updatedAt = Date.now()
+    this.trimThreadMessages(thread)
     if (thread.title === 'New chat') {
       const first = thread.messages.find(m => m.role === 'user')
       if (first) {

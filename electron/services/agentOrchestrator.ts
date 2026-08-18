@@ -32,8 +32,9 @@ export class AgentOrchestrator {
     this.io = io
     this.maxConcurrentSessions = maxConcurrentSessions
     this.concurrencyLimiter = new PrioritySemaphore(maxConcurrentSessions)
-    this.startHealthChecks()
-    this.resourceTracker.startMonitoring()
+    // Health/resource timers are started lazily on first session registration
+    // and stopped when the last session closes (see registerSession/
+    // unregisterSession) so idle apps consume zero polling overhead.
   }
 
   setStateManager(sm: StateManager | null): void {
@@ -69,6 +70,9 @@ export class AgentOrchestrator {
       lastHealthCheck: Date.now(),
       healthy: true,
     })
+    // Restart polling timers now that a session exists.
+    this.startHealthChecks()
+    this.resourceTracker.startMonitoring()
     try {
       // Preserve the existing task link across restarts: upsertSession without
       // taskId would null it out, then ensureSessionTask re-creates a NEW task
@@ -98,6 +102,11 @@ export class AgentOrchestrator {
   unregisterSession(sessionId: string): void {
     this.resourceTracker.unregisterSession(sessionId)
     this.sessions.delete(sessionId)
+    // Stop polling timers when the last session goes away — nothing to monitor.
+    if (this.sessions.size === 0) {
+      this.stopHealthChecks()
+      this.resourceTracker.stopMonitoring()
+    }
     try {
       this.stateManager?.closeSessionRecord(sessionId)
       this.teardownMergedWorktree(sessionId)
