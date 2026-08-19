@@ -150,6 +150,39 @@ describe('OutputFilterService', () => {
       const event = filter.reportTokenSavings(0, 0, 'tool')
       expect(event!.reduction).toBe(0)
     })
+
+    it('attributes the event to the provided sessionId instead of system', () => {
+      const event = filter.reportTokenSavings(2000, 500, 'git-diff', 'session-abc')
+      expect(event).not.toBeNull()
+      expect(event!.sessionId).toBe('session-abc')
+    })
+
+    it('falls back to system session when no sessionId is provided', () => {
+      const event = filter.reportTokenSavings(2000, 500, 'tool')
+      expect(event).not.toBeNull()
+      expect(event!.sessionId).toBe('system')
+    })
+  })
+
+  describe('wrapper double-count guard', () => {
+    it('skips finalize when the HTTP POST already reported the same token pair', () => {
+      // Simulate the wrapper: HTTP POST lands first (reportTokenSavings) with a
+      // real session id, then the AGNTSPCE_STATS line arrives through the PTY.
+      const httpEvent = filter.reportTokenSavings(1500, 600, 'git status', 'session-xyz')
+      expect(httpEvent).not.toBeNull()
+      expect(httpEvent!.sessionId).toBe('session-xyz')
+
+      const ptyEvent = runCommand(['agntspce $ git status\r\n', 'AGNTSPCE_STATS raw=1500 filtered=600\r\n', '$ \r\n'])
+      expect(emitted.length).toBe(1)
+      expect(emitted[0].sessionId).toBe('session-xyz')
+    })
+
+    it('still emits via PTY path when the HTTP POST never arrived', () => {
+      const ptyEvent = runCommand(['agntspce $ git status\r\n', 'AGNTSPCE_STATS raw=1500 filtered=600\r\n', '$ \r\n'])
+      expect(ptyEvent).not.toBeNull()
+      expect(ptyEvent!.sessionId).toBe('s1')
+      expect(emitted.length).toBe(1)
+    })
   })
 
   describe('history and stats aggregation', () => {

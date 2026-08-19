@@ -457,6 +457,9 @@ export class SessionManager extends EventEmitter {
 
     env.AGNTSPCE_ENABLED = '1'
     env.AGNTSPCE_NODE_PATH = process.execPath
+    // Expose the session id so bin/agntspce.mjs can attribute wrapper token
+    // stats to the real session instead of a catch-all "system" bucket.
+    env.AGNTSPCE_SESSION_ID = sessionId
 
     // Inject RTK session token and binary path.
     // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.

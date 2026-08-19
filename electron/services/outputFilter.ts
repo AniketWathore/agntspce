@@ -437,6 +437,21 @@ export class OutputFilterService {
     let filterName: string | undefined
     if (pending) {
       debugLog(`USING PENDING STATS session=${sessionId.slice(0,8)} raw=${pending.rawTokens} filtered=${pending.filteredTokens}`)
+      const dedupKey = `${pending.rawTokens}-${pending.filteredTokens}`
+      // If the wrapper's HTTP POST (reportTokenSavings) already recorded this
+      // exact token pair within the last 5s, skip emitting — otherwise the same
+      // spawnSync gets double-counted (PTY path + HTTP path).
+      const lastReported = this._recentTokenReports.get(dedupKey)
+      const now = Date.now()
+      if (lastReported && now - lastReported < 5000) {
+        debugLog(`SKIP finalize (already reported via HTTP) session=${sessionId.slice(0,8)} key=${dedupKey}`)
+        this._pendingStats.delete(sessionId)
+        this.clearTimer(sessionId)
+        this.insideCommand.set(sessionId, false)
+        this.commandBuffers.delete(sessionId)
+        this.outputAccum.delete(sessionId)
+        return null
+      }
       originalTokens = pending.rawTokens
       filteredTokens = pending.filteredTokens
       reduction = originalTokens > 0
@@ -446,8 +461,7 @@ export class OutputFilterService {
       // Mark as recently reported so the wrapper's HTTP POST (reportTokenSavings)
       // for the SAME command is skipped — otherwise raw/filtered tokens from the
       // same spawnSync get double-counted in the cumulative stats.
-      const dedupKey = `${pending.rawTokens}-${pending.filteredTokens}`
-      this._recentTokenReports.set(dedupKey, Date.now())
+      this._recentTokenReports.set(dedupKey, now)
       this._pendingStats.delete(sessionId)
     } else {
       debugLog(`FALLBACK no pending stats session=${sessionId.slice(0,8)} cmd="${cmdBuf.command}" rawLen=${cleanedOutput.length}`)
@@ -555,7 +569,7 @@ export class OutputFilterService {
     }))
   }
 
-  reportTokenSavings(originalTokens: number, filteredTokens: number, toolName?: string) {
+  reportTokenSavings(originalTokens: number, filteredTokens: number, toolName?: string, sessionId?: string) {
     // Dedup: if any active session has pending stats with the same token
     // values, the PTY-based detection already captured this command.
     // The HTTP POST (from bin/agntspce.mjs reportStats) is redundant.
@@ -580,7 +594,7 @@ export class OutputFilterService {
       }
     }
     const event: CommandEvent = {
-      sessionId: 'system',
+      sessionId: sessionId || 'system',
       command: toolName || 'tool',
       args: [],
       formatted: `agntspce $ ${toolName || 'tool'}`,

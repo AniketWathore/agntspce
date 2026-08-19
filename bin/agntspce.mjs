@@ -306,7 +306,7 @@ function cmdRewrite(command) {
 
 function reportStats(rawTokens, filteredTokens, commandStr, exitCode) {
   const port = parseInt(process.env.AGNTSPCE_PORT || '9460', 10)
-  const body = JSON.stringify({ originalTokens: rawTokens, filteredTokens, toolName: commandStr })
+  const body = JSON.stringify({ originalTokens: rawTokens, filteredTokens, toolName: commandStr, sessionId: process.env.AGNTSPCE_SESSION_ID || '' })
   process.stderr.write(`[agntspce] reporting stats raw=${rawTokens} filtered=${filteredTokens} port=${port}\n`)
   const done = () => process.exit(exitCode)
   try {

@@ -30,9 +30,9 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
     }
   })
 
-  socket.on('report-token-savings', (data: { originalTokens: number; filteredTokens: number; toolName?: string }) => {
+  socket.on('report-token-savings', (data: { originalTokens: number; filteredTokens: number; toolName?: string; sessionId?: string }) => {
     try {
-      ctx.sessionManager.outputFilter.reportTokenSavings(data.originalTokens, data.filteredTokens, data.toolName)
+      ctx.sessionManager.outputFilter.reportTokenSavings(data.originalTokens, data.filteredTokens, data.toolName, data.sessionId || undefined)
     } catch (e) {
       console.error('report-token-savings error:', e)
     }

@@ -104,12 +104,12 @@ export function registerApiRoutes(app: Express, ctx: ServerContext): void {
 
   app.post('/api/report-token-savings', (req, res) => {
     try {
-      const { originalTokens, filteredTokens, toolName } = req.body
+      const { originalTokens, filteredTokens, toolName, sessionId } = req.body
       if (typeof originalTokens !== 'number' || typeof filteredTokens !== 'number') {
         res.status(400).json({ error: 'originalTokens and filteredTokens are required' })
         return
       }
-      ctx.sessionManager.outputFilter.reportTokenSavings(originalTokens, filteredTokens, toolName || 'tool')
+      ctx.sessionManager.outputFilter.reportTokenSavings(originalTokens, filteredTokens, toolName || 'tool', typeof sessionId === 'string' && sessionId ? sessionId : undefined)
       res.json({ ok: true })
     } catch (e) {
       console.error('/api/report-token-savings error:', e)
