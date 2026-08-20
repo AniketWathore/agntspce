@@ -2580,6 +2580,27 @@
   color: var(--text-primary);
 }
 
+.dashboard-reset-btn {
+  height: 32px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.12s;
+}
+
+.dashboard-reset-btn:hover {
+  background: var(--bg-hover);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
 .dashboard-body {
   flex: 1;
   padding: 20px 24px 24px;

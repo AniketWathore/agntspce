@@ -25,6 +25,7 @@ interface Props {
   searchEvents?: CommandEvent[]
   commandHistory?: CommandEvent[]
   getOrchestratorStats?: () => Promise<OrchestratorStats>
+  onResetStats?: () => void
 }
 
 type DashboardTab = 'workspaces' | 'tokens' | 'orchestration'
@@ -107,6 +108,11 @@ export default function Dashboard(props: Props) {
         </div>
         <div className="dashboard-header-actions">
           <button className="new-terminal-btn" onClick={onNewWorkspace}>+ New Workspace</button>
+          {tab === 'tokens' && props.onResetStats && (
+            <button className="dashboard-reset-btn" onClick={() => { if (confirm('Reset token savings stats? This clears all tracked command history and per-session breakdowns.')) props.onResetStats!() }} title="Reset token stats">
+              Reset
+            </button>
+          )}
           <button className="dashboard-close-btn" onClick={onClose} title="Close">
             <i className="codicon codicon-close" style={{ fontSize: 16 }}></i>
           </button>
@@ -275,7 +281,7 @@ export default function Dashboard(props: Props) {
                   {(() => {
                     const bySession = new Map<string, { commands: number; orig: number; filt: number; firstTs: number }>()
                     for (const e of commandHistory) {
-                      if (e.command.startsWith('agntspce-search')) continue
+                      if (e.command.startsWith('agntspce-search') || e.sessionId === 'system') continue
                       const s = bySession.get(e.sessionId) || { commands: 0, orig: 0, filt: 0, firstTs: e.timestamp }
                       s.commands++
                       s.orig += e.originalTokens

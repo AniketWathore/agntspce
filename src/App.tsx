@@ -146,6 +146,8 @@ function App() {
     onChatStreamChunk, onChatResponse, onChatError, onChatThreads,
     executionHistory,
     filterStats, commandHistory, searchEvents,
+    requestFilterStats,
+    resetFilterStats,
     getOrchestratorStats,
   } = useSocket()
   const tokensSaved = useMemo(() => {
@@ -996,6 +998,7 @@ function App() {
           searchEvents={searchEvents}
           commandHistory={commandHistory}
           getOrchestratorStats={getOrchestratorStats}
+          onResetStats={() => { resetFilterStats(); requestFilterStats() }}
         />
       </Suspense>
     )},
