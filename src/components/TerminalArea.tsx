@@ -58,60 +58,166 @@ const AGENT_TYPES = [
   { id: 'gemini', label: 'Gemini CLI', icon: '✨' },
 ]
 
-function getTilingStyle(count: number, paneSizes: Record<string, number>, sessionIds: string[]): CSSProperties {
-  const base: CSSProperties = { display: 'grid', gap: 4, padding: '0 4px 4px', minHeight: 0, flex: 1 }
-  const w = sessionIds.map(id => Math.max(0.3, paneSizes[id] || 1))
+interface CellPlacement {
+  col: number
+  row: number
+  rowSpan?: number
+  colSpan?: number
+}
 
-  if (count <= 1) return { ...base, gridTemplateColumns: '1fr', gridTemplateRows: '1fr' }
-  if (count === 2) return { ...base, gridTemplateColumns: `${w[0]}fr ${w[1]}fr`, gridTemplateRows: '1fr' }
-  if (count === 3) return { ...base, gridTemplateColumns: `${w[0]}fr ${w[1] + w[2]}fr`, gridTemplateRows: `${w[1]}fr ${w[2]}fr` }
-  if (count === 4) return { ...base, gridTemplateColumns: `${w[0] + w[2]}fr ${w[1] + w[3]}fr`, gridTemplateRows: `${w[0] + w[1]}fr ${w[2] + w[3]}fr` }
-  if (count === 5) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr`, gridTemplateRows: '1fr 1fr' }
-  if (count === 6) return { ...base, gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)' }
-  if (count === 7) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr 1fr`, gridTemplateRows: 'repeat(2, 1fr)' }
-  if (count === 9) return { ...base, gridTemplateColumns: `${w[0]}fr 1fr 1fr 1fr 1fr`, gridTemplateRows: 'repeat(2, 1fr)' }
+interface GridDef {
+  cols: number
+  rows: number
+  cells: CellPlacement[]
+}
+
+interface TilingLayout {
+  gridTemplateColumns: string
+  gridTemplateRows: string
+  positions: CSSProperties[]
+}
+
+// Deterministic tiling layouts. Odd counts use a "master-stack" arrangement
+// (agent 1 spans the full height on the left, remaining agents stack in a grid
+// on the right, Hyprland/tmux-style). Even counts use equal-sized grids.
+function gridDefForCount(count: number): GridDef {
+  if (count <= 1) return { cols: 1, rows: 1, cells: [{ col: 1, row: 1 }] }
+  if (count === 2) return { cols: 2, rows: 1, cells: [{ col: 1, row: 1 }, { col: 2, row: 1 }] }
+  if (count === 3) return {
+    cols: 2, rows: 2,
+    cells: [
+      { col: 1, row: 1, rowSpan: 2 },
+      { col: 2, row: 1 },
+      { col: 2, row: 2 },
+    ],
+  }
+  if (count === 4) return {
+    cols: 2, rows: 2,
+    cells: [
+      { col: 1, row: 1 }, { col: 2, row: 1 },
+      { col: 1, row: 2 }, { col: 2, row: 2 },
+    ],
+  }
+  if (count === 5) return {
+    cols: 3, rows: 2,
+    cells: [
+      { col: 1, row: 1, rowSpan: 2 },
+      { col: 2, row: 1 }, { col: 3, row: 1 },
+      { col: 2, row: 2 }, { col: 3, row: 2 },
+    ],
+  }
+  if (count === 6) return {
+    cols: 3, rows: 2,
+    cells: [
+      { col: 1, row: 1 }, { col: 2, row: 1 }, { col: 3, row: 1 },
+      { col: 1, row: 2 }, { col: 2, row: 2 }, { col: 3, row: 2 },
+    ],
+  }
+  if (count === 7) return {
+    cols: 4, rows: 2,
+    cells: [
+      { col: 1, row: 1, rowSpan: 2 },
+      { col: 2, row: 1 }, { col: 3, row: 1 }, { col: 4, row: 1 },
+      { col: 2, row: 2 }, { col: 3, row: 2 }, { col: 4, row: 2 },
+    ],
+  }
+  if (count === 8) return {
+    cols: 4, rows: 2,
+    cells: [
+      { col: 1, row: 1 }, { col: 2, row: 1 }, { col: 3, row: 1 }, { col: 4, row: 1 },
+      { col: 1, row: 2 }, { col: 2, row: 2 }, { col: 3, row: 2 }, { col: 4, row: 2 },
+    ],
+  }
+  if (count === 9) return {
+    cols: 5, rows: 2,
+    cells: [
+      { col: 1, row: 1, rowSpan: 2 },
+      { col: 2, row: 1 }, { col: 3, row: 1 }, { col: 4, row: 1 }, { col: 5, row: 1 },
+      { col: 2, row: 2 }, { col: 3, row: 2 }, { col: 4, row: 2 }, { col: 5, row: 2 },
+    ],
+  }
+  if (count === 10) return {
+    cols: 5, rows: 2,
+    cells: [
+      { col: 1, row: 1 }, { col: 2, row: 1 }, { col: 3, row: 1 }, { col: 4, row: 1 }, { col: 5, row: 1 },
+      { col: 1, row: 2 }, { col: 2, row: 2 }, { col: 3, row: 2 }, { col: 4, row: 2 }, { col: 5, row: 2 },
+    ],
+  }
   const cols = Math.min(Math.ceil(Math.sqrt(count)), 4)
   const rows = Math.ceil(count / cols)
-  return { ...base, gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }
-}
-
-function getItemStyle(index: number, count: number, _activeIndex: number): CSSProperties {
-  // First agent spans full height in its column (not 2 cols)
-  if ((count === 3 || count === 5 || count === 7 || count === 9) && index === 0) {
-    return { gridRow: 'span 2' }
+  const cells: CellPlacement[] = []
+  for (let i = 0; i < count; i++) {
+    cells.push({ col: (i % cols) + 1, row: Math.floor(i / cols) + 1 })
   }
-  return {}
+  return { cols, rows, cells }
 }
 
+// Builds the CSS grid template and explicit cell positions for a count.
+// Column widths and row heights are independent track vectors (one per grid
+// column/row). Resizing a divider adjusts exactly the two tracks that share it
+// (real tiled-window-manager behavior), so neighboring panes resize together
+// and overlap is impossible. The master (index 0) spans all rows.
+function computeTiling(count: number, colTracks: number[], rowTracks: number[]): TilingLayout {
+  const def = gridDefForCount(count)
+  const cols = normalizeTracks(colTracks, def.cols)
+  const rows = normalizeTracks(rowTracks, def.rows)
+  const gridTemplateColumns = cols.map(t => `${t}fr`).join(' ')
+  const gridTemplateRows = rows.map(t => `${t}fr`).join(' ')
+  const positions: CSSProperties[] = def.cells.map(c => ({
+    gridColumn: String(c.col),
+    gridRow: c.rowSpan ? `${c.row} / span ${c.rowSpan}` : String(c.row),
+  }))
+  return { gridTemplateColumns, gridTemplateRows, positions }
+}
+
+function normalizeTracks(tracks: number[], length: number): number[] {
+  return Array.from({ length }, (_, i) => {
+    const v = tracks[i]
+    return v === undefined ? 1 : Math.max(0.1, v)
+  })
+}
+
+// Master-stack layouts: master column width fraction. 3 = 50% (mandatory),
+// 5 = 38% (keeps Agent 1 dominant but de-congests the right side), 7/9 = 40%
+// balanced. Even counts use fully equal tracks.
+const MASTER_COL_FRACTIONS: Record<number, number> = { 3: 0.5, 5: 0.38, 7: 0.4, 9: 0.4 }
+
+function defaultColTracks(count: number): number[] {
+  const def = gridDefForCount(count)
+  const masterFraction = MASTER_COL_FRACTIONS[count]
+  if (masterFraction !== undefined) {
+    const rightCols = Math.max(1, def.cols - 1)
+    const rightWidth = (1 - masterFraction) / rightCols
+    return [masterFraction, ...Array(rightCols).fill(rightWidth)]
+  }
+  return Array(def.cols).fill(1)
+}
+
+function defaultRowTracks(count: number): number[] {
+  return Array(gridDefForCount(count).rows).fill(1)
+}
+
+// Returns the track indices affected by dragging an edge of the given cell.
+// Dragging a divider grows the pane's own track and shrinks the neighbor track.
+function getResizeTrackPair(cell: CellPlacement, edge: 'left' | 'right' | 'top' | 'bottom'): { grow: number; shrink: number } {
+  if (edge === 'right') return { grow: cell.col - 1, shrink: cell.col }
+  if (edge === 'left') return { grow: cell.col - 1, shrink: cell.col - 2 }
+  if (edge === 'bottom') return { grow: cell.row - 1, shrink: cell.row }
+  return { grow: cell.row - 1, shrink: cell.row - 2 } // top
+}
+
+// Resize handles only appear on interior dividers so every edge has exactly one
+// grabbable surface on either side of it.
 function getGridEdgeHandles(index: number, count: number): ('left' | 'right' | 'top' | 'bottom')[] {
-  if (count === 2) {
-    return index === 0 ? ['left', 'right'] : ['right']
-  }
-  if (count === 3) {
-    return index === 0 ? ['left', 'right'] :
-           index === 1 ? ['top', 'right', 'bottom'] :
-           ['right', 'bottom']
-  }
-  if (count === 4) {
-    return index === 0 ? ['left', 'right', 'top'] :
-           index === 1 ? ['right', 'top'] :
-           index === 2 ? ['left', 'right', 'bottom'] :
-           ['right', 'bottom']
-  }
-  if (count === 5) {
-    return index === 0 ? ['left', 'right', 'top'] :
-           index === 1 ? ['right', 'top'] :
-           index === 2 ? ['left', 'right'] :
-           index === 3 ? ['right'] :
-           ['right', 'bottom']
-  }
-  if (count === 7) {
-    return index === 0 ? ['left', 'right'] :
-           index === 3 ? ['left', 'right', 'top'] :
-           index === 4 ? ['right', 'top'] :
-           ['left', 'right', 'bottom']
-  }
-  return ['left', 'right', 'top', 'bottom']
+  const def = gridDefForCount(count)
+  const cell = def.cells[index]
+  if (!cell) return []
+  const handles: ('left' | 'right' | 'top' | 'bottom')[] = []
+  if (cell.col > 1) handles.push('left')
+  if (cell.col + (cell.colSpan || 1) <= def.cols) handles.push('right')
+  if (cell.row > 1) handles.push('top')
+  if (cell.row + (cell.rowSpan || 1) <= def.rows) handles.push('bottom')
+  return handles
 }
 
 const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, writeData, hidden, onTerminalOutput }: {
@@ -316,8 +422,8 @@ export default memo(function TerminalArea({
   const [focusSessionId, setFocusSessionId] = useState<string | null>(null)
   const [splitLayout, setSplitLayout] = useState<'grid' | 'side-left' | 'side-right'>('grid')
   const prevShellCount = useRef(shellSessions.length)
-  const [paneSizes, setPaneSizes] = useState<Record<string, number>>({})
-  const dragRef = useRef<{ sessionId: string; edge: string; startX: number; startY: number; startSize: number } | null>(null)
+  const [colTracks, setColTracks] = useState<number[]>(() => defaultColTracks(0))
+  const [rowTracks, setRowTracks] = useState<number[]>(() => defaultRowTracks(0))
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -361,50 +467,24 @@ export default memo(function TerminalArea({
     prevShellCount.current = shellSessions.length
   }, [shellSessions])
 
+  // Reset the grid tracks whenever the agent count changes (layout restructuring).
+  const prevAgentCount = useRef(-1)
   useEffect(() => {
     const count = filteredSessions.length
-    setPaneSizes(prev => {
-      const prevIds = new Set(Object.keys(prev))
-      // Reset pane sizes when agent count changes (layout restructuring)
-      const countChanged = prevIds.size !== count || !prevIds.has(filteredSessions[0]?.id || '')
-      if (!countChanged) {
-        // Only add new sessions without resetting existing ones
-        const next = { ...prev }
-        filteredSessions.forEach((s, i) => {
-          if (next[s.id] === undefined) {
-            if (count === 3) next[s.id] = i === 0 ? 2 : 1
-            else if (count === 1) next[s.id] = 1
-            else if (count === 2) next[s.id] = 1
-            else if (count === 4) next[s.id] = 1
-            else if (count === 5) next[s.id] = i === 0 ? 2 : 1
-            else if (count === 6) next[s.id] = 1
-            else if (count === 7) next[s.id] = i === 0 ? 2 : 1
-            else next[s.id] = 1
-          }
-        })
-        return next
-      }
-      // Full reset: compute new layout based on count
-      const next: Record<string, number> = {}
-      filteredSessions.forEach((s, i) => {
-        if (count === 1) next[s.id] = 1
-        else if (count === 2) next[s.id] = 1
-        else if (count === 3) next[s.id] = i === 0 ? 2 : 1
-        else if (count === 4) next[s.id] = 1
-        else if (count === 5) next[s.id] = i === 0 ? 2 : 1
-        else if (count === 6) next[s.id] = 1
-        else if (count === 7) next[s.id] = i === 0 ? 2 : 1
-        else next[s.id] = 1
-      })
-      // Persist to localStorage
-      try {
-        localStorage.setItem('terminalPaneSizes', JSON.stringify(next))
-      } catch {}
-      return next
-    })
+    if (count !== prevAgentCount.current) {
+      prevAgentCount.current = count
+      setColTracks(defaultColTracks(count))
+      setRowTracks(defaultRowTracks(count))
+    }
   }, [filteredSessions])
 
-  const useHorizontalScroll = bottomShellOpen && filteredSessions.length >= 3
+  // Exit full screen (and side splits) if the focused session is closed.
+  useEffect(() => {
+    if (focusSessionId && !filteredSessions.some(s => s.id === focusSessionId)) {
+      setFocusSessionId(null)
+      setSplitLayout('grid')
+    }
+  }, [filteredSessions, focusSessionId])
 
   const showAgents = !(terminalFullscreen && bottomShellOpen)
 
@@ -419,83 +499,83 @@ export default memo(function TerminalArea({
 
   const [dragging, setDragging] = useState(false)
   const gridContainerRef = useRef<HTMLDivElement>(null)
-  const dragSizeRef = useRef<{ [sessionId: string]: number }>({})
+  const dragRef = useRef<{
+    sessionId: string
+    edge: 'left' | 'right' | 'top' | 'bottom'
+    startX: number
+    startY: number
+    count: number
+    growIdx: number
+    shrinkIdx: number
+    isColumn: boolean
+    startTracks: number[]
+  } | null>(null)
+  const dragTracksRef = useRef<number[] | null>(null)
 
-  function handleResizeStart(sessionId: string, edge: string, x: number, y: number) {
-    dragRef.current = { sessionId, edge, startX: x, startY: y, startSize: paneSizes[sessionId] || 1 }
-    dragSizeRef.current[sessionId] = paneSizes[sessionId] || 1
+  function handleResizeStart(sessionId: string, edge: 'left' | 'right' | 'top' | 'bottom', x: number, y: number) {
+    const idx = filteredSessions.findIndex(s => s.id === sessionId)
+    const def = gridDefForCount(filteredSessions.length)
+    const cell = def.cells[idx]
+    if (!cell) return
+    const pair = getResizeTrackPair(cell, edge)
+    const isColumn = edge === 'left' || edge === 'right'
+    dragRef.current = {
+      sessionId,
+      edge,
+      startX: x,
+      startY: y,
+      count: filteredSessions.length,
+      growIdx: pair.grow,
+      shrinkIdx: pair.shrink,
+      isColumn,
+      startTracks: (isColumn ? colTracks : rowTracks),
+    }
+    dragTracksRef.current = isColumn ? colTracks.slice() : rowTracks.slice()
     setDragging(true)
   }
 
-  function handleResizeMove(sessionId: string, edge: string, x: number, y: number) {
+  function handleResizeMove(sessionId: string, _edge: string, x: number, y: number) {
     const drag = dragRef.current
-    if (!drag || drag.sessionId !== sessionId) return
+    if (!drag || drag.sessionId !== sessionId || drag.count !== filteredSessions.length) return
     const container = gridContainerRef.current
     if (!container) return
     const rect = container.getBoundingClientRect()
-    const deltaX = x - drag.startX
-    const deltaY = y - drag.startY
-    let factorX = 0
-    let factorY = 0
-    if (edge === 'left' || edge === 'right') {
-      factorX = deltaX / rect.width
-      if (edge === 'left') factorX = -factorX
+    let factor = 0
+    if (drag.isColumn) {
+      factor = (x - drag.startX) / rect.width
+      if (drag.edge === 'left') factor = -factor
     } else {
-      factorY = deltaY / rect.height
-      if (edge === 'top') factorY = -factorY
+      factor = (y - drag.startY) / rect.height
+      if (drag.edge === 'top') factor = -factor
     }
-    const factor = (edge === 'left' || edge === 'right') ? factorX : factorY
-    const newSize = Math.max(0.25, Math.min(8, drag.startSize + factor))
-    dragSizeRef.current[sessionId] = newSize
+    // Adjust exactly the two tracks sharing this divider: grow the pane's own
+    // track and shrink the neighbor by the applied amount (clamped so panes
+    // never collapse onto each other).
+    const tracks = drag.startTracks.slice()
+    const grow = Math.max(0.1, (tracks[drag.growIdx] || 1) + factor)
+    const applied = grow - (tracks[drag.growIdx] || 1)
+    tracks[drag.growIdx] = grow
+    tracks[drag.shrinkIdx] = Math.max(0.1, (tracks[drag.shrinkIdx] || 1) - applied)
+    dragTracksRef.current = tracks
 
     // Direct DOM manipulation during drag to avoid React re-renders
-    const w = filteredSessions.map(s => {
-      if (s.id === sessionId) return Math.max(0.3, newSize)
-      return Math.max(0.3, paneSizes[s.id] || 1)
-    })
-
-    const count = filteredSessions.length
-
-    if (count === 2) {
-      container.style.gridTemplateColumns = `${w[0]}fr ${w[1]}fr`
-    } else if (count === 3) {
-      container.style.gridTemplateColumns = `${w[0]}fr ${w[1] + w[2]}fr`
-      container.style.gridTemplateRows = `${w[1]}fr ${w[2]}fr`
-    } else if (count === 4) {
-      container.style.gridTemplateColumns = `${w[0] + w[2]}fr ${w[1] + w[3]}fr`
-      container.style.gridTemplateRows = `${w[0] + w[1]}fr ${w[2] + w[3]}fr`
-    } else if (count === 5) {
-      // 4 columns: first spans 2 cols (50%) — but user wants ~30%. Let's use 3 cols instead.
-      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr`
-      container.style.gridTemplateRows = '1fr 1fr'
-    } else if (count === 7) {
-      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr 1fr 1fr`
-      container.style.gridTemplateRows = '1fr 1fr'
-    } else if (count === 9) {
-      // 5 columns for simplicity (first = 20%, close to 10% approximate)
-      container.style.gridTemplateColumns = `${w[0]}fr 1fr 1fr 1fr 1fr`
-      container.style.gridTemplateRows = '1fr 1fr'
+    if (drag.isColumn) {
+      container.style.gridTemplateColumns = tracks.map(t => `${t}fr`).join(' ')
     } else {
-      // Default: split evenly with first column larger for odd counts
-      const cols = Math.ceil(Math.sqrt(count))
-      container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`
-      const rows = Math.ceil(count / cols)
-      container.style.gridTemplateRows = `repeat(${rows}, 1fr)`
+      container.style.gridTemplateRows = tracks.map(t => `${t}fr`).join(' ')
     }
   }
 
   const handleResizeEnd = useCallback(() => {
     const drag = dragRef.current
-    if (drag) {
-      const finalSize = dragSizeRef.current[drag.sessionId]
-      if (finalSize !== undefined) {
-        setPaneSizes(prev => ({ ...prev, [drag.sessionId]: finalSize }))
-      }
+    if (drag && drag.count === filteredSessions.length && dragTracksRef.current) {
+      if (drag.isColumn) setColTracks(dragTracksRef.current)
+      else setRowTracks(dragTracksRef.current)
     }
     setDragging(false)
     dragRef.current = null
-    dragSizeRef.current = {}
-  }, [])
+    dragTracksRef.current = null
+  }, [filteredSessions.length])
 
   function handleAddAgentClick() {
     if (agentsList && agentsList.length > 0) {
@@ -533,11 +613,20 @@ export default memo(function TerminalArea({
     }
   }
 
-  const activeIdx = activeSessionId
-    ? filteredSessions.findIndex(s => s.id === activeSessionId)
-    : 0
-  const sessionIds = filteredSessions.map(s => s.id)
-  const tilingStyle = getTilingStyle(filteredSessions.length, paneSizes, sessionIds)
+  const tilingLayout = useMemo(
+    () => computeTiling(filteredSessions.length, colTracks, rowTracks),
+    [filteredSessions, colTracks, rowTracks]
+  )
+  const tilingStyle: CSSProperties = {
+    display: 'grid',
+    gap: 4,
+    padding: '0 4px 4px',
+    minHeight: 0,
+    flex: 1,
+    gridTemplateColumns: tilingLayout.gridTemplateColumns,
+    gridTemplateRows: tilingLayout.gridTemplateRows,
+  }
+  const isFullScreen = focusSessionId !== null && splitLayout === 'grid'
 
   if (shellOnly) {
     return (
@@ -737,46 +826,16 @@ export default memo(function TerminalArea({
         ) : (
           <>
             {showAgents && (
-              focusSessionId && splitLayout === 'grid' ? (
-                <div className={`terminal-area${dragging ? ' no-transition' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-                  {filteredSessions.filter(s => s.id === focusSessionId).map(session => (
-                    <TerminalPane
-                      key={session.id}
-                      session={session}
-                      onInput={onInput}
-                      onResize={onResize}
-                      onRestart={onRestart}
-                      onResumeSession={onResumeSession}
-                      onStartAgent={onStartAgent}
-                      onShowAgentModal={onShowAgentModal}
-                      writeData={writeBuffersRef.current[session.id] || ''}
-                      agentConfigs={agentConfigs}
-                      layoutMode="focus"
-                      onLayoutChange={(mode) => {
-                        if (mode === 'grid') { setFocusSessionId(null); setSplitLayout('grid') }
-                        else if (mode === 'focus') setFocusSessionId(null)
-                        else { setFocusSessionId(session.id); setSplitLayout(mode) }
-                      }}
-                      style={{ flex: paneSizes[session.id] || 1, willChange: 'transform' }}
-                      onClose={onCloseTab}
-                      dimmed={false}
-                      onTerminalOutput={onTerminalOutput}
-                      onResizeStart={handleResizeStart}
-                        onResizeMove={handleResizeMove}
-                        onResizeEnd={handleResizeEnd}
-                      />
-                  ))}
-                </div>
-              ) : splitLayout !== 'grid' && focusSessionId ? (
+              splitLayout !== 'grid' && focusSessionId ? (
                 <div className={`terminal-area${dragging ? ' no-transition' : ''}`} style={{ display: 'flex', flex: 1, minHeight: 0, gap: 4, padding: '0 4px 4px' }}>
                   {splitLayout === 'side-left' ? (
                     <>
                       {filteredSessions.filter(s => s.id === focusSessionId).map(session => (
-                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-left" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, minWidth: 0, willChange: 'transform' }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
+                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-left" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: 1, minWidth: 0, willChange: 'transform' }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                       ))}
                       <div className="terminal-area" style={{ flex: 1, minWidth: 0, display: 'grid', gap: 4, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', alignContent: 'start' }}>
                         {filteredSessions.filter(s => s.id !== focusSessionId).map(session => (
-                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, willChange: 'transform' }} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
+                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ willChange: 'transform' }} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                         ))}
                       </div>
                     </>
@@ -784,49 +843,77 @@ export default memo(function TerminalArea({
                     <>
                       <div className="terminal-area" style={{ flex: 1, minWidth: 0, display: 'grid', gap: 4, gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', alignContent: 'start' }}>
                         {filteredSessions.filter(s => s.id !== focusSessionId).map(session => (
-                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, willChange: 'transform' }} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
+                          <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="grid" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') } else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ willChange: 'transform' }} onClose={onCloseTab} dimmed={focusMode && session.id !== activeSessionId} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                         ))}
                       </div>
                       {filteredSessions.filter(s => s.id === focusSessionId).map(session => (
-                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-right" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: paneSizes[session.id] || 1, minWidth: 0, willChange: 'transform' }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
+                        <TerminalPane key={session.id} session={session} onInput={onInput} onResize={onResize} onRestart={onRestart} onResumeSession={onResumeSession} onStartAgent={onStartAgent} onShowAgentModal={onShowAgentModal} writeData={writeBuffersRef.current[session.id] || ''} agentConfigs={agentConfigs} layoutMode="side-right" onLayoutChange={(m) => { if (m === 'grid') { setFocusSessionId(null); setSplitLayout('grid') } else if (m === 'focus') setFocusSessionId(null); else { setFocusSessionId(session.id); setSplitLayout(m) } }} style={{ flex: 1, minWidth: 0, willChange: 'transform' }} onClose={onCloseTab} dimmed={false} onTerminalOutput={onTerminalOutput} onResizeStart={handleResizeStart} onResizeMove={handleResizeMove} onResizeEnd={handleResizeEnd} />
                       ))}
                     </>
                   )}
                 </div>
               ) : (
-                <div
-                  className={`${useHorizontalScroll ? 'terminal-area-hscroll' : `terminal-area${dragging ? ' no-transition' : ''}`}`}
-                  ref={gridContainerRef}
-                  style={useHorizontalScroll ? undefined : tilingStyle}
-                >
-                  {filteredSessions.map((session, i) => (
-                    <TerminalPane
-                      key={session.id}
-                      session={session}
-                      onInput={onInput}
-                      onResize={onResize}
-                      onRestart={onRestart}
-                      onResumeSession={onResumeSession}
-                      onStartAgent={onStartAgent}
-                      onShowAgentModal={onShowAgentModal}
-                      writeData={writeBuffersRef.current[session.id] || ''}
-                      agentConfigs={agentConfigs}
-                      layoutMode="grid"
-                      onLayoutChange={(mode) => {
-                        if (mode === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') }
-                        else if (mode === 'side-left' || mode === 'side-right') { setFocusSessionId(session.id); setSplitLayout(mode) }
-                      }}
-                      style={useHorizontalScroll ? { flex: '1 0 50%', minWidth: 0, height: '100%' } : { ...getItemStyle(i, filteredSessions.length, activeIdx), willChange: 'transform' }}
-                      onClose={onCloseTab}
-                      dimmed={focusMode && session.id !== activeSessionId}
-                      onTerminalOutput={onTerminalOutput}
-                      onResizeStart={handleResizeStart}
-                      onResizeMove={handleResizeMove}
-                      onResizeEnd={handleResizeEnd}
-                      edgeHandles={getGridEdgeHandles(i, filteredSessions.length)}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="agent-fullscreen-bar" style={{ display: isFullScreen ? 'flex' : 'none' }}>
+                    <div className="agent-fullscreen-tabs">
+                      {filteredSessions.map(s => (
+                        <div
+                          key={s.id}
+                          className={`agent-fullscreen-tab ${s.id === focusSessionId ? 'active' : ''}`}
+                          onClick={() => { setFocusSessionId(s.id); onActiveSessionChange(s.id) }}
+                          title={s.id.slice(-8)}
+                        >
+                          <img className="tab-icon-img" src={getAgentColorImage(s.type)} alt={s.type} />
+                          <span className="agent-fullscreen-tab-label">{s.type.toUpperCase()}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="agent-fullscreen-actions">
+                      <button className="agent-fullscreen-btn" onClick={() => { setFocusSessionId(null); setSplitLayout('grid') }} title="Restore the tiled layout">
+                        <i className="codicon codicon-split-horizontal" style={{ fontSize: 14 }}></i>
+                        Split Agents
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    className={`terminal-area${dragging ? ' no-transition' : ''}`}
+                    ref={gridContainerRef}
+                    style={tilingStyle}
+                  >
+                    {filteredSessions.map((session, i) => (
+                      <TerminalPane
+                        key={session.id}
+                        session={session}
+                        onInput={onInput}
+                        onResize={onResize}
+                        onRestart={onRestart}
+                        onResumeSession={onResumeSession}
+                        onStartAgent={onStartAgent}
+                        onShowAgentModal={onShowAgentModal}
+                        writeData={writeBuffersRef.current[session.id] || ''}
+                        agentConfigs={agentConfigs}
+                        layoutMode={isFullScreen && session.id === focusSessionId ? 'focus' : 'grid'}
+                        onLayoutChange={(mode) => {
+                          if (mode === 'focus') { setFocusSessionId(session.id); setSplitLayout('grid') }
+                          else if (mode === 'side-left' || mode === 'side-right') { setFocusSessionId(session.id); setSplitLayout(mode) }
+                          else { setFocusSessionId(null); setSplitLayout('grid') }
+                        }}
+                        style={isFullScreen
+                          ? (session.id === focusSessionId
+                              ? { gridColumn: '1 / -1', gridRow: '1 / -1', willChange: 'transform' }
+                              : { display: 'none' })
+                          : { ...tilingLayout.positions[i], willChange: 'transform' }}
+                        onClose={onCloseTab}
+                        dimmed={focusMode && session.id !== activeSessionId && !isFullScreen}
+                        onTerminalOutput={onTerminalOutput}
+                        onResizeStart={handleResizeStart}
+                        onResizeMove={handleResizeMove}
+                        onResizeEnd={handleResizeEnd}
+                        edgeHandles={isFullScreen ? [] : getGridEdgeHandles(i, filteredSessions.length)}
+                      />
+                    ))}
+                  </div>
+                </>
               )
             )}
 

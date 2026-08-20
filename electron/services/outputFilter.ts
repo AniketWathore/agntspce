@@ -116,10 +116,6 @@ export class OutputFilterService {
       this._commandHistory.clear()
       for (const e of events) {
         if (!e || typeof e.sessionId !== 'string') continue
-        // Events attributed to the catch-all "system" bucket were a pre-fix
-        // misattribution bug (wrapper HTTP POSTs without a session id). They
-        // are noise and must not pollute per-session stats forever.
-        if (e.sessionId === 'system') continue
         const hist = this._commandHistory.get(e.sessionId) || []
         hist.push(e)
         if (hist.length > 200) hist.shift()

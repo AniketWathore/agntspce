@@ -341,6 +341,11 @@ function areTerminalPanePropsEqual(prev: Props, next: Props): boolean {
   if (prev.dimmed !== next.dimmed) return false
   if (prev.layoutMode !== next.layoutMode) return false
   if (prev.agentConfigs !== next.agentConfigs) return false
-  if (prev.style?.flex !== next.style?.flex) return false
+  const ps = prev.style
+  const ns = next.style
+  if (ps?.flex !== ns?.flex) return false
+  if (ps?.gridColumn !== ns?.gridColumn) return false
+  if (ps?.gridRow !== ns?.gridRow) return false
+  if (ps?.display !== ns?.display) return false
   return true
 }

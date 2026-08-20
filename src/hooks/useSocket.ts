@@ -68,7 +68,6 @@ interface UseSocketReturn {
   executionHistory: ExecutionEvent[]
   sessionStartedAt: number
   requestFilterStats: () => void
-  resetFilterStats: () => void
   createWorkspaceFromGit: (gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }) => Promise<any>
   updateWorkspaceConfig: (workspaceId: string, updates: any) => Promise<any>
   addWorktree: (workspaceId: string) => Promise<any>
@@ -490,11 +489,6 @@ socket.emit('get-cumulative-stats', {})
     socketRef.current?.emit('get-filter-stats', {})
   }, [])
 
-  const resetFilterStats = useCallback(() => {
-    socketRef.current?.emit('reset-filter-stats')
-    socketRef.current?.emit('get-filter-stats', {})
-  }, [])
-
   const getOrchestratorStats = useCallback((): Promise<OrchestratorStats> => {
     return new Promise((resolve) => {
       socketRef.current?.emit('get-orchestrator-stats', {}, (res: any) => {
@@ -891,7 +885,6 @@ socket.emit('get-cumulative-stats', {})
     commandHistory,
     searchEvents,
     requestFilterStats,
-    resetFilterStats,
     executionHistory,
     sessionStartedAt,
     getOrchestratorStats,
