@@ -472,6 +472,7 @@ function App() {
   const handleSelectWorkspace = useCallback((id: string) => {
     switchWorkspace(id)
     setWorkspaceSidebarOpen(true)
+    setActiveView(null)
     setViewMode('agents')
     setSelectedFilePath(null)
     if (appBodyRef.current) {
@@ -986,7 +987,7 @@ function App() {
           sessions={sessions}
           activeWorkspace={activeWorkspace}
           deletedWorkspaces={deletedWorkspaces}
-          onSelect={(id) => { switchWorkspace(id); setActiveView(null) }}
+          onSelect={(id) => { switchWorkspace(id); setActiveView(null); setViewMode('agents'); setSelectedFilePath(null) }}
           onDelete={handleDeleteWorkspace}
           onRestore={handleRestoreWorkspace}
           onPermanentDelete={handlePermanentDelete}
