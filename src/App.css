@@ -1560,6 +1560,8 @@
   padding: 4px;
   height: 100%;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
   transition: grid-template-columns 0.18s ease, grid-template-rows 0.18s ease;
 }
 
@@ -1748,6 +1750,7 @@
   will-change: transform;
   backface-visibility: hidden;
   transform: translateZ(0);
+  contain: paint;
 }
 
 .terminal-pane.dimmed {
