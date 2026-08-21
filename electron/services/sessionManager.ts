@@ -918,11 +918,19 @@ export class SessionManager extends EventEmitter {
   }
 
   async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
-    // Lazy restore: register metadata-only placeholders (no PTY, no agent
-    // process). Real sessions are spawned on demand via resumeSession().
+    // Shells always restore live (they have no resume UI — a placeholder
+    // shell would be a dead terminal). The first agent also restores live
+    // (PTY + agent started, no resume button) — matching the pre-lazy-restore
+    // behavior. Remaining agents are registered as metadata-only placeholders
+    // and spawned on demand via resumeSession().
+    let isFirstAgent = true
     for (const saved of sessions) {
       if (this.sessions.has(saved.id)) continue
       this.registerRestorableSession(saved)
+      if (saved.type === 'shell' || isFirstAgent) {
+        if ((AGENT_TYPES as readonly string[]).includes(saved.type)) isFirstAgent = false
+        await this.resumeSession(saved.id)
+      }
     }
   }
 
@@ -974,6 +982,11 @@ export class SessionManager extends EventEmitter {
     // Spawn the real PTY for this session id.
     const result = await this.createRawSession(savedType, savedCwd, sessionId)
     if (!result) return false
+
+    // The placeholder is now a live session — clear the flag so the
+    // renderer creates the xterm instance and stops treating it as
+    // a saved-but-not-running session.
+    session.restorable = false
 
     if (savedAgentConfig) {
       try {
