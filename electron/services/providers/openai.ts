@@ -1,6 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { streamText } from 'ai'
-import type { AIProvider, ApiKeyEntry, ChatMessage } from '../chatTypes'
+import { toModelMessages, type AIProvider, type ApiKeyEntry, type ChatMessage } from '../chatTypes'
 
 export class OpenAICompatibleProvider implements AIProvider {
   readonly id: string
@@ -55,7 +55,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     let streamError: unknown = null
     const result = streamText({
       model: client.chat(model || this.model),
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: toModelMessages(messages),
       maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
@@ -86,7 +86,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     let streamError: unknown = null
     const result = streamText({
       model: client.chat(model || this.model),
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: toModelMessages(messages),
       maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,

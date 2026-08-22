@@ -1,6 +1,6 @@
 import { createDeepSeek } from '@ai-sdk/deepseek'
 import { streamText } from 'ai'
-import type { AIProvider, ApiKeyEntry, ChatMessage } from '../chatTypes'
+import { toModelMessages, type AIProvider, type ApiKeyEntry, type ChatMessage } from '../chatTypes'
 
 const DEEPSEEK_API = 'https://api.deepseek.com'
 
@@ -57,7 +57,7 @@ export class DeepSeekProvider implements AIProvider {
     let streamError: unknown = null
     const result = streamText({
       model: client.chat(model || this.model),
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: toModelMessages(messages),
       maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
@@ -88,7 +88,7 @@ export class DeepSeekProvider implements AIProvider {
     let streamError: unknown = null
     const result = streamText({
       model: client.chat(model || this.model),
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: toModelMessages(messages),
       maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,

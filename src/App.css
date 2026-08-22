@@ -5539,6 +5539,112 @@
   border-top: 1px solid var(--border);
 }
 
+/* Attachment picker (paperclip) + pending chips */
+.chat-attach-btn {
+  align-self: flex-end;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.chat-attach-btn:hover {
+  color: var(--text-primary);
+  background: rgba(127, 127, 127, 0.15);
+}
+
+.chat-attach-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+
+.chat-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 200px;
+  padding: 3px 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.chat-attach-chip.has-thumb {
+  padding: 2px;
+}
+
+.chat-attach-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.chat-attach-icon {
+  font-size: 12px;
+}
+
+.chat-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attach-remove {
+  display: flex;
+  align-items: center;
+  padding: 1px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.chat-attach-remove:hover {
+  color: var(--text-primary);
+}
+
+/* Attachments shown inside a sent user message */
+.chat-msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.chat-msg-att-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+.chat-msg-att-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
 .chat-input {
   flex: 1;
   padding: 8px 12px;

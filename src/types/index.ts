@@ -179,6 +179,13 @@ export interface OpenFile {
 
 export type ProviderType = 'openai' | 'anthropic' | 'google' | 'deepseek' | 'openai-compatible'
 
+export interface ChatAttachment {
+  name: string
+  mediaType: string
+  kind: 'image' | 'file'
+  data: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -188,6 +195,7 @@ export interface ChatMessage {
   timestamp: number
   streaming?: boolean
   error?: boolean
+  attachments?: { name: string; kind: 'image' | 'file'; dataUrl?: string }[]
 }
 
 export interface ChatThread {

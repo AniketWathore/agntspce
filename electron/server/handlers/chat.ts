@@ -29,7 +29,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
     socket.emit('chat-history', { threadId, messages: [] })
   })
 
-  socket.on('chat-send', async ({ _reqId, threadId, providerId, content, model }) => {
+  socket.on('chat-send', async ({ _reqId, threadId, providerId, content, model, attachments }) => {
     try {
       const provider = ctx.chatManager.getProvider(providerId)
       if (!provider.isConfigured()) {
@@ -41,7 +41,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
       return
     }
 
-    const msg = await ctx.chatManager.sendMessage(threadId, providerId, content, model)
+    const msg = await ctx.chatManager.sendMessage(threadId, providerId, content, model, attachments)
     if (msg.error) {
       socket.emit('chat-error', { _reqId, threadId, error: msg.content })
     } else {
@@ -49,7 +49,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
     }
   })
 
-  socket.on('chat-send-stream', async ({ threadId, providerId, content, model }) => {
+  socket.on('chat-send-stream', async ({ threadId, providerId, content, model, attachments }) => {
     try {
       const provider = ctx.chatManager.getProvider(providerId)
       if (!provider.isConfigured()) {
@@ -67,7 +67,7 @@ export function registerChatHandlers(ctx: ServerContext, socket: Socket): void {
       } else {
         socket.emit('chat-stream-chunk', chunk)
       }
-    })
+    }, attachments)
   })
 
   socket.on('chat-stop-stream', ({ threadId }) => {

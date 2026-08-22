@@ -1,6 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { streamText } from 'ai'
-import type { AIProvider, ApiKeyEntry, ChatMessage } from '../chatTypes'
+import { toModelMessages, type AIProvider, type ApiKeyEntry, type ChatMessage } from '../chatTypes'
 
 const ANTHROPIC_API = 'https://api.anthropic.com'
 
@@ -51,9 +51,7 @@ export class AnthropicProvider implements AIProvider {
 
   private buildMessages(messages: ChatMessage[]) {
     const sysMsg = messages.filter(m => m.role === 'system').pop()
-    const chatMessages = messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    const chatMessages = toModelMessages(messages.filter(m => m.role !== 'system')) as Array<{ role: 'user' | 'assistant'; content: any }>
     return { sysMsg, chatMessages }
   }
 

@@ -18,6 +18,10 @@ export function bootstrapServer(userDataPath: string, rebuildMenu: () => void, s
   const expressApp = express()
   const httpServer = createServer(expressApp)
   const io = new Server(httpServer, {
+    // Base64 image/file attachments ride the chat-send events; the default
+    // 1MB Socket.IO cap would reject them. Local-only + token-gated, so a
+    // generous cap is safe.
+    maxHttpBufferSize: 25 * 1024 * 1024,
     cors: {
       origin: (origin, callback) => {
         if (isAllowedCorsOrigin(origin)) {

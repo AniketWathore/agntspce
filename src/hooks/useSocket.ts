@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
-import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CommandEvent, ExecutionEvent, ChatModelInfo, ChatThread } from '../types'
+import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CommandEvent, ExecutionEvent, ChatModelInfo, ChatThread, ChatAttachment } from '../types'
 import { SERVER_URL, getServerAuthToken, apiHeaders } from '../utils/serverAuth'
 
 export interface OrchestratorTaskStats {
@@ -106,7 +106,7 @@ interface UseSocketReturn {
   deleteFile: (absolutePath: string) => Promise<any>
   chatGetModels: () => Promise<ChatModelInfo[]>
   chatSend: (threadId: string, providerId: string, content: string, model?: string) => Promise<any>
-  chatSendStream: (threadId: string, providerId: string, content: string, model?: string) => void
+  chatSendStream: (threadId: string, providerId: string, content: string, model?: string, attachments?: ChatAttachment[]) => void
   chatStopStream: (threadId: string) => void
   chatGetHistory: (threadId: string) => Promise<any>
   chatListThreads: () => Promise<ChatThread[]>
@@ -730,8 +730,8 @@ socket.emit('get-cumulative-stats', {})
     })
   }, [registerOneShot])
 
-  const chatSendStream = useCallback((threadId: string, providerId: string, content: string, model?: string) => {
-    socketRef.current?.emit('chat-send-stream', { threadId, providerId, content, model })
+  const chatSendStream = useCallback((threadId: string, providerId: string, content: string, model?: string, attachments?: ChatAttachment[]) => {
+    socketRef.current?.emit('chat-send-stream', { threadId, providerId, content, model, attachments })
   }, [])
 
   const chatStopStream = useCallback((threadId: string) => {

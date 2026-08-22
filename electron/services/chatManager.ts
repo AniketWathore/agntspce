@@ -1,6 +1,7 @@
 import type {
   AIProvider,
   ApiKeyEntry,
+  ChatAttachment,
   ChatMessage,
   ChatModelInfo,
   ChatThread,
@@ -41,6 +42,32 @@ export interface UpdateKeyInput {
   apiKey?: string
   baseUrl?: string
   expiresAt?: number | null
+}
+
+// Attachment limits: hard caps keep history JSON and provider payloads sane.
+const MAX_ATTACHMENTS_PER_MESSAGE = 6
+const MAX_BINARY_BASE64_CHARS = 8 * 1024 * 1024 // ~6MB binary as base64
+const MAX_TEXT_ATTACHMENT_CHARS = 200_000
+
+function sanitizeAttachments(atts?: ChatAttachment[]): ChatAttachment[] {
+  if (!Array.isArray(atts)) return []
+  const out: ChatAttachment[] = []
+  for (const raw of atts) {
+    if (out.length >= MAX_ATTACHMENTS_PER_MESSAGE) break
+    if (!raw || typeof raw.name !== 'string' || !raw.name || typeof raw.data !== 'string' || !raw.data) continue
+    const kind: 'image' | 'file' = raw.kind === 'image' ? 'image' : 'file'
+    const mediaType = typeof raw.mediaType === 'string' && raw.mediaType ? raw.mediaType.slice(0, 100) : 'application/octet-stream'
+    let data = raw.data
+    // Normalize data URLs ("data:image/png;base64,...") to raw base64.
+    const m = /^data:[^;]+;base64,(.*)$/s.exec(data)
+    if (m) data = m[1]
+    if ((kind === 'image' || mediaType === 'application/pdf') && data.length > MAX_BINARY_BASE64_CHARS) continue
+    if (kind === 'file' && mediaType !== 'application/pdf' && data.length > MAX_TEXT_ATTACHMENT_CHARS) {
+      data = data.slice(0, MAX_TEXT_ATTACHMENT_CHARS) + '\n…[truncated]'
+    }
+    out.push({ name: raw.name.slice(0, 200), mediaType, kind, data })
+  }
+  return out
 }
 
 export class ChatManager {
@@ -441,7 +468,8 @@ export class ChatManager {
     threadId: string,
     providerId: string,
     content: string,
-    model?: string
+    model?: string,
+    attachments?: ChatAttachment[]
   ): Promise<ChatMessage> {
     const provider = this.getProvider(providerId)
     if (!provider.isConfigured()) {
@@ -457,6 +485,7 @@ export class ChatManager {
     }
 
     const thread = this.getOrCreateThread(threadId, providerId, model || provider.model)
+    const atts = sanitizeAttachments(attachments)
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
@@ -464,6 +493,7 @@ export class ChatManager {
       provider: providerId,
       model: model || provider.model,
       timestamp: Date.now(),
+      ...(atts.length ? { attachments: atts } : {}),
     }
     thread.messages.push(userMsg)
 
@@ -501,7 +531,8 @@ export class ChatManager {
     providerId: string,
     content: string,
     model: string | undefined,
-    onChunk: (chunk: StreamChunk) => void
+    onChunk: (chunk: StreamChunk) => void,
+    attachments?: ChatAttachment[]
   ): Promise<void> {
     const provider = this.getProvider(providerId)
     const resolvedModel = model || provider.model
@@ -516,6 +547,7 @@ export class ChatManager {
       return
     }
 
+    const atts = sanitizeAttachments(attachments)
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
@@ -523,6 +555,7 @@ export class ChatManager {
       provider: providerId,
       model: resolvedModel,
       timestamp: Date.now(),
+      ...(atts.length ? { attachments: atts } : {}),
     }
     thread.messages.push(userMsg)
 

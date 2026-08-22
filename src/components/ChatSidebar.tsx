@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import useSocketEvent from '../hooks/useSocketEvent'
-import type { ChatMessage, ChatModelInfo, ChatThread, StreamChunk } from '../types'
+import type { ChatMessage, ChatModelInfo, ChatThread, StreamChunk, ChatAttachment } from '../types'
 import { apiHeadersSync } from '../utils/serverAuth'
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
   onNavigateToSettings?: () => void
   socket: {
     chatGetModels: () => Promise<ChatModelInfo[]>
-    chatSendStream: (threadId: string, providerId: string, content: string, model?: string) => void
+    chatSendStream: (threadId: string, providerId: string, content: string, model?: string, attachments?: ChatAttachment[]) => void
     chatStopStream: (threadId: string) => void
     chatGetHistory: (threadId: string) => Promise<{ threadId: string; messages: ChatMessage[] }>
     chatListThreads: () => Promise<ChatThread[]>
@@ -29,6 +29,37 @@ const SERVER_URL = 'http://127.0.0.1:9460'
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+}
+
+// ── Attachments (images + files) ─────────────────────────────
+const MAX_FILE_BYTES = 8 * 1024 * 1024
+const MAX_PENDING_ATTACHMENTS = 6
+
+interface PendingAttachment {
+  id: string
+  name: string
+  mediaType: string
+  kind: 'image' | 'file'
+  data: string   // base64 (image/pdf) or raw text — what gets sent
+  dataUrl?: string // thumbnail preview for images
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result || ''))
+    r.onerror = () => reject(new Error('read failed'))
+    r.readAsDataURL(file)
+  })
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result || ''))
+    r.onerror = () => reject(new Error('read failed'))
+    r.readAsText(file)
+  })
 }
 
 function formatTime(ts: number): string {
@@ -245,10 +276,66 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     socket.chatListThreads().then(t => setThreads(t))
   }, [socket])
 
+  // ── Attachments ──────────────────────────────────────────────
+  const [pending, setPending] = useState<PendingAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleAttachClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const removePending = useCallback((id: string) => {
+    setPending(prev => prev.filter(p => p.id !== id))
+  }, [])
+
+  const handleFilesChosen = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    for (const file of files) {
+      if (file.size > MAX_FILE_BYTES) continue
+      try {
+        if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+          const dataUrl = await readFileAsDataUrl(file)
+          const isImage = file.type.startsWith('image/')
+          setPending(prev => prev.length >= MAX_PENDING_ATTACHMENTS ? prev : [
+            ...prev,
+            {
+              id: generateId(),
+              name: file.name,
+              mediaType: file.type || 'application/octet-stream',
+              kind: isImage ? ('image' as const) : ('file' as const),
+              data: dataUrl.replace(/^data:[^;]+;base64,/, ''),
+              ...(isImage ? { dataUrl } : {}),
+            },
+          ])
+        } else {
+          const text = await readFileAsText(file)
+          setPending(prev => prev.length >= MAX_PENDING_ATTACHMENTS ? prev : [
+            ...prev,
+            {
+              id: generateId(),
+              name: file.name,
+              mediaType: file.type || 'text/plain',
+              kind: 'file' as const,
+              data: text,
+            },
+          ])
+        }
+      } catch {}
+    }
+  }, [])
+
   const handleSend = useCallback(() => {
     const text = input.trim()
-    if (!text || streaming) return
+    if ((!text && pending.length === 0) || streaming) return
     setInput('')
+    const payloadAttachments: ChatAttachment[] = pending.map(p => ({
+      name: p.name, mediaType: p.mediaType, kind: p.kind, data: p.data,
+    }))
+    const displayAttachments = pending.length > 0
+      ? pending.map(p => ({ name: p.name, kind: p.kind, dataUrl: p.dataUrl }))
+      : undefined
+    setPending([])
     const userMsg: ChatMessage = {
       id: generateId(),
       role: 'user',
@@ -256,6 +343,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
       timestamp: Date.now(),
       provider: selectedProvider,
       model: selectedModel,
+      ...(displayAttachments ? { attachments: displayAttachments } : {}),
     }
     const assistantMsg: ChatMessage = {
       id: generateId(),
@@ -273,8 +361,11 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
       tid = generateId()
       setThreadId(tid)
     }
-    socket.chatSendStream(tid, selectedProvider, text, selectedModel)
-  }, [input, streaming, selectedProvider, selectedModel, threadId, socket])
+    socket.chatSendStream(
+      tid, selectedProvider, text, selectedModel,
+      payloadAttachments.length > 0 ? payloadAttachments : undefined,
+    )
+  }, [input, streaming, selectedProvider, selectedModel, threadId, socket, pending])
 
   const prevStreamingRef = useRef(false)
   useEffect(() => {
@@ -338,7 +429,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && pending.length === 0) {
       e.preventDefault()
       handleSend()
     }
@@ -366,6 +457,17 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
               {msg.content || (msg.streaming ? <span className="chat-cursor">|</span> : '')}
               {msg.streaming && msg.content && <span className="chat-cursor">|</span>}
             </>
+          )}
+          {!msg.attachments?.length ? null : (
+            <div className="chat-msg-attachments">
+              {msg.attachments.map((a, ai) => a.kind === 'image' && a.dataUrl ? (
+                <img key={ai} src={a.dataUrl} alt={a.name} className="chat-msg-att-thumb" title={a.name} />
+              ) : (
+                <span key={ai} className="chat-msg-att-file" title={a.name}>
+                  <i className="codicon codicon-file" />{a.name}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -494,7 +596,37 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
             <div ref={messagesEndRef} />
           </div>
 
+          {pending.length > 0 && (
+            <div className="chat-attach-row">
+              {pending.map(p => (
+                <div key={p.id} className={`chat-attach-chip${p.kind === 'image' ? ' has-thumb' : ''}`} title={p.name}>
+                  {p.kind === 'image' && p.dataUrl
+                    ? <img src={p.dataUrl} alt={p.name} className="chat-attach-thumb" />
+                    : <i className="codicon codicon-file chat-attach-icon" />}
+                  <span className="chat-attach-name">{p.name}</span>
+                  <button className="chat-attach-remove" onClick={() => removePending(p.id)} title="Remove">
+                    <i className="codicon codicon-close" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="chat-input-area">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFilesChosen}
+            />
+            <button
+              className="chat-attach-btn"
+              onClick={handleAttachClick}
+              disabled={streaming}
+              title="Attach images or files"
+            >
+              <i className="codicon codicon-attach" style={{ fontSize: 14 }}></i>
+            </button>
             <textarea
               ref={inputRef}
               className="chat-input"
@@ -517,7 +649,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
               <button
                 className="chat-send-btn"
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() && pending.length === 0}
                 title="Send"
               >
                 <i className="codicon codicon-send" style={{ fontSize: 13 }}></i>
