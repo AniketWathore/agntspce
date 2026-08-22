@@ -130,6 +130,26 @@ export const BUILTIN_FILTERS: Record<string, FilterDefinition> = {
     onEmpty: 'ok fetched',
   },
 
+  'git-show': {
+    description: 'Compact git show output',
+    matchCommand: '^git\\s+show\\b',
+    stripAnsi: true,
+    truncateLinesAt: 500,
+    headLines: 80,
+    onEmpty: 'no changes',
+  },
+
+  'git-ls-files': {
+    // Agent plumbing runs this constantly (--recurse-submodules listings are
+    // thousands of paths); without a filter it reports raw == filtered.
+    description: 'Compact git ls-files listing',
+    matchCommand: '^git\\s+ls-files\\b',
+    stripAnsi: true,
+    headLines: 100,
+    maxLines: 150,
+    onEmpty: 'no files',
+  },
+
   'npm-test': {
     description: 'Compact npm test output',
     matchCommand: '^npm\\s+test\\b',

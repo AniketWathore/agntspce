@@ -291,7 +291,7 @@ export default function Dashboard(props: Props) {
                       return (
                         <div key={sid} className="savings-row" style={{ fontSize: 12, padding: '4px 0' }}>
                           <span style={{ color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 11 }}>
-                            {sid.slice(0, 12)} <span style={{ opacity: 0.7 }}>&middot; {ts}</span>
+                            {sid} <span style={{ opacity: 0.7 }}>&middot; {ts}</span>
                           </span>
                           <span style={{ marginLeft: 8 }}>
                             {stats.commands} cmd{stats.commands !== 1 ? 's' : ''} &mdash;

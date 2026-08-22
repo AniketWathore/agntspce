@@ -109,7 +109,29 @@ export function compileFilter(name: string, def: FilterDefinition): CompiledFilt
 }
 
 export function findFilterIn(command: string, filters: CompiledFilter[]): CompiledFilter | undefined {
-  return filters.find(f => f.matchRegex.test(command))
+  return filters.find(f => f.matchRegex.test(normalizeCommand(command)))
+}
+
+// Strip git global-option noise ("-c k=v", "--no-pager", "--git-dir=…", …)
+// so patterns anchored at the subcommand still match plumbing-style
+// invocations like "git -c core.quotepath=false status". Mirrors the wrapper
+// (bin/agntspce.mjs) so both sides agree on what is filterable.
+export function normalizeCommand(command: string): string {
+  const tokens = command.split(/\s+/)
+  const result: string[] = []
+  const skipNext = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'])
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i]
+    if (/^--(?:no-)?(?:pager|paginate)$/.test(t)) { i++; continue }
+    if (/^--(?:literal|glob|noglob|icase)-pathspecs$/.test(t)) { i++; continue }
+    if (/^--(?:html|man|info)-path$/.test(t)) { i++; continue }
+    if (/^--(?:git-dir|work-tree|namespace|exec-path)=/.test(t)) { i++; continue }
+    if (skipNext.has(t)) { i += 2; continue }
+    result.push(t)
+    i++
+  }
+  return result.join(' ')
 }
 
 export function applyFilter(filter: CompiledFilter, stdout: string): string {
@@ -216,9 +238,10 @@ export class FilterRegistry {
   /// Check if a command matches any non-catch-all filter.
   /// Used by processCommandLine to distinguish shell commands from natural-language prompts.
   hasSpecificFilter(command: string): boolean {
+    const normalized = normalizeCommand(command)
     for (const filter of this.filters) {
       if (filter.name === 'strip-ansi') continue
-      if (filter.matchRegex.test(command)) return true
+      if (filter.matchRegex.test(normalized)) return true
     }
     return false
   }

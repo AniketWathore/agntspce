@@ -85,6 +85,15 @@ const BUILTIN_FILTERS = [
     headLines: 80,
   },
   {
+    // Agent plumbing runs this constantly (--recurse-submodules listings are
+    // thousands of paths); without a filter it reports raw == filtered.
+    matchCommand: /^git\s+ls-files\b/,
+    stripAnsi: true,
+    headLines: 100,
+    maxLines: 150,
+    onEmpty: 'no files',
+  },
+  {
     matchCommand: /^npm\b/,
     stripAnsi: true,
     stripLinesMatching: [/^npm (WARN|notice)/, /^added \d+ package/, /^removed \d+ package/, /^changed \d+ package/],
