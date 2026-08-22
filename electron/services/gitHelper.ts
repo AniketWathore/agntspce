@@ -149,9 +149,11 @@ export class GitHelper {
   async getLog(worktreePath: string, maxCount = 20): Promise<{ hash: string, message: string, author: string, date: string }[] | null> {
     const state = this.getPathState(worktreePath)
     if (!state.ok) return null
+    // Coerce to a bounded integer — the value arrives from the renderer.
+    const n = Math.min(Math.max(Math.floor(Number(maxCount) || 20), 1), 1000)
     try {
       const { stdout } = await this.execGit(
-        ['log', `--max-count=${maxCount}`, '--format=%H|%s|%an|%ar'],
+        ['log', `--max-count=${n}`, '--format=%H|%s|%an|%ar'],
         { cwd: state.normalized, timeout: 10000 },
       )
       return stdout.trim().split('\n').filter(Boolean).map(line => {

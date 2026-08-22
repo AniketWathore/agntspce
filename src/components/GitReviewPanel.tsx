@@ -90,6 +90,8 @@ export default function GitReviewPanel({
   const [graphHeight, setGraphHeight] = useState(200)
   const graphRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { dragCleanupRef.current?.() }, [])
 
   const stagedFiles = status?.files?.filter(f => f.staged) || []
   const unstagedFiles = status?.files?.filter(f => !f.staged) || []
@@ -150,11 +152,13 @@ export default function GitReviewPanel({
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      dragCleanupRef.current = null
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.body.style.cursor = 'ns-resize'
     document.body.style.userSelect = 'none'
+    dragCleanupRef.current = onUp
   }
 
   const currentBranch = branches?.find(b => b.current)?.name || status?.branch || ''

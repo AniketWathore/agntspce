@@ -214,9 +214,12 @@ export class WorkspaceManager {
   }
 
   async saveAllSessionBuffers(workspaceId: string, buffers: Map<string, string>): Promise<void> {
-    for (const [id, buf] of buffers) {
-      if (buf) await this.saveSessionBuffer(workspaceId, id, buf)
-    }
+    // Independent files — write them concurrently.
+    await Promise.all(
+      Array.from(buffers)
+        .filter(([, buf]) => buf)
+        .map(([id, buf]) => this.saveSessionBuffer(workspaceId, id, buf))
+    )
   }
 
   saveSessionStateSync(workspaceId: string, sessions: SavedSessionData[]): void {

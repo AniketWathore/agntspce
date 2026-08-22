@@ -42,6 +42,8 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [threadId, setThreadId] = useState<string>('')
+  const threadIdRef = useRef(threadId)
+  threadIdRef.current = threadId
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -86,8 +88,13 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     }
     const known = threads.some(t => t.id === threadId)
     if (!known) return
+    // Staleness guard: a slow response for an earlier thread must not
+    // overwrite the messages of the thread the user switched to.
+    const requested = threadId
     socket.chatGetHistory(threadId).then(data => {
-      setMessages(data?.messages || [])
+      if (threadIdRef.current === requested) {
+        setMessages(data?.messages || [])
+      }
     })
   }, [socket, threadId, threads])
 
@@ -154,11 +161,14 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
 
   useSocketEvent<StreamChunk>(socket.onChatStreamChunk, (chunk) => {
     if (chunk.threadId !== threadId) return
+    if (chunk.done) {
+      setStreaming(false)
+    }
     setMessages(prev => {
       const last = prev[prev.length - 1]
+      const isStreamingAssistant = last?.role === 'assistant' && last.streaming
       if (chunk.done) {
-        setStreaming(false)
-        if (last?.role === 'assistant' && last.streaming) {
+        if (isStreamingAssistant) {
           const updated = [...prev]
           updated[updated.length - 1] = {
             ...last,
@@ -169,7 +179,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
         }
         return prev
       }
-      if (last?.role === 'assistant' && last.streaming) {
+      if (isStreamingAssistant) {
         const updated = [...prev]
         updated[updated.length - 1] = {
           ...last,
@@ -183,30 +193,28 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
 
   useSocketEvent<{ threadId: string; message: ChatMessage }>(socket.onChatResponse, (data) => {
     if (data.threadId !== threadId) return
+    setStreaming(false)
     setMessages(prev => {
       const last = prev[prev.length - 1]
       if (last?.role === 'assistant' && last.streaming) {
         const updated = [...prev]
         updated[updated.length - 1] = { ...data.message, streaming: false }
-        setStreaming(false)
         return updated
       }
-      setStreaming(false)
       return [...prev, { ...data.message, streaming: false }]
     })
   }, [socket, threadId])
 
   useSocketEvent<{ threadId: string; error: string }>(socket.onChatError, (data) => {
     if (data.threadId !== threadId) return
+    setStreaming(false)
     setMessages(prev => {
       const last = prev[prev.length - 1]
       if (last?.role === 'assistant' && last.streaming) {
         const updated = [...prev]
         updated[updated.length - 1] = { ...last, content: data.error, streaming: false, error: true }
-        setStreaming(false)
         return updated
       }
-      setStreaming(false)
       return [...prev, { id: generateId(), role: 'assistant', content: data.error, timestamp: Date.now(), error: true }]
     })
   }, [socket, threadId])

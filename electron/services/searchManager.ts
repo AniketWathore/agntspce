@@ -6,7 +6,6 @@ import crypto from 'node:crypto'
 
 import { fileURLToPath } from 'node:url'
 
-const HMAC_SECRET = 'agntspce-search-integration-v1-do-not-rely-on-this-for-security'
 const TOKEN_TTL_SECS = 86400
 const SEARCH_VERSION = '0.1.0'
 
@@ -242,13 +241,40 @@ function detectInstalledAgents(): AgentCheck[] {
   return AGENT_CHECKS.filter((a) => a.check())
 }
 
+// Per-install random secret for signing search session tokens. Persisted in
+// userData with user-only permissions. Nothing external verifies these tokens
+// today (the search tool ignores them), so rotating the secret is harmless.
+let _installSecret: string | null = null
+function getInstallSecret(): string {
+  if (_installSecret) return _installSecret
+  try {
+    const secretPath = path.join(app.getPath('userData'), '.install-secret')
+    try {
+      const existing = fs.readFileSync(secretPath, 'utf-8').trim()
+      if (existing.length >= 32) {
+        _installSecret = existing
+        return _installSecret
+      }
+    } catch {}
+    const secret = crypto.randomBytes(32).toString('hex')
+    fs.mkdirSync(path.dirname(secretPath), { recursive: true })
+    fs.writeFileSync(secretPath, secret + '\n', { encoding: 'utf-8', mode: 0o600 })
+    _installSecret = secret
+    return _installSecret
+  } catch {
+    // userData unavailable — fall back to a per-process random secret
+    _installSecret = crypto.randomBytes(32).toString('hex')
+    return _installSecret
+  }
+}
+
 function generateSessionToken(pid?: number): string {
   const now = Math.floor(Date.now() / 1000)
   const expiry = now + TOKEN_TTL_SECS
   const nonce = crypto.randomBytes(8).toString('hex')
   const effectivePid = pid ?? process.pid
   const payload = `${effectivePid}:${expiry}:${nonce}`
-  const sig = crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest()
+  const sig = crypto.createHmac('sha256', getInstallSecret()).update(payload).digest()
   const combined = Buffer.concat([Buffer.from(payload, 'utf-8'), sig])
   return combined.toString('base64url')
 }
@@ -506,7 +532,6 @@ export {
   injectOpenCodeConfig,
   removeOpenCodeConfig,
   detectInstalledAgents,
-  HMAC_SECRET,
   TOKEN_TTL_SECS,
   SEARCH_VERSION,
 }

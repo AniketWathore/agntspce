@@ -71,12 +71,6 @@ interface GridDef {
   cells: CellPlacement[]
 }
 
-interface GridDef {
-  cols: number
-  rows: number
-  cells: CellPlacement[]
-}
-
 // Deterministic tiling layouts. Odd counts use a "master-stack" arrangement
 // (agent 1 spans the full height on the left, remaining agents stack in a grid
 // on the right, Hyprland/tmux-style). Even counts use equal-sized grids.
@@ -464,9 +458,6 @@ export default memo(function TerminalArea({
         else if (count === 7) next[s.id] = i === 0 ? 2 : 1
         else next[s.id] = 1
       })
-      try {
-        localStorage.setItem('terminalPaneSizes', JSON.stringify(next))
-      } catch {}
       return next
     })
   }, [filteredSessions])
@@ -608,7 +599,11 @@ export default memo(function TerminalArea({
     ? filteredSessions.findIndex(s => s.id === activeSessionId)
     : 0
   const sessionIds = filteredSessions.map(s => s.id)
-  const tilingStyle = getTilingStyle(filteredSessions.length, paneSizes, sessionIds)
+  // While a pane resize drag is in flight, fold the in-progress size into the
+  // computed style so any React re-render (status flip etc.) doesn't snap the
+  // grid back to pre-drag sizes and fight handleResizeMove's direct DOM writes.
+  const effectivePaneSizes = dragging ? { ...paneSizes, ...dragSizeRef.current } : paneSizes
+  const tilingStyle = getTilingStyle(filteredSessions.length, effectivePaneSizes, sessionIds)
   const useHorizontalScroll = bottomShellOpen && filteredSessions.length >= 3
   const isFullScreen = focusSessionId !== null && splitLayout === 'grid'
 

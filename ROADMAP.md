@@ -32,28 +32,33 @@ Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[/]` skipped/wo
 
 ## Phase 3 — Medium security
 
-- [ ] **P3.1** Store chat API keys via Electron `safeStorage` instead of plaintext JSON (`chatManager.ts`)
-- [ ] **P3.2** Window hardening: `setWindowOpenHandler` deny + `will-navigate` guard (`window.ts`)
-- [ ] **P3.3** Validate `maxCount` numeric coercion in git handlers (`gitHelper.ts:153`, `server/handlers/git.ts`)
-- [ ] **P3.4** Validate worktree `namingPattern` (reject `../`, spaces) — folded into P1.4
-- [ ] **P3.5** Restrict `open-in-explorer` to workspace/session paths (`window.ts:485-493`)
-- [ ] **P3.6** Replace hardcoded HMAC constants with per-install random secret (`searchManager.ts:9`, `rtkManager.ts:12`)
+- [x] **P3.1** Store chat API keys via Electron `safeStorage` instead of plaintext JSON (`chatManager.ts`) — config saved encrypted (`enc:v1:` prefix) when OS keychain available; legacy plaintext files load transparently and re-save encrypted on next change
+- [x] **P3.2** Window hardening: `setWindowOpenHandler` deny-all + `will-navigate` guard (allows only app origin; external http(s) links go to system browser)
+- [x] **P3.3** Validate `maxCount` numeric coercion in git path (`gitHelper.getLog` clamps to int 1–1000; renderer-supplied value can no longer reach git argv raw)
+- [x] **P3.4** Validate worktree `namingPattern` — done in P1.4 (`safeWorktreeName`)
+- [x] **P3.5** Restrict `open-in-explorer` — better: removed entirely. Renderer declared it but never called it; deleted preload exposure + type + IPC handler
+- [~] **P3.6** Hardcoded HMAC constants:
+  - [x] `searchManager.ts` — now signs tokens with a per-install random secret persisted at `<userData>/.install-secret` (mode 0600); nothing external verifies these tokens so rotation is harmless
+  - [/] `rtkManager.ts` — **won't-fix for now**: the compiled RTK binaries (`bin/rtk-*`) embed the same constant and *verify* `AGNTSPCE_RTK_SESSION` tokens against it; changing our side alone would break RTK session gating. Requires rebuilding the Rust binary with a matching secret mechanism
 
 ## Phase 4 — Medium perf / bugs
 
-- [ ] **P4.1** Fix O(n²) buffer re-slicing in `terminal-output` handler (`useSocket.ts:190-192`)
-- [ ] **P4.2** Prune orphaned `outputBuffer` entries on workspace switch / sessions replace (`useSocket.ts:213-217`)
-- [ ] **P4.3** Re-render storm: avoid rebuilding whole `sessions` object per status flip; stop keydown-listener rebinding per event (`App.tsx:407-666`)
-- [ ] **P4.4** Chat history race: staleness guard on thread switch (`ChatSidebar.tsx:81-91`)
-- [ ] **P4.5** Purify setState-inside-updater (`App.tsx:894 closeFile`, `ChatSidebar.tsx:156-210`)
-- [ ] **P4.6** Drag listeners cleanup on unmount (`App.tsx:668+`, `TerminalArea.tsx`, `GitReviewPanel.tsx:137`)
-- [ ] **P4.7** Grid style thrash during resize drag (`TerminalArea.tsx:526`)
+- [x] **P4.1** O(n²) buffer fix: pending output is accumulated as chunk arrays with byte counters; trim-to-cap happens amortized (only past 2× cap), join+single slice at flush time (`useSocket.ts`)
+- [x] **P4.2** Orphaned `outputBuffer` entries pruned on `sessions` / `workspace-changed` full snapshots
+- [x] **P4.3** Re-render storm (surgical subset): global keydown listener now reads session state through a ref and binds once for the app lifetime instead of remove/re-add on every status flip. Full memoization architecture deferred → Phase 6
+- [x] **P4.4** Chat history race: staleness guard ignores responses for threads the user has already switched away from (`ChatSidebar.tsx`)
+- [x] **P4.5** Purified setState-inside-updater: `closeFile` computes next active file outside the updater; chat stream/response/error handlers set `streaming` outside updaters (StrictMode-safe)
+- [x] **P4.6** Drag listeners removed on unmount if a drag is mid-flight (`App.tsx` ×2 resizers, `TerminalPane.tsx` edge drag, `GitReviewPanel.tsx` graph drag) via `dragCleanupRef` + unmount effect
+- [x] **P4.7** Grid style thrash: while dragging, computed `tilingStyle` folds in `dragSizeRef` values, so React re-renders no longer snap the grid back mid-drag
 
 ## Phase 5 — Consistency / dead code
 
-- [ ] **P5.1** Single source of truth for agent types/configs: sync `FALLBACK_AGENTS` (App.tsx) ↔ `agentManager.ts`; derive `isAgentType` from shared constant (`TerminalPane.tsx:44`) so StartupUI shows for all agent types
-- [ ] **P5.2** Delete duplicate `GridDef` interface, unused `terminalPaneSizes` write (`TerminalArea.tsx:68-78,468`)
-- [ ] **P5.3** Parallelize await-in-loop hot spots flagged by Skylos (`workspaceManager.ts`, `worktreeHelper.ts`) — only where order doesn't matter
+- [x] **P5.1** Single source of truth: new `src/utils/agentTypes.ts` exports `ALL_AGENT_TYPES` / `AGENT_TYPE_SET` / `isAgentTypeId()`; App.tsx + TerminalPane use it — fixes StartupUI never appearing for cursor-agent/copilot/droid/etc. `FALLBACK_AGENTS` synced with backend agentManager (claude verbose/debug flags, codex sandbox/approval flags + models/reasoning/verbosity, gemini models)
+- [x] **P5.2** Deleted duplicate `GridDef` interface + unused `terminalPaneSizes` localStorage write (`TerminalArea.tsx`)
+- [~] **P5.3** Parallelize await-in-loop — only where safe:
+  - [x] `workspaceManager.saveAllSessionBuffers` → `Promise.all` (independent file writes)
+  - [/] worktreeHelper loops → sequential required (concurrent `git worktree add` risks index-lock contention)
+  - [/] workspaceManager restore/permanent-delete scans → early-exit loops are already optimal for their lookup semantics
 
 ## Phase 6 — Larger refactors (deferred, need own review cycle)
 
@@ -111,3 +116,28 @@ npm run electron:dev  # manual smoke test: terminals spawn, output streams, chat
   2. In this SDK version, `textStream` swallows error chunks entirely, so provider errors never reached `chatManager`'s catch — the UI got an empty assistant reply instead of an error notice.
   - Fix: explicit `onError` captures the error (no stdout dump), then it's rethrown after stream consumption so `chatManager.sendMessageStream` catches it and emits a proper `chat-error` to the UI.
   - Note: the original 402 itself is not a bug — that OpenRouter key is out of credits (top up at openrouter.ai/settings/credits or switch provider/model).
+
+### 2026-08-22 — Phases 3–5 implemented
+
+**Phase 3 (medium security)**
+- `electron/services/chatManager.ts`: chat config now encrypted at rest via `safeStorage.encryptString` (`enc:v1:` prefix + base64). Legacy plaintext configs load transparently and get encrypted on next save. Falls back to plaintext write only if OS keychain unavailable.
+- `electron/window.ts`: `setWindowOpenHandler(() => ({ action: 'deny' }))` + `will-navigate` guard on every BrowserWindow — navigation limited to the app bundle origin; external http(s) URLs are handed to the system browser via `shell.openExternal`.
+- `electron/services/gitHelper.ts`: `getLog` coerces renderer-supplied `maxCount` to bounded integer (1–1000).
+- Removed unused `open-in-explorer` IPC surface entirely (preload exposure, type declaration, handler) — renderer never called it.
+- `electron/services/searchManager.ts`: search session tokens now signed with per-install random secret persisted at `<userData>/.install-secret` (0600). rtkManager constant left in place — the prebuilt RTK binaries verify tokens against it; changing requires a Rust rebuild.
+
+**Phase 4 (perf/bugs)**
+- `src/hooks/useSocket.ts`: pending output stored as chunk arrays with byte counters; amortized trim past 2× cap, single join+slice per flush. Orphans pruned on full session snapshots.
+- `src/App.tsx`: keydown listener binds once; reads `activeSessionId`/`agentSessions` through a ref (no more remove/re-add + tree re-render per status flip).
+- `src/components/ChatSidebar.tsx`: thread-history responses guarded against stale thread switches.
+- `src/App.tsx` `closeFile` + ChatSidebar stream/response/error handlers: side-effect-free updaters.
+- Drag-listener cleanup on unmount: `App.tsx` (sidebar + terminal resizers), `TerminalPane.tsx` (edge drag), `GitReviewPanel.tsx` (graph drag) — all register their `onUp` into a `dragCleanupRef` flushed by an unmount effect.
+- `src/components/TerminalArea.tsx`: during pane-resize drags the computed grid style includes in-flight sizes, so React re-renders no longer snap back mid-drag.
+
+**Phase 5 (consistency/dead code)**
+- New `src/utils/agentTypes.ts` = single source of agent-capable types; App.tsx and TerminalPane.tsx consume it. StartupUI now appears for all agent types (previously only claude/codex/opencode/gemini), un-sticking waiting sessions of legacy types.
+- `FALLBACK_AGENTS` (offline path) synced to backend agentManager: Claude Verbose/Debug, Codex sandbox+approval flags and models/reasoning/verbosity, Gemini models.
+- Removed duplicate `GridDef` interface and dead `terminalPaneSizes` localStorage write.
+- Parallelized `workspaceManager.saveAllSessionBuffers`; skipped worktree loops (git lock contention) and early-exit lookup scans by design.
+
+**Verification**: `tsc -b` clean · oxlint warning count unchanged from baseline (39, all pre-existing categories) · `npm run build` succeeds.

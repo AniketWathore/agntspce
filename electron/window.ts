@@ -32,6 +32,19 @@ function buildWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   })
+
+  // Renderer hardening: never open new windows from web content, and block
+  // navigation away from the app bundle (dev server in dev, file:// in prod).
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env.VITE_DEV_SERVER_URL
+    const allowed = devUrl ? url.startsWith(devUrl) : url.startsWith('file://')
+    if (!allowed) {
+      event.preventDefault()
+      if (url.startsWith('http://') || url.startsWith('https://')) shell.openExternal(url)
+    }
+  })
+
   win.maximize()
   if (isDev) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL!)
@@ -481,15 +494,5 @@ export function registerIpcHandlers(rebuildMenuFn: () => void, serverAuthToken?:
     const dup = await workspaceManager.duplicateWorkspace(activeId, newName)
     rebuildMenuFn()
     return dup
-  })
-
-  ipcMain.handle('open-in-explorer', async (_event, filePath: string) => {
-    if (!filePath) return false
-    try {
-      await shell.openPath(filePath)
-      return true
-    } catch {
-      return false
-    }
   })
 }

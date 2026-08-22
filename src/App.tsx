@@ -28,6 +28,7 @@ import '@vscode/codicons/dist/codicon.css'
 import './App.css'
 import { assetUrl } from './utils/assetUrl'
 import { parseCombo, eventMatches, type ShortcutCombo } from './utils/shortcuts'
+import { AGENT_TYPE_SET } from './utils/agentTypes'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
   { id: 'claude', name: 'Claude Code', icon: '🤖' },
@@ -48,7 +49,11 @@ const FALLBACK_AGENTS: AgentConfig[] = [
   {
     id: 'claude', name: 'Claude Code', icon: '🤖', description: 'Anthropic Claude Code CLI',
     modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Resume conversation' }, { id: 'resume', name: 'Resume', description: 'Restore interrupted session' }],
-    flags: [{ id: 'skipPermissions', flag: '--dangerously-skip-permissions', label: '🚀 YOLO Mode', description: 'YOLO Mode (skip permissions)', category: 'permissions', default: true }],
+    flags: [
+      { id: 'skipPermissions', flag: '--dangerously-skip-permissions', label: '🚀 YOLO Mode', description: 'YOLO Mode (skip permissions)', category: 'permissions', default: true },
+      { id: 'verbose', flag: '--verbose', label: '📝 Verbose', description: 'Verbose output mode', category: 'output', default: false },
+      { id: 'debug', flag: '--debug', label: '🐛 Debug', description: 'Debug mode with detailed logging', category: 'output', default: false },
+    ],
     defaultMode: 'fresh',
   },
   {
@@ -60,12 +65,26 @@ const FALLBACK_AGENTS: AgentConfig[] = [
   {
     id: 'codex', name: 'Codex', icon: '⚡', description: 'OpenAI Codex CLI',
     modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }, { id: 'continue', name: 'Continue', description: 'Continue most recent session' }, { id: 'resume', name: 'Resume', description: 'Resume interrupted session' }],
-    flags: [{ id: 'yolo', flag: '--dangerously-bypass-approvals-and-sandbox', label: '🚀 YOLO Mode', description: 'No approvals + no sandboxing', category: 'sandbox', default: true }],
+    models: ['gpt-4', 'gpt-5', 'gpt-5-codex'],
+    defaultModel: 'gpt-5-codex',
+    reasoningLevels: ['low', 'medium', 'high'],
+    defaultReasoning: 'high',
+    verbosityLevels: ['low', 'medium', 'high'],
+    defaultVerbosity: 'high',
+    flags: [
+      { id: 'yolo', flag: '--dangerously-bypass-approvals-and-sandbox', label: '🚀 YOLO Mode', description: 'No approvals + no sandboxing (extremely dangerous)', category: 'sandbox', default: true },
+      { id: 'workspaceWrite', flag: '--sandbox workspace-write', label: '📝 Workspace Write', description: 'Write files in workspace only (safer than YOLO)', category: 'sandbox', default: false },
+      { id: 'readOnly', flag: '--sandbox read-only', label: '👀 Read Only', description: 'Read-only access (safest, no modifications)', category: 'sandbox', default: false },
+      { id: 'neverAsk', flag: '--ask-for-approval never', label: '⚡ Never Ask', description: 'Never ask for permission', category: 'approvals', default: false },
+      { id: 'askOnRequest', flag: '--ask-for-approval on-request', label: '🛡️ Ask on Risk', description: 'Ask only on risky operations', category: 'approvals', default: false },
+    ],
     defaultMode: 'fresh',
   },
   {
     id: 'gemini', name: 'Gemini', icon: '✨', description: 'Google Gemini CLI',
     modes: [{ id: 'fresh', name: 'Fresh', description: 'Start new session' }],
+    models: ['gemini-2.5-pro', 'gemini-2.0-flash'],
+    defaultModel: 'gemini-2.5-pro',
     flags: [],
     defaultMode: 'fresh',
   },
@@ -126,7 +145,6 @@ interface ModalState {
   onSubmit: (value: string) => void
 }
 
-const AGENT_TYPE_SET = new Set(['claude', 'codex', 'opencode', 'gemini', 'cursor-agent', 'copilot', 'mastracode', 'droid', 'amp', 'pi', 'kilocode', 'windsurf'])
 const NOOP = () => {}
 
 function App() {
@@ -225,6 +243,10 @@ function App() {
   })
   const dragging = useRef<'left' | 'right' | 'terminal' | null>(null)
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Active document-level drag listeners — removed on unmount if a drag is
+  // still in flight (e.g. workspace switch tears the panel down mid-drag).
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { dragCleanupRef.current?.() }, [])
 
   useEffect(() => { leftWidthRef.current = leftWidth }, [leftWidth])
 
@@ -630,10 +652,17 @@ function App() {
     return () => unsub?.()
   }, [])
 
+  // Latest session state for the keydown handler — reading through a ref lets
+  // the listener stay bound for the app lifetime instead of being removed and
+  // re-added on every status flip (which also re-rendered the whole tree).
+  const shortcutDepsRef = useRef({ activeSessionId, agentSessions })
+  shortcutDepsRef.current = { activeSessionId, agentSessions }
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
       if (!isMeta) return
+      const { activeSessionId, agentSessions } = shortcutDepsRef.current
 
       if (e.key === 'Tab') {
         e.preventDefault()
@@ -672,7 +701,8 @@ function App() {
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [activeSessionId, agentSessions, shortcuts])
+    // shortcuts is stable (static combo list); sessions state read via ref
+  }, [shortcuts])
 
   function onResizerMouseDown(side: 'left' | 'right') {
     return (e: React.MouseEvent) => {
@@ -744,12 +774,14 @@ function App() {
         document.removeEventListener('mouseup', onUp)
         document.body.style.cursor = ''
         document.body.style.userSelect = ''
+        dragCleanupRef.current = null
       }
 
       document.addEventListener('mousemove', onMove)
       document.addEventListener('mouseup', onUp)
       document.body.style.cursor = 'col-resize'
       document.body.style.userSelect = 'none'
+      dragCleanupRef.current = onUp
     }
   }
 
@@ -779,12 +811,14 @@ function App() {
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      dragCleanupRef.current = null
     }
 
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
     document.body.style.cursor = 'ns-resize'
     document.body.style.userSelect = 'none'
+    dragCleanupRef.current = onUp
   }, [terminalHeight])
 
   function setView(view: 'dashboard' | 'settings' | null) {
@@ -900,19 +934,19 @@ function App() {
 
   const closeFile = useCallback((fileId: string) => {
     const isLastFile = openFiles.length <= 1
-    setOpenFiles(prev => {
-      const idx = prev.findIndex(f => f.id === fileId)
-      const next = prev.filter(f => f.id !== fileId)
-      if (activeFileId === fileId) {
-        if (next.length > 0) {
-          const newIdx = Math.min(idx, next.length - 1)
-          setActiveFileId(next[newIdx].id)
-        } else {
-          setActiveFileId(null)
-        }
+    // Compute the next active file outside the updater — updaters must stay
+    // pure (they run twice under StrictMode).
+    setOpenFiles(prev => prev.filter(f => f.id !== fileId))
+    if (activeFileId === fileId) {
+      const idx = openFiles.findIndex(f => f.id === fileId)
+      const next = openFiles.filter(f => f.id !== fileId)
+      if (next.length > 0) {
+        const newIdx = Math.min(idx, next.length - 1)
+        setActiveFileId(next[newIdx].id)
+      } else {
+        setActiveFileId(null)
       }
-      return next
-    })
+    }
     setFileContents(prev => {
       const next = { ...prev }
       delete next[fileId]

@@ -144,17 +144,52 @@ export function useSocket(): UseSocketReturn {
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
   const filterEventCbs = useRef<((data: FilterEvent) => void)[]>([])
   const sessionUnhealthyCbs = useRef<((data: { sessionId: string, reason: string, usage?: any }) => void)[]>([])
-  const outputBuffer = useRef<Record<string, string>>({})
+  // Pending terminal output per session, accumulated as chunks. Joining happens
+  // once at flush time — re-slicing a 64KB string on every incoming chunk was
+  // O(n²) under sustained output.
+  const OUTPUT_CAP = 65536
+  const outputBuffer = useRef<Record<string, { chunks: string[], bytes: number }>>({})
   const outputTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const flushOutput = useCallback(() => {
     outputTimer.current = null
     const buffer = outputBuffer.current
     outputBuffer.current = {}
-    for (const [sessionId, data] of Object.entries(buffer)) {
-      if (!data) continue
+    for (const [sessionId, entry] of Object.entries(buffer)) {
+      if (!entry.chunks.length) continue
+      const data = entry.chunks.join('').slice(-OUTPUT_CAP)
       const payload = { sessionId, data }
       terminalOutputCbs.current.forEach(cb => cb(payload))
+    }
+  }, [])
+
+  const pushOutput = useCallback((sessionId: string, data: string) => {
+    if (!data) return
+    const entry = outputBuffer.current[sessionId] ?? (outputBuffer.current[sessionId] = { chunks: [], bytes: 0 })
+    entry.chunks.push(data)
+    entry.bytes += data.length
+    if (entry.bytes > OUTPUT_CAP * 2) {
+      // Amortized trim to the last OUTPUT_CAP bytes
+      let dropped = 0
+      let i = 0
+      while (i < entry.chunks.length && dropped < entry.bytes - OUTPUT_CAP) {
+        dropped += entry.chunks[i].length
+        i++
+      }
+      entry.chunks = entry.chunks.slice(i)
+      entry.bytes -= dropped
+    }
+    if (!outputTimer.current) {
+      outputTimer.current = setTimeout(flushOutput, 30)
+    }
+  }, [flushOutput])
+
+  // Drop buffered output for sessions that are gone after a full snapshot
+  // (connect / workspace switch) — otherwise up to 64KB per orphan lingers.
+  const pruneOutputBuffers = useCallback((keepIds: string[]) => {
+    const keep = new Set(keepIds)
+    for (const id of Object.keys(outputBuffer.current)) {
+      if (!keep.has(id)) delete outputBuffer.current[id]
     }
   }, [])
 
@@ -187,14 +222,11 @@ socket.emit('get-cumulative-stats', {})
 
     socket.on('sessions', (data: Record<string, SessionState>) => {
       setSessions(data || {})
+      pruneOutputBuffers(Object.keys(data || {}))
     })
 
     socket.on('terminal-output', (data: TerminalOutput) => {
-      const cur = outputBuffer.current[data.sessionId] || ''
-      outputBuffer.current[data.sessionId] = (cur + data.data).slice(-65536)
-      if (!outputTimer.current) {
-        outputTimer.current = setTimeout(flushOutput, 30)
-      }
+      pushOutput(data.sessionId, data.data)
     })
 
     socket.on('status-change', (data: StatusChange) => {
@@ -216,6 +248,7 @@ socket.emit('get-cumulative-stats', {})
     socket.on('workspace-changed', (data: WorkspaceChange) => {
       setActiveWorkspace(data.workspace)
       setSessions(data.sessions || {})
+      pruneOutputBuffers(Object.keys(data.sessions || {}))
       workspaceChangedCbs.current.forEach(cb => cb(data))
     })
 
@@ -255,13 +288,7 @@ socket.emit('get-cumulative-stats', {})
 
     socket.on('backlog', (data: Record<string, string>) => {
       for (const [sessionId, buffered] of Object.entries(data)) {
-        if (buffered) {
-          const cur = outputBuffer.current[sessionId] || ''
-          outputBuffer.current[sessionId] = (cur + buffered).slice(-65536)
-        }
-      }
-      if (!outputTimer.current) {
-        outputTimer.current = setTimeout(flushOutput, 30)
+        if (buffered) pushOutput(sessionId, buffered)
       }
     })
 
@@ -326,7 +353,8 @@ socket.emit('get-cumulative-stats', {})
       }
       socketRef.current?.disconnect()
     }
-  }, [flushOutput])
+    // pushOutput / pruneOutputBuffers / flushOutput are stable useCallbacks
+  }, [flushOutput, pushOutput, pruneOutputBuffers])
 
   const onTerminalOutput = useCallback((cb: (data: TerminalOutput) => void) => {
     terminalOutputCbs.current.push(cb)

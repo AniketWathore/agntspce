@@ -14,13 +14,16 @@ import { OpenAICompatibleProvider } from './providers/openai'
 import { AnthropicProvider } from './providers/anthropic'
 import { GeminiProvider } from './providers/gemini'
 import { DeepSeekProvider } from './providers/deepseek'
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 
 function makeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 }
+
+// Prefix marking the config file content as safeStorage-encrypted (base64).
+const ENC_PREFIX = 'enc:v1:'
 
 export interface AddKeyInput {
   type: ProviderType
@@ -59,7 +62,7 @@ export class ChatManager {
   private loadConfigs() {
     try {
       const content = fs.readFileSync(this.configFilePath, 'utf-8')
-      const parsed = JSON.parse(content)
+      const parsed = this.decryptConfig(content)
       if (parsed && typeof parsed === 'object' && parsed.providers && typeof parsed.providers === 'object') {
         for (const [id, raw] of Object.entries(parsed.providers as Record<string, Partial<ApiKeyEntry>>)) {
           if (!raw || typeof raw !== 'object') continue
@@ -79,6 +82,24 @@ export class ChatManager {
       }
     } catch {}
     this.migrateLegacyConfig()
+  }
+
+  // Decrypt config file contents. Legacy files were plaintext JSON — they are
+  // returned as-is and re-saved encrypted by saveConfigs() on the next change.
+  private decryptConfig(content: string): any {
+    if (content.startsWith(ENC_PREFIX)) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        console.error('[chatManager] Config is encrypted but safeStorage is unavailable on this platform')
+        return null
+      }
+      try {
+        return JSON.parse(safeStorage.decryptString(Buffer.from(content.slice(ENC_PREFIX.length), 'base64')).toString('utf-8'))
+      } catch (e) {
+        console.error('[chatManager] Failed to decrypt chat config:', e)
+        return null
+      }
+    }
+    try { return JSON.parse(content) } catch { return null }
   }
 
   private migrateLegacyConfig() {
@@ -117,8 +138,13 @@ export class ChatManager {
       for (const [id, entry] of this.keys) {
         providers[id] = { ...entry }
       }
+      const json = JSON.stringify({ providers }, null, 2)
+      let content = json
+      if (safeStorage.isEncryptionAvailable()) {
+        content = ENC_PREFIX + safeStorage.encryptString(json).toString('base64')
+      }
       fs.mkdirSync(path.dirname(this.configFilePath), { recursive: true })
-      fs.writeFileSync(this.configFilePath, JSON.stringify({ providers }, null, 2), 'utf-8')
+      fs.writeFileSync(this.configFilePath, content, 'utf-8')
     } catch (e) {
       console.error('Failed to save chat config:', e)
     }

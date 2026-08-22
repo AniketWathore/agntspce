@@ -284,7 +284,6 @@ declare global {
       getDefaultPath: () => Promise<string>
       getServerPort: () => Promise<number>
       getServerAuthToken: () => Promise<string>
-      openInExplorer: (filePath: string) => Promise<boolean>
       exportWorkspace: () => Promise<string | null>
       importWorkspace: () => Promise<{ workspace: any; path: string } | null>
       duplicateWorkspace: (newName: string) => Promise<any>

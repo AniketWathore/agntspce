@@ -8,6 +8,7 @@ import StatusDot from './StatusDot'
 import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 import StartupUI from './StartupUI'
 import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
+import { isAgentTypeId } from '../utils/agentTypes'
 
 interface Props {
   session: SessionState
@@ -40,8 +41,11 @@ export default memo(function TerminalPane(props: Props) {
   const [showStartup, setShowStartup] = useState(false)
   const onTerminalOutputRef = useRef(onTerminalOutput)
   useEffect(() => { onTerminalOutputRef.current = onTerminalOutput })
+  // Active edge-drag listeners — removed if the pane unmounts mid-drag.
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => () => { dragCleanupRef.current?.() }, [])
 
-  const isAgentType = session.type === 'claude' || session.type === 'codex' || session.type === 'opencode' || session.type === 'gemini'
+  const isAgentType = isAgentTypeId(session.type)
   const shouldShowStartup = isAgentType && session.status === 'waiting' && showStartup
   const groupColor = session.sessionGroupId
     ? ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#f97316'][
@@ -260,10 +264,12 @@ function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.Mo
       document.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      dragCleanupRef.current = null
       onResizeEnd?.()
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
+    dragCleanupRef.current = onUp
   }
 
   const handles = edgeHandles ?? ['left', 'right', 'top', 'bottom']
