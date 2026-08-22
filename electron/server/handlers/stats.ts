@@ -1,5 +1,16 @@
 import type { Socket } from 'socket.io'
 import type { ServerContext } from '../context'
+import { toWireEvent } from '../../services/outputFilter'
+
+// History payloads go to the renderer for display of token counts only;
+// output bodies are trimmed so large histories don't bloat client memory.
+function trimHistoryBodies<T extends { original?: string; filtered?: string }>(entries: T[]): T[] {
+  return entries.map(e => ({
+    ...e,
+    original: e.original && e.original.length > 2048 ? e.original.slice(0, 2048) : e.original,
+    filtered: e.filtered && e.filtered.length > 2048 ? e.filtered.slice(0, 2048) : e.filtered,
+  }))
+}
 
 export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void {
   socket.on('get-cumulative-stats', () => {
@@ -24,7 +35,7 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
         commandsProcessed: allCommandHistory.length,
       }
       const allHistory = ctx.sessionManager.outputFilter.getAllHistory()
-      socket.emit('filter-stats', { stats: aggregated, history: allHistory, commandHistory: allCommandHistory })
+      socket.emit('filter-stats', { stats: aggregated, history: trimHistoryBodies(allHistory), commandHistory: allCommandHistory.map(toWireEvent) })
     } catch (e) {
       console.error('get-filter-stats error:', e)
     }
@@ -45,10 +56,10 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
   socket.on('get-command-filter-history', ({ sessionId }: { sessionId?: string }, callback?: Function) => {
     if (sessionId) {
       const history = ctx.sessionManager.outputFilter.getCommandHistory(sessionId)
-      if (callback) callback?.({ ok: true, history })
+      if (callback) callback?.({ ok: true, history: history.map(toWireEvent) })
     } else {
       const allHistory = ctx.sessionManager.outputFilter.getAllCommandHistory()
-      if (callback) callback?.({ ok: true, history: allHistory })
+      if (callback) callback?.({ ok: true, history: allHistory.map(toWireEvent) })
     }
   })
 

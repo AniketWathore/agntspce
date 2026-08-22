@@ -16,6 +16,7 @@ import { AgentOrchestrator } from './agentOrchestrator'
 import { TokenUsageTracker } from './outputCompressor'
 import { CavemanService } from './cavemanService'
 import { RingBuffer } from './ringBuffer'
+import { toWireEvent } from './outputFilter'
 import { ContextWriter } from './orchestration/contextWriter'
 import * as rtkManager from './rtkManager'
 import { getActiveSearchPath, generateSessionToken } from './searchManager'
@@ -146,6 +147,14 @@ function sanitizeLabel(value: unknown): string {
 
 const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
 
+// Terminal output is coalesced per session before hitting Socket.IO. Agent
+// TUIs redraw many times per second with multi-KB frames; one packet per PTY
+// chunk floods both processes with allocations. A 16ms window matches one
+// display frame (the renderer already coalesces at 30ms, so perceived latency
+// is unchanged).
+const OUTPUT_FLUSH_MS = 16
+const OUTPUT_FLUSH_BYTES = 512 * 1024
+
 function applyBackpressure(io: any): void {
   try {
     for (const [, socket] of io.sockets.sockets) {
@@ -189,6 +198,7 @@ export class SessionManager extends EventEmitter {
   private contextWriter: ContextWriter | null = null
   private lastStatusRefresh = new Map<string, number>()
   private lastStatusBytes = new Map<string, number>()
+  private pendingOutput = new Map<string, { chunks: string[]; bytes: number; timer: ReturnType<typeof setTimeout> | null }>()
 
   constructor(io: any, agentManager?: any, dataDir?: string) {
     super()
@@ -200,7 +210,9 @@ export class SessionManager extends EventEmitter {
     if (dataDir) this.cavemanService.setDataDir(dataDir)
     this.outputFilter.setOnCommandEvent((event) => {
       try {
-        this.io.emit('command-filter-event', event)
+        // Wire copies carry only a small output preview — the renderer only
+        // renders token counts, and full bodies accumulated in client state.
+        this.io.emit('command-filter-event', toWireEvent(event))
       } catch {}
     })
     this.cavemanService.onRunComplete((sessionId, run) => {
@@ -408,6 +420,47 @@ export class SessionManager extends EventEmitter {
     }
     this.isWorkspaceSwitching = false
     this.startBranchRefresh()
+  }
+
+  private scheduleTerminalOutput(sessionId: string, data: string): void {
+    let entry = this.pendingOutput.get(sessionId)
+    if (!entry) {
+      entry = { chunks: [], bytes: 0, timer: null }
+      this.pendingOutput.set(sessionId, entry)
+    }
+    entry.chunks.push(data)
+    entry.bytes += data.length
+    // Large bursts flush immediately; otherwise wait out the coalescing window.
+    if (entry.bytes >= OUTPUT_FLUSH_BYTES) {
+      this.flushTerminalOutput(sessionId)
+      return
+    }
+    if (!entry.timer) {
+      const e = entry
+      e.timer = setTimeout(() => {
+        e.timer = null
+        this.flushTerminalOutput(sessionId)
+      }, OUTPUT_FLUSH_MS)
+      e.timer.unref?.()
+    }
+  }
+
+  private flushTerminalOutput(sessionId: string): void {
+    const entry = this.pendingOutput.get(sessionId)
+    if (!entry) return
+    this.pendingOutput.delete(sessionId)
+    if (entry.timer) clearTimeout(entry.timer)
+    const data = entry.chunks.join('')
+    if (!data) return
+    // Only deliver for the live session object; after a workspace switch the
+    // data is still in the ring buffer and reaches the client via backlog.
+    const session = this.sessions.get(sessionId)
+    if (!session || session.pty === null) return
+    applyBackpressure(this.io)
+    try {
+      this.io.emit('terminal-output', { sessionId, data })
+    } catch { }
+    session.deliveredBufferLength = session.buffer.totalBytes
   }
 
   async createSession(sessionId: string, config: SessionConfig) {
@@ -660,12 +713,9 @@ export class SessionManager extends EventEmitter {
       this.tokenUsageTracker.trackOutput(sessionId, data)
       const isActive = this.sessions.get(sessionId) === session
       if (isActive) {
-        applyBackpressure(this.io)
-        try {
-          // Send modified data to frontend (with compression applied by outputFilter)
-          this.io.emit('terminal-output', { sessionId, data: modifiedData })
-        } catch { }
-        session.deliveredBufferLength = session.buffer.totalBytes
+        // Send modified data to frontend (with compression applied by
+        // outputFilter), coalesced into one packet per flush window.
+        this.scheduleTerminalOutput(sessionId, modifiedData)
       }
       // Status detection joins the full buffer and runs regexes — throttle it
       // on the hot output path (processMonitor still refreshes every 5s).
@@ -679,6 +729,9 @@ export class SessionManager extends EventEmitter {
     })
 
     ptyProcess.onExit(({ exitCode, signal }: any) => {
+      // Deliver any coalesced output before the exit event so the renderer
+      // sees the final output in order.
+      this.flushTerminalOutput(sessionId)
       session.slotRelease?.()
       clearInterval(session.processMonitor!)
       session.status = 'exited'
@@ -780,6 +833,7 @@ export class SessionManager extends EventEmitter {
   closeSession(sessionId: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
+    this.flushTerminalOutput(sessionId)
     session.slotRelease?.()
     this.sessionHistory.push({
       id: sessionId,

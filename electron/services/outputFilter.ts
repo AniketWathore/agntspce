@@ -44,12 +44,54 @@ const SHELL_ECHO_RE = /^\$\s+agntspce\s+run\s+/
 // Wrapper system lines (marker, token stats, diagnostics) that must be
 // consumed for RTK tracking but hidden from the terminal screen.
 const AGNTSPCE_DIAG_RE = /^\[agntspce\]/
+// Shell echo (or tool header) of an invocation through the wrapper BY PATH,
+// e.g. "$ /Users/me/app/bin/agntspce git show". The wrapper prints its own
+// "agntspce $ <cmd>" marker right after, so showing both reads as a double
+// execution. These lines are normalized in the display to the marker form.
+// Must NOT match bare commands ($ git show), the marker itself, or the
+// agntspce-search binary (requires bin/ before the name and whitespace/.cmd after).
+const WRAPPER_ECHO_RE = /(?:^|[#$%❯➜>]\s)\S*bin[/\\]agntspce(?:\.cmd)?\s+(.+?)\s*$/
 const toPlainLine = (raw: string) => raw
   .replace(/\x1b\[[\d;]*[A-Za-z]/g, '')
   .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07)/g, '')
   .replace(/[\x00-\x08\x0b\x0c\r\x0e-\x1f\x7f]/g, '')
+
+// Memory bounds. Agent TUIs emit full-screen redraw frames as very long
+// "lines"; without caps those flow into command history (200/session,
+// persisted up to 5000 total) and are loaded back at startup.
+const MAX_ACCUM_LINE_CHARS = 8 * 1024
+const MAX_EVENT_OUTPUT_BYTES = 256 * 1024
+const EVENT_HEAD_BYTES = 192 * 1024
+const WIRE_PREVIEW_BYTES = 2 * 1024
+
+// Keep head + tail of oversized text so token accounting and previews stay useful.
+function capStoredOutput(text: string): string {
+  if (Buffer.byteLength(text) <= MAX_EVENT_OUTPUT_BYTES) return text
+  let head = text.slice(0, EVENT_HEAD_BYTES)
+  while (Buffer.byteLength(head) > EVENT_HEAD_BYTES) head = head.slice(0, -1024)
+  const tailBudget = MAX_EVENT_OUTPUT_BYTES - Buffer.byteLength(head)
+  let tail = tailBudget > 0 ? text.slice(-tailBudget) : ''
+  while (tail && Buffer.byteLength(head) + Buffer.byteLength(tail) > MAX_EVENT_OUTPUT_BYTES) {
+    tail = tail.slice(1024)
+  }
+  return `${head}\n…[${Buffer.byteLength(text) - Buffer.byteLength(head) - Buffer.byteLength(tail)} bytes omitted]…\n${tail}`
+}
+
+// Wire copies keep only a small preview — the renderer never displays output
+// bodies (only token counts), and shipping full text made the renderer retain
+// hundreds of large strings plus forced huge JSON serializations on connect.
+export function toWireEvent(event: CommandEvent): CommandEvent {
+  if (event.rawOutput.length <= WIRE_PREVIEW_BYTES && event.filteredOutput.length <= WIRE_PREVIEW_BYTES) return event
+  return {
+    ...event,
+    rawOutput: event.rawOutput.length > WIRE_PREVIEW_BYTES ? event.rawOutput.slice(0, WIRE_PREVIEW_BYTES) : event.rawOutput,
+    filteredOutput: event.filteredOutput.length > WIRE_PREVIEW_BYTES ? event.filteredOutput.slice(0, WIRE_PREVIEW_BYTES) : event.filteredOutput,
+  }
+}
+
 const isSystemLine = (plain: string) =>
   AGNTSPCE_CMD_RE.test(plain) || AGNTSPCE_STATS_RE.test(plain) || AGNTSPCE_DIAG_RE.test(plain)
+
 export class OutputFilterService {
   private commandBuffers = new Map<string, {
     command: string
@@ -111,11 +153,17 @@ export class OutputFilterService {
     if (!this._historyFilePath) return
     try {
       const data = fs.readFileSync(this._historyFilePath, 'utf-8')
-      const events = JSON.parse(data) as CommandEvent[]
-      if (!Array.isArray(events)) return
+      const parsed = JSON.parse(data) as CommandEvent[]
+      if (!Array.isArray(parsed)) return
+      // Keep the most recent slice if the file somehow grew beyond the cap.
+      const events = parsed.length > 5000 ? parsed.slice(-5000) : parsed
       this._commandHistory.clear()
       for (const e of events) {
         if (!e || typeof e.sessionId !== 'string') continue
+        // Cap bodies of pre-existing persisted events so old oversized files
+        // don't get re-loaded into memory wholesale on every startup.
+        e.rawOutput = capStoredOutput(String(e.rawOutput || ''))
+        e.filteredOutput = capStoredOutput(String(e.filteredOutput || ''))
         const hist = this._commandHistory.get(e.sessionId) || []
         hist.push(e)
         if (hist.length > 200) hist.shift()
@@ -205,12 +253,20 @@ export class OutputFilterService {
       if (dropping) dropping = false
 
       if (showLine) {
-        // Emit only the bytes of this line+sep that belong to `data` (not the
-        // buffered partial from the previous chunk, which was never displayed).
-        const emitStart = Math.max(segStart, emitFrom)
-        const emitEnd = segStart + rawLine.length + sep.length
-        if (emitEnd > emitStart) {
-          displayOut += full.slice(emitStart, emitEnd)
+        // Echoed wrapper-by-path invocations are shown as the compact marker
+        // form instead — the real marker line right after is hidden, so the
+        // command appears exactly once ("agntspce $ git show").
+        const echoMatch = plain.match(WRAPPER_ECHO_RE)
+        if (echoMatch) {
+          displayOut += `agntspce $ ${echoMatch[1].trim()}${sep}`
+        } else {
+          // Emit only the bytes of this line+sep that belong to `data` (not the
+          // buffered partial from the previous chunk, which was never displayed).
+          const emitStart = Math.max(segStart, emitFrom)
+          const emitEnd = segStart + rawLine.length + sep.length
+          if (emitEnd > emitStart) {
+            displayOut += full.slice(emitStart, emitEnd)
+          }
         }
       }
 
@@ -288,7 +344,7 @@ export class OutputFilterService {
       // When it doesn't (status transitions without markers), the fallback in
       // finalizeCommand creates events from the recent accumulator.
       const accum = this.outputAccum.get(sessionId) || []
-      accum.push(rawLine)
+      accum.push(rawLine.length > MAX_ACCUM_LINE_CHARS ? rawLine.slice(0, MAX_ACCUM_LINE_CHARS) + '…' : rawLine)
       if (accum.length > 200) accum.shift()
       this.outputAccum.set(sessionId, accum)
       if (this.insideCommand.get(sessionId)) {
@@ -500,13 +556,15 @@ export class OutputFilterService {
     }
 
     const brandedCmd = formatCommand(cmdBuf.command, cmdBuf.args, 'agntspce')
+    // Token counts above are computed on the full text; only the RETAINED
+    // copies are capped so history (memory + persisted JSON) stays bounded.
     const event: CommandEvent = {
       sessionId,
       command: cmdBuf.command,
       args: cmdBuf.args,
       formatted: brandedCmd,
-      rawOutput: cleanedOutput,
-      filteredOutput: filtered,
+      rawOutput: capStoredOutput(cleanedOutput),
+      filteredOutput: capStoredOutput(filtered),
       originalTokens,
       filteredTokens,
       reduction,
@@ -528,6 +586,19 @@ export class OutputFilterService {
     return this._commandHistory.get(sessionId) || []
   }
 
+  // Byte lengths are memoized per event object: getAllStats() runs after every
+  // emitted command, and re-encoding every retained output each time (the old
+  // behavior) turned into an allocation storm as history grew.
+  private _byteLenCache = new WeakMap<CommandEvent, { raw: number; filtered: number }>()
+  private eventByteLengths(event: CommandEvent): { raw: number; filtered: number } {
+    let lengths = this._byteLenCache.get(event)
+    if (!lengths) {
+      lengths = { raw: Buffer.byteLength(event.rawOutput), filtered: Buffer.byteLength(event.filteredOutput) }
+      this._byteLenCache.set(event, lengths)
+    }
+    return lengths
+  }
+
   getAllCommandHistory(): CommandEvent[] {
     const all: CommandEvent[] = []
     for (const [, hist] of this._commandHistory) all.push(...hist)
@@ -539,9 +610,16 @@ export class OutputFilterService {
     // Command history (persisted + live) is the single source of truth for
     // totals. Avoids double counting between _cumulativeStats and history.
     const sessionEvents = this.getAllCommandHistory().filter(e => !e.command.startsWith('agntspce-search'))
+    let totalOriginalBytes = 0
+    let totalFilteredBytes = 0
+    for (const e of sessionEvents) {
+      const lens = this.eventByteLengths(e)
+      totalOriginalBytes += lens.raw
+      totalFilteredBytes += lens.filtered
+    }
     const stats = {
-      totalOriginalBytes: sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.rawOutput).length, 0),
-      totalFilteredBytes: sessionEvents.reduce((s, e) => s + new TextEncoder().encode(e.filteredOutput).length, 0),
+      totalOriginalBytes,
+      totalFilteredBytes,
       totalOriginalTokens: sessionEvents.reduce((s, e) => s + e.originalTokens, 0),
       totalFilteredTokens: sessionEvents.reduce((s, e) => s + e.filteredTokens, 0),
       eventsProcessed: sessionEvents.length,
@@ -556,17 +634,20 @@ export class OutputFilterService {
 
   getAllHistory(): any[] {
     const allEvents = this.getAllCommandHistory()
-    return allEvents.map(e => ({
-      sessionId: e.sessionId,
-      original: e.rawOutput,
-      filtered: e.filteredOutput,
-      originalBytes: new TextEncoder().encode(e.rawOutput).length,
-      filteredBytes: new TextEncoder().encode(e.filteredOutput).length,
-      originalTokens: e.originalTokens,
-      filteredTokens: e.filteredTokens,
-      reduction: e.reduction,
-      rulesApplied: e.filterName ? [e.filterName] : [],
-    }))
+    return allEvents.map(e => {
+      const lens = this.eventByteLengths(e)
+      return {
+        sessionId: e.sessionId,
+        original: e.rawOutput,
+        filtered: e.filteredOutput,
+        originalBytes: lens.raw,
+        filteredBytes: lens.filtered,
+        originalTokens: e.originalTokens,
+        filteredTokens: e.filteredTokens,
+        reduction: e.reduction,
+        rulesApplied: e.filterName ? [e.filterName] : [],
+      }
+    })
   }
 
   reportTokenSavings(originalTokens: number, filteredTokens: number, toolName?: string, sessionId?: string) {

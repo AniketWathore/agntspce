@@ -139,6 +139,7 @@ export function useSocket(): UseSocketReturn {
   const [executionHistory, setExecutionHistory] = useState<ExecutionEvent[]>([])
   const [sessionStartedAt, setSessionStartedAt] = useState<number>(Date.now())
   const terminalOutputCbs = useRef<((data: TerminalOutput) => void)[]>([])
+  const lastStatsFetchAt = useRef(0)
   const statusChangeCbs = useRef<((data: StatusChange) => void)[]>([])
   const branchChangeCbs = useRef<((data: BranchChange) => void)[]>([])
   const workspaceChangedCbs = useRef<((data: WorkspaceChange) => void)[]>([])
@@ -323,7 +324,13 @@ socket.emit('get-cumulative-stats', {})
     if (isSearch) {
       setSearchEvents(prev => [event, ...prev].slice(0, 100))
     }
-    socket.emit('get-cumulative-stats', {})
+    // Throttle the stats refetch — a burst of commands used to trigger a
+    // round trip (and a server-side history rescan) per event.
+    const now = Date.now()
+    if (now - lastStatsFetchAt.current >= 1000) {
+      lastStatsFetchAt.current = now
+      socket.emit('get-cumulative-stats', {})
+    }
   })
 
   socket.on('execution-event', (event: ExecutionEvent) => {

@@ -67,6 +67,25 @@ describe('OutputFilterService', () => {
       expect(filter.processOutput('s1', data)).toBe(data)
     })
 
+    it('normalizes an echoed absolute-path wrapper invocation to the marker form', () => {
+      const data = '$ /Users/dev/app/bin/agntspce git show\r\n'
+      const display = filter.processOutput('s1', data)
+      expect(display).toContain('agntspce $ git show')
+      expect(display).not.toContain('/Users/dev/app/bin/agntspce')
+    })
+
+    it('normalizes a Windows echoed .cmd wrapper invocation', () => {
+      const data = 'PS C:\\> C:\\app\\bin\\agntspce.cmd git status\r\n'
+      const display = filter.processOutput('s1', data)
+      expect(display).toContain('agntspce $ git status')
+      expect(display).not.toContain('C:\\app\\bin\\agntspce.cmd')
+    })
+
+    it('leaves ordinary echoed commands and the agntspce-search binary untouched', () => {
+      const data = '$ git show\r\n$ /opt/tools/bin/agntspce-search search q\r\n'
+      expect(filter.processOutput('s1', data)).toBe(data)
+    })
+
     it('preserves normal output around stripped system lines', () => {
       const data = 'agntspce $ git status\r\nOn branch main\r\nAGNTSPCE_STATS raw=10 filtered=5\r\n'
       const display = filter.processOutput('s1', data)
