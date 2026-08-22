@@ -98,6 +98,32 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     })
   }, [socket, threadId, threads])
 
+  // Restore the provider/model of the active thread so reopening the panel or
+  // restarting the app keeps chatting with the same model instead of falling
+  // back to the first configured provider. The LAST MESSAGE is the source of
+  // truth for "the model we were using" — thread.model is only written when
+  // the thread is created and goes stale after mid-chat model changes. Falls
+  // back to it for empty threads. A ref guards against later thread/provider
+  // refreshes re-firing, and keepModelRef protects the restored choice from
+  // the model-list fetch reset until the user explicitly picks something else.
+  const syncedThreadRef = useRef('')
+  const keepModelRef = useRef('')
+  useEffect(() => {
+    if (!threadId || syncedThreadRef.current === threadId) return
+    const th = threads.find(x => x.id === threadId)
+    if (!th) return
+    const msgs = th.messages || []
+    const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : undefined
+    const providerId = lastMsg?.provider || th.providerId
+    const model = lastMsg?.model || th.model || ''
+    const prov = providers.find(p => p.id === providerId)
+    if (!providerId || !prov?.configured || !prov.hasKey) return
+    syncedThreadRef.current = threadId
+    keepModelRef.current = model
+    setSelectedProvider(prev => (prev === providerId ? prev : providerId))
+    setSelectedModel(prev => (prev === model ? prev : model))
+  }, [threadId, threads, providers])
+
   useEffect(() => {
     // Only auto-scroll to bottom when the user is already near the bottom,
     // so scrolling up through history isn't yanked back down on new output.
@@ -129,7 +155,12 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
           if (data.ok && data.models?.length) {
             const sorted = [...data.models].sort((a, b) => a.localeCompare(b))
             setModels(sorted)
-            setSelectedModel(prev => (sorted.includes(prev) ? prev : sorted[0]))
+            setSelectedModel(prev => {
+              // A restored per-thread selection wins even when the provider's
+              // list omits it (e.g. stealth models); user changes clear the guard.
+              if (prev && prev === keepModelRef.current) return prev
+              return sorted.includes(prev) ? prev : sorted[0]
+            })
           }
         })
         .catch(() => {})
@@ -312,6 +343,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   }, [socket, threadId])
 
   const handleProviderChange = (id: string) => {
+    keepModelRef.current = ''
     setSelectedProvider(id)
     const p = providers.find(x => x.id === id)
     setSelectedModel(p?.model || '')
@@ -479,10 +511,10 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
             <select
               className="chat-model-select"
               value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
+              onChange={e => { keepModelRef.current = ''; setSelectedModel(e.target.value) }}
               title="Model"
             >
-              {(models.length > 0 ? [...models].sort((a, b) => a.localeCompare(b)) : [selectedModel]).map(m => (
+              {Array.from(new Set([selectedModel, ...models].filter(Boolean))).sort((a, b) => a.localeCompare(b)).map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
