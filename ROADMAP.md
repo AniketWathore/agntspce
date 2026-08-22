@@ -102,3 +102,12 @@ npm run electron:dev  # manual smoke test: terminals spawn, output streams, chat
 
 - `npx tsc -b` clean · oxlint: no new warnings (all pre-existing) · `npm run build` succeeds · `npm audit fix` applied (lockfile-only).
 - Manual smoke test still recommended: launch `npm run electron:dev`, confirm terminals spawn/stream, chat Settings load keys, git panel commit works.
+
+### 2026-08-22 — Follow-up from electron:dev smoke test
+
+- **Electron binary download explained:** `npm audit fix` bumped electron 42.5.0 → 42.9.3 (security release; caret range in package.json allowed it). A new Electron version downloads its binary once, then it's cached — subsequent runs start instantly again.
+- **Fixed: giant APICallError dumps in terminal on chat failures** (`providers/openai.ts`, `anthropic.ts`, `deepseek.ts`, `gemini.ts`). Two problems:
+  1. The AI SDK's `streamText` has a default `onError` that raw `console.error`s the entire error object including `requestBodyValues` (i.e., your chat message contents) to stdout.
+  2. In this SDK version, `textStream` swallows error chunks entirely, so provider errors never reached `chatManager`'s catch — the UI got an empty assistant reply instead of an error notice.
+  - Fix: explicit `onError` captures the error (no stdout dump), then it's rethrown after stream consumption so `chatManager.sendMessageStream` catches it and emits a proper `chat-error` to the UI.
+  - Note: the original 402 itself is not a bug — that OpenRouter key is out of credits (top up at openrouter.ai/settings/credits or switch provider/model).

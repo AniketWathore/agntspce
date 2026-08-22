@@ -54,17 +54,24 @@ export class DeepSeekProvider implements AIProvider {
     if (!this.isConfigured()) throw new Error(`${this.name} API key is not configured`)
 
     const client = this.getClient()
+    let streamError: unknown = null
     const result = streamText({
       model: client.chat(model || this.model),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
+      // Replaces the SDK default that dumps the whole APICallError object
+      // (incl. message contents) to stdout. The error is rethrown below.
+      onError: ({ error }) => { streamError = error },
     })
 
     let fullText = ''
     for await (const chunk of result.textStream) {
       fullText += chunk
+    }
+    if (streamError != null) {
+      throw streamError instanceof Error ? streamError : new Error(String(streamError))
     }
     return fullText
   }
@@ -78,12 +85,14 @@ export class DeepSeekProvider implements AIProvider {
     if (!this.isConfigured()) throw new Error(`${this.name} API key is not configured`)
 
     const client = this.getClient()
+    let streamError: unknown = null
     const result = streamText({
       model: client.chat(model || this.model),
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       maxOutputTokens: 4096,
       temperature: 0.7,
       abortSignal: signal,
+      onError: ({ error }) => { streamError = error },
     })
 
     let fullText = ''
@@ -91,6 +100,9 @@ export class DeepSeekProvider implements AIProvider {
       if (signal?.aborted) break
       fullText += chunk
       onChunk(chunk)
+    }
+    if (streamError != null && !signal?.aborted) {
+      throw streamError instanceof Error ? streamError : new Error(String(streamError))
     }
     return fullText
   }
