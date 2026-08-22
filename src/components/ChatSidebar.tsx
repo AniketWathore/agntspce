@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import useSocketEvent from '../hooks/useSocketEvent'
 import type { ChatMessage, ChatModelInfo, ChatThread, StreamChunk } from '../types'
+import { apiHeadersSync } from '../utils/serverAuth'
 
 interface Props {
   onClose: () => void
@@ -115,7 +116,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   useEffect(() => {
     if (selectedProvider) {
       setLoading(false)
-      fetch(`${SERVER_URL}/api/chat/models/${selectedProvider}`)
+      fetch(`${SERVER_URL}/api/chat/models/${selectedProvider}`, { headers: apiHeadersSync() })
         .then(res => res.json())
         .then(data => {
           if (data.ok && data.models?.length) {

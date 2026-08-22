@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron'
+import crypto from 'node:crypto'
 import 'dotenv/config'
 import { initialize as initRtk } from './services/rtkManager'
 import { initialize as initSearch, injectClaudeCodeConfig, injectOpenCodeConfig } from './services/searchManager'
@@ -30,8 +31,13 @@ let orchestrationStateManager: StateManager | null = null
 
 let serverHandle: ReturnType<typeof bootstrapServer> | null = null
 
+// Per-launch random token. The renderer obtains it via preload IPC and must
+// present it on the Socket.IO handshake and /api/* requests; browser pages on
+// other origins cannot get it, which blocks drive-by access to localhost:9460.
+const serverAuthToken = crypto.randomBytes(32).toString('hex')
+
 function startServer() {
-  serverHandle = bootstrapServer(app.getPath('userData'), rebuildMenu, orchestrationStateManager)
+  serverHandle = bootstrapServer(app.getPath('userData'), rebuildMenu, orchestrationStateManager, serverAuthToken)
   return serverHandle
 }
 
@@ -66,7 +72,7 @@ app.whenReady().then(async () => {
     }
   }
 
-  registerIpcHandlers(rebuildMenu)
+  registerIpcHandlers(rebuildMenu, serverAuthToken)
   createWindow()
 
   const server = startServer()

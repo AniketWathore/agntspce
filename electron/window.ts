@@ -398,8 +398,9 @@ export function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
-export function registerIpcHandlers(rebuildMenuFn: () => void) {
+export function registerIpcHandlers(rebuildMenuFn: () => void, serverAuthToken?: string) {
   ipcMain.handle('new-window', () => createNewWindow())
+  ipcMain.handle('get-server-auth-token', () => serverAuthToken ?? '')
   ipcMain.handle('window-minimize', () => mainWindow?.minimize())
   ipcMain.handle('window-maximize', () => {
     if (mainWindow?.isMaximized()) mainWindow.unmaximize()

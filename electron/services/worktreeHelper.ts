@@ -4,6 +4,17 @@ import * as path from 'path'
 import type { Workspace } from './types'
 
 export class WorktreeHelper {
+  // Validate a namingPattern-derived name: allow letters, digits, dot, dash,
+  // underscore and `/` for nesting, but reject anything that could escape the
+  // repo (.., absolute paths, whitespace, shell-active characters).
+  private safeWorktreeName(pattern: string, n: string): string {
+    const name = pattern.replace('{n}', n)
+    if (!/^[A-Za-z0-9._\-/]+$/.test(name) || name.includes('..') || name.startsWith('/')) {
+      throw new Error(`Unsafe worktree name from namingPattern: "${name}"`)
+    }
+    return name
+  }
+
   async resolvePrimaryDir(repoPath: string): Promise<string> {
     for (const dir of ['master', 'main']) {
       try {
@@ -27,7 +38,7 @@ export class WorktreeHelper {
 
   async createWorktree(workspace: Workspace, worktreeId: string): Promise<string> {
     const repo = workspace.repository!
-    const worktreeName = workspace.worktrees!.namingPattern.replace('{n}', worktreeId.replace('work', ''))
+    const worktreeName = this.safeWorktreeName(workspace.worktrees!.namingPattern, worktreeId.replace('work', ''))
     const worktreePath = path.join(repo.path, worktreeName)
     const masterPath = await this.resolvePrimaryDir(repo.path)
 
@@ -40,11 +51,11 @@ export class WorktreeHelper {
 
     let defaultBranch = repo.masterBranch || 'master'
     try {
-      await this.execGit(`git rev-parse --verify ${defaultBranch}`, masterPath)
+      await this.execGit(['rev-parse', '--verify', defaultBranch], masterPath)
     } catch {
       if (defaultBranch === 'master') {
         try {
-          await this.execGit('git rev-parse --verify main', masterPath)
+          await this.execGit(['rev-parse', '--verify', 'main'], masterPath)
           defaultBranch = 'main'
         } catch {
           throw new Error('Neither master nor main branch found')
@@ -56,18 +67,18 @@ export class WorktreeHelper {
 
     const branchName = `${worktreeName}-dev`
     try {
-      await this.execGit(`git branch -D ${branchName}`, masterPath)
+      await this.execGit(['branch', '-D', branchName], masterPath)
     } catch { }
 
-    await this.execGit(`git worktree add ../${worktreeName} -b ${branchName} ${defaultBranch}`, masterPath)
+    await this.execGit(['worktree', 'add', `../${worktreeName}`, '-b', branchName, defaultBranch], masterPath)
     await fs.access(worktreePath)
     return worktreePath
   }
 
   async removeWorktree(workspace: Workspace, worktreeId: string): Promise<void> {
-    const worktreeName = workspace.worktrees!.namingPattern.replace('{n}', worktreeId.replace('work', ''))
+    const worktreeName = this.safeWorktreeName(workspace.worktrees!.namingPattern, worktreeId.replace('work', ''))
     const masterPath = await this.resolvePrimaryDir(workspace.repository!.path)
-    await this.execGit(`git worktree remove ${worktreeName}`, masterPath)
+    await this.execGit(['worktree', 'remove', worktreeName], masterPath)
   }
 
   async ensureWorktreesExist(workspace: Workspace): Promise<string[]> {
@@ -76,7 +87,12 @@ export class WorktreeHelper {
     const created: string[] = []
     for (let i = 1; i <= (workspace.terminals?.pairs || 1); i++) {
       const worktreeId = `work${i}`
-      const worktreeName = workspace.worktrees.namingPattern.replace('{n}', String(i))
+      let worktreeName: string
+      try {
+        worktreeName = this.safeWorktreeName(workspace.worktrees.namingPattern, String(i))
+      } catch {
+        continue
+      }
       const worktreePath = path.join(workspace.repository.path, worktreeName)
       try {
         await fs.access(worktreePath)
@@ -92,21 +108,18 @@ export class WorktreeHelper {
     return created
   }
 
-  private execGit(command: string, cwd: string): Promise<string> {
+  private execGit(args: string[], cwd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const parts = command.split(' ')
-      const cmd = parts[0]!
-      const args = parts.slice(1)
-      const child = spawn(cmd, args, { cwd, stdio: 'pipe', windowsHide: true })
+      const child = spawn('git', args, { cwd, stdio: 'pipe', windowsHide: true })
       let stdout = ''
       let stderr = ''
       child.stdout.on('data', (data: Buffer) => { stdout += data.toString() })
       child.stderr.on('data', (data: Buffer) => { stderr += data.toString() })
       child.on('close', (code) => {
         if (code === 0) resolve(stdout.trim())
-        else reject(new Error(`Git command failed: ${command}\nExit: ${code}\n${stderr}`))
+        else reject(new Error(`Git command failed: git ${args.join(' ')}\nExit: ${code}\n${stderr}`))
       })
-      child.on('error', (e) => reject(new Error(`Failed to execute: ${command}\n${e.message}`)))
+      child.on('error', (e) => reject(new Error(`Failed to execute: git ${args.join(' ')}\n${e.message}`)))
     })
   }
 }

@@ -125,6 +125,20 @@ function buildShellArgs(commands: string | string[]): string[] {
   return ['-c', keepOpen]
 }
 
+// Single-quote a value for safe interpolation into the POSIX shell command
+// string that buildShellArgs hands to `sh -c`. Prevents paths containing
+// quotes, `$`, backticks or `;` from executing as shell syntax. (On win32,
+// buildShellArgs drops cd commands entirely, so this only ever feeds sh.)
+function shq(value: string): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`
+}
+
+// Strip shell-active characters from display-only labels (repo names,
+// worktree ids) before they are interpolated into echo commands.
+function sanitizeLabel(value: unknown): string {
+  return String(value ?? '').replace(/['"`$\\;(){}]/g, '')
+}
+
 // ─── RTK Integration ────────────────────────────────────────────
 // Token generation, path resolution, and hook management are delegated
 // to electron/services/rtkManager.ts. rtkManager.initialize() is called
@@ -319,12 +333,12 @@ export class SessionManager extends EventEmitter {
 
         let args: string[]
         if (terminal.terminalType === 'claude') {
-          args = buildShellArgs(`cd "${wt.path}"`)
+          args = buildShellArgs(`cd ${shq(wt.path)}`)
         } else {
           args = buildShellArgs([
-            `cd "${wt.path}"`,
-            `echo "=== ${terminal.repository?.name}/${terminal.worktree} ==="`,
-            `echo "Directory: ${wt.path}"`,
+            `cd ${shq(wt.path)}`,
+            `echo "=== ${sanitizeLabel(terminal.repository?.name)}/${sanitizeLabel(terminal.worktree)} ==="`,
+            `echo "Directory: ${sanitizeLabel(wt.path)}"`,
             `echo "Branch: $(git branch --show-current 2>/dev/null || echo unknown)"`,
             `echo ""`,
           ])
@@ -352,7 +366,7 @@ export class SessionManager extends EventEmitter {
             Promise.resolve().then(() =>
               this.createSession(claudeId, {
                 command: getDefaultShell(),
-                args: buildShellArgs(`cd "${wt.path}"`),
+                args: buildShellArgs(`cd ${shq(wt.path)}`),
                 cwd: wt.path,
                 type: 'claude',
                 worktreeId: wt.id,
@@ -367,9 +381,9 @@ export class SessionManager extends EventEmitter {
               this.createSession(serverId, {
                 command: getDefaultShell(),
                 args: buildShellArgs([
-                  `cd "${wt.path}"`,
-                  `echo "=== Server Terminal for ${wt.id} ==="`,
-                  `echo "Directory: ${wt.path}"`,
+                  `cd ${shq(wt.path)}`,
+                  `echo "=== Server Terminal for ${sanitizeLabel(wt.id)} ==="`,
+                  `echo "Directory: ${sanitizeLabel(wt.path)}"`,
                   `echo "Branch: $(git branch --show-current 2>/dev/null || echo unknown)"`,
                   `echo ""`,
                 ]),
@@ -684,7 +698,7 @@ export class SessionManager extends EventEmitter {
         setTimeout(() => {
           this.createSession(sessionId, {
             ...config,
-            args: buildShellArgs(`cd "${config.cwd}" && echo "Claude session ended. Type 'claude' to start a new session." && echo ""`),
+            args: buildShellArgs(`cd ${shq(config.cwd)} && echo "Claude session ended. Type 'claude' to start a new session." && echo ""`),
           })
         }, 500)
       } else {
@@ -803,8 +817,8 @@ export class SessionManager extends EventEmitter {
     const sessionId = existingSessionId || `raw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const cwd = workspacePath || this.workspace?.repository?.path || process.env.HOME || os.homedir() || '/tmp'
     const args = type === 'shell'
-      ? buildShellArgs([`cd "${cwd}"`, `echo "Welcome to AgntSpce"`])
-      : buildShellArgs(`cd "${cwd}"`)
+      ? buildShellArgs([`cd ${shq(cwd)}`, `echo "Welcome to AgntSpce"`])
+      : buildShellArgs(`cd ${shq(cwd)}`)
 
     try {
       await this.createSession(sessionId, {
@@ -951,7 +965,7 @@ export class SessionManager extends EventEmitter {
       tokenUsage: 0,
       config: {
         command: getDefaultShell(),
-        args: buildShellArgs(`cd "${cwd}"`),
+        args: buildShellArgs(`cd ${shq(cwd)}`),
         cwd,
         type: saved.type,
         worktreeId: '',
@@ -1032,7 +1046,7 @@ export class SessionManager extends EventEmitter {
       const sessionId = `${groupId}-${i}`
       await this.createSession(sessionId, {
         command: getDefaultShell(),
-        args: buildShellArgs(`cd "${cwd}"`),
+        args: buildShellArgs(`cd ${shq(cwd)}`),
         cwd,
         type: config.agentId,
         worktreeId,

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
 import type { WorkspaceInfo, SessionState, TerminalOutput, StatusChange, BranchChange, WorkspaceChange, AgentConfig, AgentStartConfig, FilterEvent, FilterStats, CommandEvent, ExecutionEvent, ChatModelInfo, ChatThread } from '../types'
-
-const SERVER_URL = 'http://127.0.0.1:9460'
+import { SERVER_URL, getServerAuthToken, apiHeaders } from '../utils/serverAuth'
 
 export interface OrchestratorTaskStats {
   total: number
@@ -160,8 +159,12 @@ export function useSocket(): UseSocketReturn {
   }, [])
 
   useEffect(() => {
-    const socket = io(SERVER_URL)
-    socketRef.current = socket
+    let disposed = false
+    void (async () => {
+      const token = await getServerAuthToken()
+      if (disposed) return
+      const socket = io(SERVER_URL, token ? { auth: { token } } : {})
+      socketRef.current = socket
 
     socket.on('connect', () => {
       setConnected(true)
@@ -254,7 +257,7 @@ socket.emit('get-cumulative-stats', {})
       for (const [sessionId, buffered] of Object.entries(data)) {
         if (buffered) {
           const cur = outputBuffer.current[sessionId] || ''
-          outputBuffer.current[sessionId] = cur + buffered
+          outputBuffer.current[sessionId] = (cur + buffered).slice(-65536)
         }
       }
       if (!outputTimer.current) {
@@ -313,12 +316,15 @@ socket.emit('get-cumulative-stats', {})
     setSearchEvents(all.filter(e => e.command.startsWith('agntspce-search')).reverse())
   })
 
+  })()
+
   return () => {
+      disposed = true
       if (outputTimer.current) {
         clearTimeout(outputTimer.current)
         flushOutput()
       }
-      socket.disconnect()
+      socketRef.current?.disconnect()
     }
   }, [flushOutput])
 
@@ -350,6 +356,27 @@ socket.emit('get-cumulative-stats', {})
     }
   }, [])
 
+  // Ack-based request with a bounded wait. Resolves null instead of hanging
+  // forever when the socket is missing or the server never answers.
+  const emitAck = useCallback((event: string, payload: unknown, timeoutMs = 120000): Promise<any> => {
+    return new Promise((resolve) => {
+      const socket = socketRef.current
+      if (!socket) {
+        resolve(null)
+        return
+      }
+      let settled = false
+      const finish = (res: any) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(res)
+      }
+      const timer = setTimeout(() => finish(null), timeoutMs)
+      socket.emit(event, payload, (res: any) => finish(res))
+    })
+  }, [])
+
   const sendTerminalInput = useCallback((sessionId: string, data: string) => {
     socketRef.current?.emit('terminal-input', { sessionId, data })
   }, [])
@@ -371,32 +398,27 @@ socket.emit('get-cumulative-stats', {})
   }, [])
 
   const createWorkspace = useCallback((data: any): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('create-workspace', data, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('create-workspace', data)
+  }, [emitAck])
 
   const deleteWorkspace = useCallback((workspaceId: string) => {
     socketRef.current?.emit('delete-workspace', { workspaceId })
   }, [])
 
-  const listDeletedWorkspaces = useCallback((): Promise<{ id: string; name: string; deletedAt: string }[]> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('list-deleted-workspaces', {}, (res: any) => resolve(res || []))
-    })
-  }, [])
+  const listDeletedWorkspaces = useCallback(async (): Promise<{ id: string; name: string; deletedAt: string }[]> => {
+    const res = await emitAck('list-deleted-workspaces', {})
+    return res || []
+  }, [emitAck])
 
-  const restoreWorkspace = useCallback((workspaceId: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('restore-workspace', { workspaceId }, (res: any) => resolve(res?.ok ?? false))
-    })
-  }, [])
+  const restoreWorkspace = useCallback(async (workspaceId: string): Promise<boolean> => {
+    const res = await emitAck('restore-workspace', { workspaceId })
+    return res?.ok ?? false
+  }, [emitAck])
 
-  const permanentDeleteWorkspace = useCallback((workspaceId: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('permanent-delete-workspace', { workspaceId }, (res: any) => resolve(res?.ok ?? false))
-    })
-  }, [])
+  const permanentDeleteWorkspace = useCallback(async (workspaceId: string): Promise<boolean> => {
+    const res = await emitAck('permanent-delete-workspace', { workspaceId })
+    return res?.ok ?? false
+  }, [emitAck])
 
   const refreshWorkspaces = useCallback(() => {
     socketRef.current?.emit('list-workspaces')
@@ -420,7 +442,7 @@ socket.emit('get-cumulative-stats', {})
 
   const fetchAgentConfigs = useCallback(async (): Promise<AgentConfig[]> => {
     try {
-      const res = await fetch(`${SERVER_URL}/api/agents`)
+      const res = await fetch(`${SERVER_URL}/api/agents`, { headers: await apiHeaders() })
       if (!res.ok) throw new Error('Failed to fetch agent configs')
       return await res.json()
     } catch {
@@ -430,7 +452,7 @@ socket.emit('get-cumulative-stats', {})
 
   const fetchInstalledAgents = useCallback(async (): Promise<Record<string, boolean>> => {
     try {
-      const res = await fetch(`${SERVER_URL}/api/agents/installed`)
+      const res = await fetch(`${SERVER_URL}/api/agents/installed`, { headers: await apiHeaders() })
       if (!res.ok) throw new Error('Failed to fetch installed agents')
       return await res.json()
     } catch {
@@ -439,40 +461,30 @@ socket.emit('get-cumulative-stats', {})
   }, [])
 
   const addWorktree = useCallback((workspaceId: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('add-worktree', { workspaceId }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('add-worktree', { workspaceId })
+  }, [emitAck])
 
   const removeWorktree = useCallback((workspaceId: string, worktreeId: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('remove-worktree', { workspaceId, worktreeId }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('remove-worktree', { workspaceId, worktreeId })
+  }, [emitAck])
 
-  const listWorktrees = useCallback((workspaceId: string): Promise<any[]> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('list-worktrees', { workspaceId }, (res: any) => resolve(res || []))
-    })
-  }, [])
+  const listWorktrees = useCallback(async (workspaceId: string): Promise<any[]> => {
+    const res = await emitAck('list-worktrees', { workspaceId })
+    return res || []
+  }, [emitAck])
 
   const startParallelTask = useCallback((config: any): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('start-parallel-task', config, (res: any) => resolve(res))
-    })
-  }, [])
+    // Clones + setup scripts can legitimately run for many minutes
+    return emitAck('start-parallel-task', config, 600000)
+  }, [emitAck])
 
   const createWorkspaceFromGit = useCallback((gitUrl: string, name?: string, scripts?: { setupScript?: string; teardownScript?: string }): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('create-workspace-from-git', { gitUrl, name, setupScript: scripts?.setupScript, teardownScript: scripts?.teardownScript }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('create-workspace-from-git', { gitUrl, name, setupScript: scripts?.setupScript, teardownScript: scripts?.teardownScript }, 600000)
+  }, [emitAck])
 
   const updateWorkspaceConfig = useCallback((workspaceId: string, updates: any): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('update-workspace-config', { workspaceId, updates }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('update-workspace-config', { workspaceId, updates })
+  }, [emitAck])
 
   const emit = useCallback((event: string, ...args: any[]) => {
     socketRef.current?.emit(event, ...args)
@@ -489,189 +501,120 @@ socket.emit('get-cumulative-stats', {})
     socketRef.current?.emit('get-filter-stats', {})
   }, [])
 
-  const getOrchestratorStats = useCallback((): Promise<OrchestratorStats> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-orchestrator-stats', {}, (res: any) => {
-        if (res?.ok) resolve(res)
-        else resolve({ concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [], orchestration: null })
-      })
-    })
-  }, [])
+  const getOrchestratorStats = useCallback(async (): Promise<OrchestratorStats> => {
+    const res = await emitAck('get-orchestrator-stats', {})
+    if (res?.ok) return res
+    return { concurrency: { active: 0, queued: 0, max: 6 }, sessionCount: 0, totalMemoryMB: 0, resourceUsage: [], orchestration: null }
+  }, [emitAck])
 
   const getSessionUsage = useCallback((sessionId: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-session-usage', { sessionId }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('get-session-usage', { sessionId })
+  }, [emitAck])
 
-  const getSessionHistory = useCallback((): Promise<any[]> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-session-history', {}, (res: any) => {
-        if (res?.ok) resolve(res.history || [])
-        else resolve([])
-      })
-    })
-  }, [])
+  const getSessionHistory = useCallback(async (): Promise<any[]> => {
+    const res = await emitAck('get-session-history', {})
+    if (res?.ok) return res.history || []
+    return []
+  }, [emitAck])
 
-  const getTokenUsage = useCallback((sessionId?: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-token-usage', { sessionId }, (res: any) => {
-        if (res?.ok) resolve(res)
-        else resolve({ usage: null, totalTokens: 0, totalCost: 0 })
-      })
-    })
-  }, [])
+  const getTokenUsage = useCallback(async (sessionId?: string): Promise<any> => {
+    const res = await emitAck('get-token-usage', { sessionId })
+    if (res?.ok) return res
+    return { usage: null, totalTokens: 0, totalCost: 0 }
+  }, [emitAck])
 
-  const getGitLog = useCallback((worktreePath: string, maxCount?: number): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-log', { worktreePath, maxCount }, (res: any) => {
-        if (res?.ok) resolve(res.log)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitLog = useCallback(async (worktreePath: string, maxCount?: number): Promise<any> => {
+    const res = await emitAck('get-git-log', { worktreePath, maxCount }, 300000)
+    if (res?.ok) return res.log
+    return null
+  }, [emitAck])
 
-  const getGitDiff = useCallback((worktreePath: string, base?: string, head?: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-diff', { worktreePath, base, head }, (res: any) => {
-        if (res?.ok) resolve(res.diff)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitDiff = useCallback(async (worktreePath: string, base?: string, head?: string): Promise<any> => {
+    const res = await emitAck('get-git-diff', { worktreePath, base, head })
+    if (res?.ok) return res.diff
+    return null
+  }, [emitAck])
 
-  const getGitBranches = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-branches', { worktreePath }, (res: any) => {
-        if (res?.ok) resolve(res.branches)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitBranches = useCallback(async (worktreePath: string): Promise<any> => {
+    const res = await emitAck('get-git-branches', { worktreePath })
+    if (res?.ok) return res.branches
+    return null
+  }, [emitAck])
 
-  const getGitWorkingTreeDiff = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-working-tree-diff', { worktreePath }, (res: any) => {
-        if (res?.ok) resolve(res.diff)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitWorkingTreeDiff = useCallback(async (worktreePath: string): Promise<any> => {
+    const res = await emitAck('get-git-working-tree-diff', { worktreePath })
+    if (res?.ok) return res.diff
+    return null
+  }, [emitAck])
 
-  const getGitCommitFiles = useCallback((worktreePath: string, commitHash: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-commit-files', { worktreePath, commitHash }, (res: any) => {
-        if (res?.ok) resolve(res.files)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitCommitFiles = useCallback(async (worktreePath: string, commitHash: string): Promise<any> => {
+    const res = await emitAck('get-git-commit-files', { worktreePath, commitHash })
+    if (res?.ok) return res.files
+    return null
+  }, [emitAck])
 
-  const getGitWorkingTreeFiles = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-working-tree-files', { worktreePath }, (res: any) => {
-        if (res?.ok) resolve(res.files)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitWorkingTreeFiles = useCallback(async (worktreePath: string): Promise<any> => {
+    const res = await emitAck('get-git-working-tree-files', { worktreePath })
+    if (res?.ok) return res.files
+    return null
+  }, [emitAck])
 
-  const getGitFileDiff = useCallback((worktreePath: string, filePath: string, base?: string, head?: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-file-diff', { worktreePath, filePath, base, head }, (res: any) => {
-        if (res?.ok) resolve(res.diff)
-        else resolve(null)
-      })
-    })
-  }, [])
+  const getGitFileDiff = useCallback(async (worktreePath: string, filePath: string, base?: string, head?: string): Promise<any> => {
+    const res = await emitAck('get-git-file-diff', { worktreePath, filePath, base, head })
+    if (res?.ok) return res.diff
+    return null
+  }, [emitAck])
 
-  const getGitFullStatus = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-git-full-status', { worktreePath }, (res: any) => {
-        resolve(res?.status ?? null)
-      })
-    })
-  }, [])
+  const getGitFullStatus = useCallback(async (worktreePath: string): Promise<any> => {
+    const res = await emitAck('get-git-full-status', { worktreePath })
+    return res?.status ?? null
+  }, [emitAck])
 
-  const gitRevertFile = useCallback((worktreePath: string, filePath: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-revert-file', { worktreePath, filePath }, (res: any) => {
-        resolve(res?.ok === true)
-      })
-    })
-  }, [])
+  const gitRevertFile = useCallback(async (worktreePath: string, filePath: string): Promise<boolean> => {
+    const res = await emitAck('git-revert-file', { worktreePath, filePath })
+    return res?.ok === true
+  }, [emitAck])
 
-  const gitStageFile = useCallback((worktreePath: string, filePath: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-stage-file', { worktreePath, filePath }, (res: any) => {
-        resolve(res?.ok === true)
-      })
-    })
-  }, [])
+  const gitStageFile = useCallback(async (worktreePath: string, filePath: string): Promise<boolean> => {
+    const res = await emitAck('git-stage-file', { worktreePath, filePath })
+    return res?.ok === true
+  }, [emitAck])
 
-  const gitUnstageFile = useCallback((worktreePath: string, filePath: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-unstage-file', { worktreePath, filePath }, (res: any) => {
-        resolve(res?.ok === true)
-      })
-    })
-  }, [])
+  const gitUnstageFile = useCallback(async (worktreePath: string, filePath: string): Promise<boolean> => {
+    const res = await emitAck('git-unstage-file', { worktreePath, filePath })
+    return res?.ok === true
+  }, [emitAck])
 
-  const gitStageAll = useCallback((worktreePath: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-stage-all', { worktreePath }, (res: any) => {
-        resolve(res?.ok === true)
-      })
-    })
-  }, [])
+  const gitStageAll = useCallback(async (worktreePath: string): Promise<boolean> => {
+    const res = await emitAck('git-stage-all', { worktreePath })
+    return res?.ok === true
+  }, [emitAck])
 
-  const gitUnstageAll = useCallback((worktreePath: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-unstage-all', { worktreePath }, (res: any) => {
-        resolve(res?.ok === true)
-      })
-    })
-  }, [])
+  const gitUnstageAll = useCallback(async (worktreePath: string): Promise<boolean> => {
+    const res = await emitAck('git-unstage-all', { worktreePath })
+    return res?.ok === true
+  }, [emitAck])
 
-  const gitCommit = useCallback((worktreePath: string, message: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-commit', { worktreePath, message }, (res: any) => {
-        resolve(res ?? { ok: false, error: 'no response' })
-      })
-    })
-  }, [])
+  const gitCommit = useCallback(async (worktreePath: string, message: string): Promise<any> => {
+    return await emitAck('git-commit', { worktreePath, message }, 300000) ?? { ok: false, error: 'no response' }
+  }, [emitAck])
 
-  const gitPull = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-pull', { worktreePath }, (res: any) => {
-        resolve(res ?? { ok: false, error: 'no response' })
-      })
-    })
-  }, [])
+  const gitPull = useCallback(async (worktreePath: string): Promise<any> => {
+    return await emitAck('git-pull', { worktreePath }, 300000) ?? { ok: false, error: 'no response' }
+  }, [emitAck])
 
-  const gitPush = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-push', { worktreePath }, (res: any) => {
-        resolve(res ?? { ok: false, error: 'no response' })
-      })
-    })
-  }, [])
+  const gitPush = useCallback(async (worktreePath: string): Promise<any> => {
+    return await emitAck('git-push', { worktreePath }, 300000) ?? { ok: false, error: 'no response' }
+  }, [emitAck])
 
-  const gitFetch = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-fetch', { worktreePath }, (res: any) => {
-        resolve(res ?? { ok: false, error: 'no response' })
-      })
-    })
-  }, [])
+  const gitFetch = useCallback(async (worktreePath: string): Promise<any> => {
+    return await emitAck('git-fetch', { worktreePath }, 300000) ?? { ok: false, error: 'no response' }
+  }, [emitAck])
 
-  const gitDiscardAll = useCallback((worktreePath: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('git-discard-all', { worktreePath }, (res: any) => {
-        resolve(res?.ok === true)
-      })
-    })
-  }, [])
+  const gitDiscardAll = useCallback(async (worktreePath: string): Promise<boolean> => {
+    const res = await emitAck('git-discard-all', { worktreePath })
+    return res?.ok === true
+  }, [emitAck])
 
   const onSessionUnhealthy = useCallback((cb: (data: { sessionId: string, reason: string, usage?: any }) => void) => {
     sessionUnhealthyCbs.current.push(cb)
@@ -685,46 +628,32 @@ socket.emit('get-cumulative-stats', {})
   }, [])
 
   const getWorkspaceTree = useCallback((worktreePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('get-workspace-tree', { worktreePath }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('get-workspace-tree', { worktreePath })
+  }, [emitAck])
 
   const readFile = useCallback((absolutePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('read-file', { absolutePath }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('read-file', { absolutePath })
+  }, [emitAck])
 
   const writeFile = useCallback((absolutePath: string, content: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('write-file', { absolutePath, content }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('write-file', { absolutePath, content })
+  }, [emitAck])
 
   const createFile = useCallback((absolutePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('create-file', { absolutePath }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('create-file', { absolutePath })
+  }, [emitAck])
 
   const createFolder = useCallback((absolutePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('create-folder', { absolutePath }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('create-folder', { absolutePath })
+  }, [emitAck])
 
   const renameFile = useCallback((oldPath: string, newPath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('rename-file', { oldPath, newPath }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('rename-file', { oldPath, newPath })
+  }, [emitAck])
 
   const deleteFile = useCallback((absolutePath: string): Promise<any> => {
-    return new Promise((resolve) => {
-      socketRef.current?.emit('delete-file', { absolutePath }, (res: any) => resolve(res))
-    })
-  }, [])
+    return emitAck('delete-file', { absolutePath })
+  }, [emitAck])
 
   // Chat functions
   const chatReqId = useRef(0)

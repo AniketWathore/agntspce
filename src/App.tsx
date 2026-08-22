@@ -657,6 +657,15 @@ function App() {
 
       const match = shortcuts.find(s => eventMatches(e, s.combo))
       if (match) {
+        // Don't hijack editing verbs (select-all / save / find) while the
+        // user is typing in an input, textarea, Monaco editor or xterm.
+        const target = e.target as HTMLElement | null
+        const inEditable = !!target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable
+        )
+        if (inEditable && /^[asf]$/i.test(e.key)) return
         e.preventDefault()
         match.action()
       }

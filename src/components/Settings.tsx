@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { ProviderTemplate, KeySummary } from '../types'
+import { apiHeaders } from '../utils/serverAuth'
 
 const SERVER_URL = 'http://127.0.0.1:9460'
 
@@ -88,8 +89,8 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
   const refresh = useCallback(async () => {
     try {
       const [tRes, kRes] = await Promise.all([
-        fetch(`${SERVER_URL}/api/chat/providers`),
-        fetch(`${SERVER_URL}/api/chat/keys`),
+        fetch(`${SERVER_URL}/api/chat/providers`, { headers: await apiHeaders() }),
+        fetch(`${SERVER_URL}/api/chat/keys`, { headers: await apiHeaders() }),
       ])
       if (tRes.ok) setTemplates(await tRes.json())
       if (kRes.ok) setKeys(await kRes.json())
@@ -154,7 +155,7 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
     try {
       const res = await fetch(`${SERVER_URL}/api/chat/models/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           type: selectedTemplate?.type || form.type,
           apiKey: key,
@@ -180,7 +181,7 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
     if (selectedTemplate?.custom) return
     setLoadingModels(true)
     try {
-      const res = await fetch(`${SERVER_URL}/api/chat/models/${providerId}`)
+      const res = await fetch(`${SERVER_URL}/api/chat/models/${providerId}`, { headers: await apiHeaders() })
       const data = await res.json()
       if (data.ok && Array.isArray(data.models)) {
         const sorted = [...data.models].sort((a, b) => a.localeCompare(b))
@@ -250,14 +251,14 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
       if (editingId) {
         const res = await fetch(`${SERVER_URL}/api/chat/keys/${editingId}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await apiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(body),
         })
         ok = res.ok
       } else {
         const res = await fetch(`${SERVER_URL}/api/chat/keys`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await apiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(body),
         })
         ok = res.ok
@@ -277,7 +278,7 @@ export default function Settings({ theme, onThemeChange, onFontSizeChange, onFon
   async function handleDelete(key: KeySummary) {
     if (!window.confirm(`Delete API key "${key.name}"?`)) return
     try {
-      const res = await fetch(`${SERVER_URL}/api/chat/keys/${key.id}`, { method: 'DELETE' })
+      const res = await fetch(`${SERVER_URL}/api/chat/keys/${key.id}`, { method: 'DELETE', headers: await apiHeaders() })
       const data = await res.json()
       if (data.ok) {
         if (editingId === key.id) cancelEdit()

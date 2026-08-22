@@ -172,7 +172,14 @@ export default memo(function TerminalPane(props: Props) {
       })
     }
 
+    // Live output arriving while the saved backlog is still being replayed
+    // must be held back, otherwise it gets queued into xterm before older
+    // backlog chunks (reordering) or dropped entirely (subscription race).
+    const pendingLive: string[] = []
+    let backlogDone = true
+
     if (writeData) {
+      backlogDone = false
       // Clear scrollback before loading saved buffer
       term.write('\x1b[3J')
       // Chunk large buffers to avoid blocking the renderer thread
@@ -182,14 +189,23 @@ export default memo(function TerminalPane(props: Props) {
         const chunk = writeData.slice(offset, offset + chunkSize)
         if (chunk) term.write(chunk)
         offset += chunkSize
-        if (offset < writeData.length) requestAnimationFrame(loadChunk)
+        if (offset < writeData.length) {
+          requestAnimationFrame(loadChunk)
+        } else {
+          backlogDone = true
+          for (const d of pendingLive.splice(0)) term.write(d)
+        }
       }
       loadChunk()
     }
 
     const unsub = onTerminalOutputRef.current?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
       if (sid === session.id && termInstance.current) {
-        termInstance.current.write(data)
+        if (!backlogDone) {
+          pendingLive.push(data)
+          return
+        }
+        term.write(data)
       }
     })
 
@@ -280,16 +296,6 @@ function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.Mo
             onClick={(e) => { e.stopPropagation(); onLayoutChange?.(layoutMode === 'focus' ? 'grid' : 'focus') }}
             title="Full screen"
           >⊞</button>
-          <button
-            className={`terminal-layout-btn ${layoutMode === 'side-left' ? 'active' : ''}`}
-            onClick={(e) => { e.stopPropagation(); onLayoutChange?.(layoutMode === 'side-left' ? 'grid' : 'side-left') }}
-            title="Left side"
-          >◧</button>
-          <button
-            className={`terminal-layout-btn ${layoutMode === 'side-right' ? 'active' : ''}`}
-            onClick={(e) => { e.stopPropagation(); onLayoutChange?.(layoutMode === 'side-right' ? 'grid' : 'side-right') }}
-            title="Right side"
-          >◨</button>
         </span>
         {onClose && (
           <button className="terminal-close-btn" onClick={() => onClose(session.id)} title="Close">✕</button>

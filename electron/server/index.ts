@@ -14,7 +14,7 @@ export interface ServerHandle {
   listen: () => void
 }
 
-export function bootstrapServer(userDataPath: string, rebuildMenu: () => void, stateManager?: StateManager | null): ServerHandle {
+export function bootstrapServer(userDataPath: string, rebuildMenu: () => void, stateManager?: StateManager | null, authToken?: string): ServerHandle {
   const expressApp = express()
   const httpServer = createServer(expressApp)
   const io = new Server(httpServer, {
@@ -29,12 +29,39 @@ export function bootstrapServer(userDataPath: string, rebuildMenu: () => void, s
     },
   })
 
-  expressApp.use((_req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-    if (_req.method === 'OPTIONS') {
+  // Socket.IO handshake auth: clients inside Electron present the per-launch
+  // token via io(url, { auth: { token } }). Non-browser local tools (no Origin
+  // header) are still allowed; any browser page without the token is rejected.
+  io.use((socket, next) => {
+    if (!authToken || socket.handshake.auth?.token === authToken) return next()
+    if (!socket.handshake.headers.origin) return next()
+    next(new Error('Unauthorized'))
+  })
+
+  // REST: reflect the origin only when allowlisted (never `*`), then require
+  // the auth token for anything a browser could send cross-origin. Requests
+  // with no Origin header (curl, local scripts like bin/agntspce.mjs) pass.
+  expressApp.use((req, res, next) => {
+    const origin = req.headers.origin
+    if (origin && isAllowedCorsOrigin(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-agntspce-token')
+    }
+    if (req.method === 'OPTIONS') {
       res.sendStatus(204)
+      return
+    }
+    const presented = (() => {
+      const header = req.headers['x-agntspce-token']
+      if (typeof header === 'string' && header) return header
+      const auth = req.headers.authorization
+      if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7)
+      return undefined
+    })()
+    if (authToken && presented !== authToken && origin) {
+      res.status(403).json({ error: 'Unauthorized' })
       return
     }
     next()

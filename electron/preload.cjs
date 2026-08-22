@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   getDefaultPath: () => ipcRenderer.invoke('get-default-path'),
   getServerPort: () => ipcRenderer.invoke('get-server-port'),
+  getServerAuthToken: () => ipcRenderer.invoke('get-server-auth-token'),
   exportWorkspace: () => ipcRenderer.invoke('export-workspace'),
   importWorkspace: () => ipcRenderer.invoke('import-workspace'),
   duplicateWorkspace: (newName) => ipcRenderer.invoke('duplicate-workspace', newName),
