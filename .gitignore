@@ -22,3 +22,6 @@ search/
 .skylos/
 agnt-tmp-*
 *.bak
+
+# Prebuilt search bundles — distributed via GitHub Releases (search-v* tags)
+packages/*.tar.gz
