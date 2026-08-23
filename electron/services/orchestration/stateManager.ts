@@ -265,11 +265,14 @@ export class StateManager {
   initIntegrationBranch(): string {
     const integrationBranch = 'agntspce-integration'
     try {
-      execFileSync('git', ['rev-parse', '--verify', integrationBranch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 })
+      // --quiet: these are existence probes whose failure is expected and
+      // handled below; without it git prints raw `fatal:` lines to the host
+      // terminal even when stderr is piped (observed on Windows).
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', integrationBranch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 })
     } catch {
       const sourceBranch = this.getSourceBranch()
       try {
-        const sourceSha = execFileSync('git', ['rev-parse', sourceBranch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
+        const sourceSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', sourceBranch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
         execFileSync('git', ['branch', integrationBranch, sourceSha], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 })
       } catch {}
     }
@@ -280,7 +283,7 @@ export class StateManager {
   getIntegrationBranchSha(): string {
     const branch = this.getIntegrationBranch()
     try {
-      return execFileSync('git', ['rev-parse', branch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
+      return execFileSync('git', ['rev-parse', '--verify', '--quiet', branch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
     } catch {
       return ''
     }
@@ -290,7 +293,7 @@ export class StateManager {
     const sha = execFileSync('git', ['rev-parse', branch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
     this.db.prepare("UPDATE workspace_config SET value = ? WHERE key = 'integration_branch'").run(branch)
 
-    const existing = execFileSync('git', ['rev-parse', '--verify', branch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
+    const existing = execFileSync('git', ['rev-parse', '--verify', '--quiet', branch], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
     if (!existing) {
       execFileSync('git', ['branch', branch, sha], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 })
     }
@@ -299,7 +302,7 @@ export class StateManager {
 
   validateRef(ref: string): string | null {
     try {
-      return execFileSync('git', ['rev-parse', '--verify', ref], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
+      return execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { cwd: this.workspaceRepoPath, encoding: 'utf-8', timeout: 5000 }).trim()
     } catch {
       return null
     }

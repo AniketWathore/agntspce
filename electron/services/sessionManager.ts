@@ -70,16 +70,27 @@ try {
   try {
     const testShell = resolveExecutablePath(getDefaultShell())
     if (fs.existsSync(testShell)) {
-      const testPty = pty.spawn(testShell, ['-c', 'echo ok'], {
+      // Keep the test shell alive (-NoExit) so its ConPTY console still
+      // exists when the kill-path forks node-pty's console-list agent;
+      // an exited shell makes AttachConsole fail and dump a stack trace.
+      const testArgs = process.platform === 'win32'
+        ? ['-NoProfile', '-NoExit', '-Command', 'echo ok']
+        : ['-c', 'echo ok']
+      const testPty = pty.spawn(testShell, testArgs, {
         name: 'xterm-color',
         cols: 40,
         rows: 10,
         cwd: os.tmpdir(),
         env: { TERM: 'xterm-color', PATH: process.env.PATH || '/usr/bin:/bin' },
+        useConptyDll: true,
       })
       testPty.on('data', () => {})
       testPty.on('exit', () => {})
-      testPty.kill()
+      if (process.platform === 'win32') {
+        setTimeout(() => { try { testPty.kill() } catch {} }, 1500)
+      } else {
+        testPty.kill()
+      }
       console.log('[sessionManager] node-pty smoke-test passed')
     }
   } catch (smokeErr: any) {
@@ -634,6 +645,10 @@ export class SessionManager extends EventEmitter {
         rows: 24,
         cwd: config.cwd,
         env,
+        // In-proc ConPTY DLL: kill() no longer forks node-pty's console-list
+        // agent, whose AttachConsole call crashes and dumps a stack trace
+        // into the host terminal on Windows.
+        useConptyDll: true,
       })
     } catch (spawnErr: any) {
       slotRelease?.()
