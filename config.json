@@ -1,0 +1,23 @@
+{
+  "server": {
+    "port": 9460,
+    "host": "127.0.0.1"
+  },
+  "sessions": {
+    "timeoutMs": 1800000,
+    "maxBufferSize": 100000,
+    "maxProcessesPerSession": 50
+  },
+  "orchestration": {
+    "maxConcurrentSessions": 8,
+    "staleAgentTimeoutMs": 300000,
+    "useWorktrees": true,
+    "gateAutoApprove": false,
+    "circuitBreakerThreshold": 3,
+    "sweepIntervalMs": 60000,
+    "logLevel": "info"
+  },
+  "logging": {
+    "level": "info"
+  }
+}

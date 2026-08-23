@@ -1,0 +1,475 @@
+#!/usr/bin/env node
+
+import { spawnSync } from 'child_process'
+import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
+import { request as httpRequest } from 'http'
+
+// ── Filter Definitions ─────────────────────────────────────────
+
+const BUILTIN_FILTERS = [
+  {
+    matchCommand: /^git\s+status\b/,
+    stripAnsi: true,
+    matchOutput: [{ pattern: /not a git repository/, message: 'Not a git repository' }],
+    replace: [
+      { pattern: /^## HEAD \(no branch\).*$/gm, replacement: 'HEAD (detached)' },
+      { pattern: /^## (\S+?)(?:\.\.\.\S+)?\s+\[(.+)\]$/gm, replacement: '$1 [$2]' },
+      { pattern: /^## (\S+?)\.\.\.\S+$/gm, replacement: '$1 [synced]' },
+      { pattern: /^## (\S+)$/gm, replacement: '$1 (no upstream)' },
+    ],
+    stripLinesMatching: [/^\s*\(use "git/, /^\s*\(create\/copy/, /^\s*\(use "git restore/, /^\s*\(use "git add /],
+    headLines: 50,
+    onEmpty: 'clean',
+  },
+  {
+    matchCommand: /^git\s+diff\b/,
+    stripAnsi: true,
+    truncateLinesAt: 500,
+    headLines: 100,
+    onEmpty: 'no changes',
+  },
+  {
+    matchCommand: /^git\s+log\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^commit\s+[a-f0-9]{40}$/, /^Author:/, /^Date:/],
+    truncateLinesAt: 200,
+    headLines: 80,
+    onEmpty: 'no commits',
+  },
+  {
+    matchCommand: /^git\s+branch\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^$/],
+    maxLines: 30,
+  },
+  {
+    matchCommand: /^git\s+push\b/,
+    stripAnsi: true,
+    matchOutput: [
+      { pattern: /Everything up-to-date/, message: 'ok (up-to-date)' },
+      { pattern: /non-fast-forward/, message: 'push rejected' },
+    ],
+    stripLinesMatching: [/^Enumerating objects:/, /^Counting objects:/, /^Compressing objects:/, /^Writing objects:/, /^Delta compression/, /^Total\s+/, /^remote:/, /^Receiving objects:/, /^Resolving deltas:/],
+    onEmpty: 'ok pushed',
+  },
+  {
+    matchCommand: /^git\s+pull\b/,
+    stripAnsi: true,
+    matchOutput: [
+      { pattern: /Already up to date/, message: 'ok (up-to-date)' },
+      { pattern: /Already up-to-date/, message: 'ok (up-to-date)' },
+    ],
+    stripLinesMatching: [/^remote:/, /^From\s+/, /^Updating\s+/, /^Fast-forward/],
+    onEmpty: 'ok pulled',
+  },
+  {
+    matchCommand: /^git\s+add\b/,
+    onEmpty: 'ok',
+  },
+  {
+    matchCommand: /^git\s+commit\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^\[/, /^create mode/, /^delete mode/, /^\s+\d+ files? changed/, /^\d+ insertions?/, /^\d+ deletions?/],
+    matchOutput: [
+      { pattern: /nothing to commit/, message: 'nothing to commit' },
+      { pattern: /no changes added/, message: 'no changes added' },
+    ],
+    onEmpty: 'ok committed',
+  },
+  {
+    matchCommand: /^git\s+show\b/,
+    stripAnsi: true,
+    truncateLinesAt: 500,
+    headLines: 80,
+  },
+  {
+    // Agent plumbing runs this constantly (--recurse-submodules listings are
+    // thousands of paths); without a filter it reports raw == filtered.
+    matchCommand: /^git\s+ls-files\b/,
+    stripAnsi: true,
+    headLines: 100,
+    maxLines: 150,
+    onEmpty: 'no files',
+  },
+  {
+    matchCommand: /^npm\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^npm (WARN|notice)/, /^added \d+ package/, /^removed \d+ package/, /^changed \d+ package/],
+    matchOutput: [
+      { pattern: /up to date/, message: 'up to date' },
+      { pattern: /found \d+ vulnerabilities/, message: 'has vulnerabilities' },
+    ],
+    headLines: 80,
+    onEmpty: 'ok',
+  },
+  {
+    matchCommand: /^cargo\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^Compiling /, /^Finished /, /^Downloading /, /^Fresh /, /^\s+Blocking/, /^\s+Updating/],
+    headLines: 50,
+    onEmpty: 'ok',
+  },
+  {
+    matchCommand: /^ls\b/,
+    stripAnsi: true,
+    headLines: 60,
+    tailLines: 10,
+    maxLines: 100,
+  },
+  {
+    matchCommand: /^tree\b/,
+    stripAnsi: true,
+    headLines: 80,
+  },
+  {
+    matchCommand: /^docker\s+(ps|images)\b/,
+    stripAnsi: true,
+    headLines: 40,
+    onEmpty: 'none',
+  },
+  {
+    matchCommand: /^docker\s+build\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^Step \d+\//, /^ ---> /, /^ ---> [a-f0-9]{12}$/, /^Successfully built /, /^Successfully tagged /, /^\s*$/],
+    matchOutput: [{ pattern: /Successfully built/, message: 'ok built' }],
+    tailLines: 10,
+    onEmpty: 'ok built',
+  },
+  {
+    matchCommand: /^pip\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^Requirement already/, /^Collecting /, /^Downloading /, /^\s+Preparing /, /^\s+Installing /, /^Successfully installed /, /^Installed /],
+    headLines: 20,
+    onEmpty: 'ok',
+  },
+  {
+    matchCommand: /^pytest\b/,
+    stripAnsi: true,
+    stripLinesMatching: [/^\.+s?$/, /^=+ (test|session|short|passed|failed|error|warnings)/, /^[\.FEs\b]+$/],
+    headLines: 20,
+    tailLines: 30,
+    onEmpty: 'ok',
+  },
+  {
+    matchCommand: /^(make|just)\b/,
+    stripAnsi: true,
+    matchOutput: [{ pattern: /Nothing to be done/, message: 'nothing to do' }],
+    stripLinesMatching: [/^(make|just): (Entering|Leaving)/, /^\s*$/],
+    tailLines: 20,
+  },
+  {
+    matchCommand: /^kubectl\b/,
+    stripAnsi: true,
+    headLines: 60,
+    truncateLinesAt: 300,
+  },
+  {
+    matchCommand: /^terraform\b/,
+    stripAnsi: true,
+    matchOutput: [{ pattern: /No changes/, message: 'no changes' }],
+    stripLinesMatching: [/^\s+\+(created)/, /^\s+~/, /^\s+-\s/],
+    headLines: 40,
+  },
+]
+
+function normalizeCommand(command) {
+  const tokens = command.split(/\s+/)
+  const result = []
+  const skipNext = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'])
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i]
+    if (/^--(?:no-)?(?:pager|paginate)$/.test(t)) { i++; continue }
+    if (/^--(?:literal|glob|noglob|icase)-pathspecs$/.test(t)) { i++; continue }
+    if (/^--(?:html|man|info)-path$/.test(t)) { i++; continue }
+    if (/^--(?:git-dir|work-tree|namespace|exec-path)=/.test(t)) { i++; continue }
+    if (skipNext.has(t)) { i += 2; continue }
+    result.push(t)
+    i++
+  }
+  return result.join(' ')
+}
+
+function findFilter(command) {
+  return BUILTIN_FILTERS.find(f => f.matchCommand.test(normalizeCommand(command)))
+}
+
+function stripAnsi(text) {
+  return text.replace(/\x1b\[[\d;]*[A-Za-z]/g, '')
+    .replace(/\x1b\][\s\S]*?(?:\x1b\\|\x07)/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+}
+
+function estimateTokens(text) {
+  const clean = stripAnsi(String(text || ''))
+    .replace(/\r\n/g, '\n')
+    .replace(/[\u200b-\u200f\u2028-\u202f\ufeff]/g, '')
+  return Math.max(1, Math.ceil(clean.length / 4))
+}
+
+function applyFilter(filter, output) {
+  let lines = output.split('\n')
+
+  if (filter.stripAnsi) {
+    lines = lines.map(l => stripAnsi(l))
+  }
+
+  if (filter.replace) {
+    const blob = lines.join('\n')
+    let result = blob
+    for (const rule of filter.replace) {
+      result = result.replace(rule.pattern, rule.replacement)
+    }
+    lines = result.split('\n')
+  }
+
+  if (filter.matchOutput) {
+    const blob = lines.join('\n')
+    for (const rule of filter.matchOutput) {
+      if (rule.pattern.test(blob)) {
+        return rule.message
+      }
+    }
+  }
+
+  if (filter.stripLinesMatching) {
+    lines = lines.filter(line => !filter.stripLinesMatching.some(p => p.test(line)))
+  }
+
+  if (filter.truncateLinesAt) {
+    lines = lines.map(l => l.length > filter.truncateLinesAt ? l.slice(0, filter.truncateLinesAt) + '...' : l)
+  }
+
+  const total = lines.length
+  if (filter.headLines && filter.tailLines) {
+    if (total > filter.headLines + filter.tailLines) {
+      const head = lines.slice(0, filter.headLines)
+      const tail = lines.slice(total - filter.tailLines)
+      lines = [...head, `... (${total - filter.headLines - filter.tailLines} lines omitted)`, ...tail]
+    }
+  } else if (filter.headLines) {
+    if (total > filter.headLines) {
+      lines = [...lines.slice(0, filter.headLines), `... (${total - filter.headLines} lines omitted)`]
+    }
+  } else if (filter.tailLines) {
+    if (total > filter.tailLines) {
+      lines = [`... (${total - filter.tailLines} lines omitted)`, ...lines.slice(total - filter.tailLines)]
+    }
+  }
+
+  if (filter.maxLines && lines.length > filter.maxLines) {
+    const truncated = lines.length - filter.maxLines
+    lines = [...lines.slice(0, filter.maxLines), `... (${truncated} lines truncated)`]
+  }
+
+  let result = lines.join('\n').trim()
+  if (!result && filter.onEmpty) {
+    result = filter.onEmpty
+  }
+
+  return result
+}
+
+function resolveBinary(name) {
+  if (name.includes('/') || name.includes('\\')) return name
+  const originalPath = process.env.AGNTSPCE_ORIGINAL_PATH || process.env.PATH || ''
+  const ourDir = path.dirname(fileURLToPath(import.meta.url))
+  const dirs = originalPath.split(path.delimiter).filter(d => d && path.resolve(d) !== ourDir)
+  const candidates = [name]
+  // Order matches CreateProcess/PATHEXT precedence (.COM > .EXE > .BAT > .CMD).
+  // On Windows the bare name must NOT match extensionless files (e.g. the
+  // POSIX `npm` sh shim) — those are not executable by CreateProcess.
+  if (process.platform === 'win32' && !path.extname(name)) {
+    candidates.length = 0
+    candidates.push(name + '.exe', name + '.com', name + '.bat', name + '.cmd')
+  }
+  for (const dir of dirs) {
+    if (!dir) continue
+    for (const cand of candidates) {
+      try {
+        const fullPath = path.resolve(dir, cand)
+        fs.accessSync(fullPath, fs.constants.F_OK)
+        const stat = fs.statSync(fullPath)
+        if (stat.isFile()) return fullPath
+      } catch {}
+    }
+  }
+  return name
+}
+
+function agntspceAvailable() {
+  const resolved = resolveBinary('agntspce')
+  return resolved !== 'agntspce'
+}
+
+// ── Subcommand: rewrite ────────────────────────────────────────
+
+function cmdRewrite(command) {
+  if (!command || !command.trim()) return command
+  const filter = findFilter(command.trim())
+  if (filter && agntspceAvailable()) {
+    return `agntspce run ${command.trim()}`
+  }
+  return command.trim()
+}
+
+// ── HTTP Stats Reporting ───────────────────────────────────────
+
+function reportStats(rawTokens, filteredTokens, commandStr, exitCode) {
+  const port = parseInt(process.env.AGNTSPCE_PORT || '9460', 10)
+  const body = JSON.stringify({ originalTokens: rawTokens, filteredTokens, toolName: commandStr, sessionId: process.env.AGNTSPCE_SESSION_ID || '' })
+  process.stderr.write(`[agntspce] reporting stats raw=${rawTokens} filtered=${filteredTokens} port=${port}\n`)
+  const done = () => process.exit(exitCode)
+  try {
+    const req = httpRequest({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/report-token-savings',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, (res) => {
+      process.stderr.write(`[agntspce] POST response status=${res.statusCode}\n`)
+      done()
+    })
+    req.setTimeout(2000, () => { process.stderr.write('[agntspce] POST timeout\n'); req.destroy(); done() })
+    req.on('error', (err) => { process.stderr.write(`[agntspce] POST error: ${err.message}\n`); done() })
+    req.write(body)
+    req.end()
+  } catch (e) {
+    process.stderr.write(`[agntspce] POST exception: ${e.message}\n`)
+    done()
+  }
+}
+
+// ── Subcommand: run ────────────────────────────────────────────
+
+function cmdRun(args) {
+  if (args.length === 0) {
+    process.exit(1)
+  }
+
+  const commandStr = args.join(' ')
+  // Normalize: if the agent passes the full binary path, replace with "agntspce"
+  // so the terminal shows "agntspce $ ..." instead of the absolute path.
+  const wrapperPath = process.argv[1] || ''
+  const wrapperBase = 'agntspce'
+  // Normalize args: replace any absolute/full path to our wrapper binary with just base name
+  const normalizedArgs = args.map(a => {
+    // Direct match to wrapper binary path
+    if (a === wrapperPath || a === wrapperBase) return wrapperBase
+    // Any absolute path that ends with our binary name (dist-electron/rtk/agntspce, bin/agntspce, etc.)
+    if (path.basename(a) === wrapperBase && (a.includes('/') || a.includes('\\'))) {
+      return wrapperBase
+    }
+    if (wrapperPath && a.includes(wrapperPath)) return wrapperBase
+    return a
+  })
+  const displayArgs = normalizedArgs[0] === wrapperBase ? normalizedArgs.slice(1) : normalizedArgs
+  const displayStr = displayArgs.join(' ')
+  const filter = findFilter(displayStr)
+  const binary = resolveBinary(normalizedArgs[0] || args[0])
+
+  // cmd.exe batch shims (.cmd/.bat) cannot be spawned directly without a
+  // shell — Node ≥18.20 throws EINVAL for them (CVE-2024-27980 mitigation).
+  // Route those through the shell with conservative quoting instead.
+  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)
+  const quoteWinArg = (arg) => {
+    const s = String(arg)
+    if (s === '' || /[\s"&|<>^()%!]/.test(s)) return '"' + s.replace(/"/g, '""') + '"'
+    return s
+  }
+
+  // Emit command marker so OutputFilterService can detect and track this command.
+  // Write to stderr, not stdout: node-pty merges both streams into the same
+  // onData stream, so OutputFilterService still sees the marker, but programs
+  // that capture stdout (e.g. opencode's internal `git rev-parse` calls that go
+  // through the bin/git wrapper) receive clean output.
+  process.stderr.write(`agntspce $ ${displayStr}\n`)
+
+  const spawnOpts = {
+    stdio: ['inherit', 'pipe', 'pipe'],
+    windowsHide: true,
+    cwd: process.cwd(),
+    env: { ...process.env, AGNTSPCE_RUN: '1' },
+    maxBuffer: 50 * 1024 * 1024,
+  }
+  const result = needsShell
+    ? spawnSync([binary, ...args.slice(1)].map(quoteWinArg).join(' '), { ...spawnOpts, shell: true })
+    : spawnSync(binary, args.slice(1), spawnOpts)
+
+  // Fallback: if the binary wasn't found, try running raw through the shell
+  if (result.error && result.error.code === 'ENOENT') {
+    const fallback = spawnSync(args[0], args.slice(1), {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: true,
+      cwd: process.cwd(),
+      env: { ...process.env, AGNTSPCE_RUN: '1' },
+      maxBuffer: 50 * 1024 * 1024,
+    })
+    const fbStdout = fallback.stdout ? fallback.stdout.toString() : ''
+    const fbStderr = fallback.stderr ? fallback.stderr.toString() : ''
+    if (fbStdout) process.stdout.write(fbStdout)
+    if (fbStderr) process.stderr.write(fbStderr)
+    const fbExit = fallback.error ? 1 : (fallback.status ?? 0)
+    process.exit(fbExit)
+  }
+
+  const stdout = result.stdout ? result.stdout.toString() : ''
+  const stderrText = result.stderr ? result.stderr.toString() : ''
+  // Suppress any lines that contain the full binary path (e.g. agent showing absolute path)
+  const wrapperFullPath = process.argv[1] ? path.basename(process.argv[1]) === 'agntspce.mjs' ? process.argv[1].replace('.mjs', '') : '' : ''
+  const binaryDir = wrapperFullPath ? path.dirname(wrapperFullPath) : ''
+  const suppressRegex = /dist-electron[\\/]rtk[\\/]agntspce|\/Users\/prashik\/Aniket\/agntspce\/dist-electron\/rtk\/agntspce|\/Users\/prashik\/Aniket\/agntspce\/bin\/agntspce/g
+  const suppressFilter = (text) => {
+    return text.split('\n').filter(line => {
+      // Suppress lines that contain the absolute wrapper binary path (agent showing full path)
+      return !suppressRegex.test(line)
+    }).join('\n')
+  }
+  const stdoutFiltered = suppressFilter(stdout)
+  const stderrFiltered = suppressFilter(stderrText)
+  const raw = (stdoutFiltered + stderrFiltered).trim()
+  const exitCode = result.status ?? 0
+
+  if (!filter) {
+    if (stdoutFiltered) process.stdout.write(stdoutFiltered)
+    if (stderrFiltered) process.stderr.write(stderrFiltered)
+    const rt = estimateTokens(raw)
+    reportStats(rt, rt, displayStr, exitCode)
+    return
+  }
+
+  const filtered = applyFilter(filter, raw)
+  // Emit token stats so the RTK system can track real savings.
+  // The raw output was captured by spawnSync; the filtered output
+  // is what gets written to the PTY. This line is detected by
+  // OutputFilterService.processOutput() and NOT included in
+  // the accumulated output or terminal display.
+  const rawTokens = estimateTokens(raw)
+  const filteredTokens = estimateTokens(filtered)
+  process.stderr.write(`\x1b[2K\rAGNTSPCE_STATS raw=${rawTokens} filtered=${filteredTokens}\n`)
+  if (filtered) {
+    process.stdout.write(filtered + '\n')
+  }
+  // Report token savings to backend via HTTP (bypasses PTY output parsing)
+  reportStats(rawTokens, filteredTokens, displayStr, exitCode)
+}
+
+// ── Entry Point ────────────────────────────────────────────────
+
+const subcommand = process.argv[2]
+
+if (subcommand === 'rewrite') {
+  const command = process.argv.slice(3).join(' ')
+  process.stdout.write(cmdRewrite(command))
+} else if (subcommand === 'run') {
+  cmdRun(process.argv.slice(3))
+} else if (subcommand && subcommand !== 'rewrite' && subcommand !== 'run') {
+  // Bare invocation: agntspce git status → treat entire argv as command
+  cmdRun(process.argv.slice(2))
+} else {
+  process.exit(1)
+}

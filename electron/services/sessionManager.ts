@@ -1,0 +1,1372 @@
+import { EventEmitter } from 'events'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
+import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+
+const _require = createRequire(import.meta.url)
+import { AGENT_TYPES, type Session, type SessionConfig, type SavedSessionData, type Worktree, type Workspace } from './types'
+import { StatusDetector } from './statusDetector'
+import { GitHelper } from './gitHelper'
+import { WorktreeHelper } from './worktreeHelper'
+import { OutputFilterService } from './outputFilter'
+import { WorkspaceManager } from './workspaceManager'
+import { AgentOrchestrator } from './agentOrchestrator'
+import { TokenUsageTracker } from './outputCompressor'
+import { CavemanService } from './cavemanService'
+import { RingBuffer } from './ringBuffer'
+import { toWireEvent } from './outputFilter'
+import { ContextWriter } from './orchestration/contextWriter'
+import * as rtkManager from './rtkManager'
+import { getActiveSearchPath, generateSessionToken } from './searchManager'
+import { resolveAgent, getLoginPath, getAllAgentBinaryDirs } from './agentResolver'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+let AGNTSPCE_BIN_DIR = ''
+// Check unpacked paths FIRST — they work with shell exec (not inside asar)
+for (const dir of [
+  path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bin'),
+  path.resolve(process.resourcesPath || '', 'bin'),
+  // Dev: bundle lives at dist-electron/main.js, so __dirname = dist-electron.
+  // One level up is the project root, then bin/. (../.. would resolve to the
+  // parent of the project root and miss the repo's bin directory.)
+  path.resolve(__dirname, '..', 'bin'),
+  path.resolve(__dirname, '..', '..', 'bin'),
+]) {
+  if (fs.existsSync(dir) && fs.existsSync(path.join(dir, 'agntspce'))) {
+    AGNTSPCE_BIN_DIR = dir
+    break
+  }
+}
+// Fallback: try asar path if no unpacked path found
+if (!AGNTSPCE_BIN_DIR) {
+  const asarPath = path.resolve(__dirname, '..', '..', 'bin')
+  if (fs.existsSync(asarPath)) {
+    AGNTSPCE_BIN_DIR = asarPath
+  }
+}
+
+// Ensure spawn-helper has execute permission (npm install can produce 644)
+try {
+  const ptyPkgPath = path.resolve(_require.resolve('node-pty/package.json'), '..')
+  const helperPath = path.join(ptyPkgPath, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper')
+  if (fs.existsSync(helperPath)) {
+    const stat = fs.statSync(helperPath)
+    if (stat && !(stat.mode & 0o111)) {
+      fs.chmodSync(helperPath, 0o755)
+      console.log('[sessionManager] Restored execute permission on spawn-helper')
+    }
+  }
+} catch {}
+
+let pty: any = null
+try {
+  pty = _require('node-pty')
+  // Quick smoke-test to confirm node-pty actually works in this environment.
+  // The native module can load but still fail at spawn time due to macOS
+  // sandbox/permissions or Electron version ABI mismatches with the prebuild.
+  try {
+    const testShell = resolveExecutablePath(getDefaultShell())
+    if (fs.existsSync(testShell)) {
+      const testPty = pty.spawn(testShell, ['-c', 'echo ok'], {
+        name: 'xterm-color',
+        cols: 40,
+        rows: 10,
+        cwd: os.tmpdir(),
+        env: { TERM: 'xterm-color', PATH: process.env.PATH || '/usr/bin:/bin' },
+      })
+      testPty.on('data', () => {})
+      testPty.on('exit', () => {})
+      testPty.kill()
+      console.log('[sessionManager] node-pty smoke-test passed')
+    }
+  } catch (smokeErr: any) {
+    console.warn('[sessionManager] node-pty smoke-test FAILED — spawns will likely fail:', {
+      shell: getDefaultShell(),
+      shellExists: fs.existsSync(getDefaultShell()),
+      error: smokeErr.message,
+      code: (smokeErr as any).code,
+      errno: (smokeErr as any).errno,
+    })
+  }
+} catch (e) {
+  console.error('node-pty failed to load:', e)
+}
+
+function getDefaultShell(): string {
+  if (process.platform === 'win32') return 'powershell.exe'
+  const shell = process.env.SHELL || '/bin/bash'
+  // Validate shell exists; this is a common gotcha when Electron's environment
+  // differs from the terminal's (e.g. SHELL unset by sandbox or build tooling).
+  if (!fs.existsSync(shell)) {
+    console.warn(`[sessionManager] SHELL="${shell}" not found, falling back to /bin/bash`)
+    return '/bin/bash'
+  }
+  return shell
+}
+
+// node-pty ≥1.1.0 on Windows does NOT do PATH lookup — CreateProcess needs a
+// fully-qualified path, otherwise it fails with "File not found: ".
+// Resolve bare names like "powershell.exe" against System32 + PATH.
+function resolveExecutablePath(command: string): string {
+  if (process.platform !== 'win32') return command
+  if (!command || path.isAbsolute(command) || /[\\/]/.test(command)) return command
+  const exts = ['', '.exe', '.cmd', '.bat']
+  const dirs: string[] = []
+  if (process.env.SystemRoot) {
+    const root = process.env.SystemRoot
+    dirs.push(
+      path.join(root, 'System32'),
+      path.join(root, 'System32', 'WindowsPowerShell', 'v1.0'),
+      path.join(root, 'SysWOW64', 'WindowsPowerShell', 'v1.0'),
+      root,
+    )
+  }
+  dirs.push(...(process.env.PATH || process.env.Path || '').split(';').filter(Boolean))
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      try {
+        const candidate = path.join(dir, command + ext)
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+      } catch {}
+    }
+  }
+  return command
+}
+
+function getShellName(): string {
+  const shell = getDefaultShell()
+  return shell.split('/').pop() || 'bash'
+}
+
+function buildShellArgs(commands: string | string[]): string[] {
+  if (process.platform === 'win32') {
+    let cmds = Array.isArray(commands) ? commands : [commands]
+    cmds = cmds.filter(c => !c.startsWith('cd '))
+    const joined = cmds.join('; ').replace(/2>\/dev\/null/g, '2>$null').replace(/\|\| echo unknown/g, '')
+    if (!joined.trim()) return ['-NoExit', '-NoProfile']
+    return ['-NoExit', '-NoProfile', '-Command', joined]
+  }
+  const shellName = getShellName()
+  const joined = Array.isArray(commands) ? commands.join(' && ') : commands
+  const keepOpen = joined && joined.trim() ? `${joined} && exec ${shellName}` : `exec ${shellName}`
+  return ['-c', keepOpen]
+}
+
+// Single-quote a value for safe interpolation into the POSIX shell command
+// string that buildShellArgs hands to `sh -c`. Prevents paths containing
+// quotes, `$`, backticks or `;` from executing as shell syntax. (On win32,
+// buildShellArgs drops cd commands entirely, so this only ever feeds sh.)
+function shq(value: string): string {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`
+}
+
+// Strip shell-active characters from display-only labels (repo names,
+// worktree ids) before they are interpolated into echo commands.
+function sanitizeLabel(value: unknown): string {
+  return String(value ?? '').replace(/['"`$\\;(){}]/g, '')
+}
+
+// ─── RTK Integration ────────────────────────────────────────────
+// Token generation, path resolution, and hook management are delegated
+// to electron/services/rtkManager.ts. rtkManager.initialize() is called
+// in the main process before any sessions are created.
+
+const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
+
+// Terminal output is coalesced per session before hitting Socket.IO. Agent
+// TUIs redraw many times per second with multi-KB frames; one packet per PTY
+// chunk floods both processes with allocations. A 16ms window matches one
+// display frame (the renderer already coalesces at 30ms, so perceived latency
+// is unchanged).
+const OUTPUT_FLUSH_MS = 16
+const OUTPUT_FLUSH_BYTES = 512 * 1024
+
+function applyBackpressure(io: any): void {
+  try {
+    for (const [, socket] of io.sockets.sockets) {
+      const transport = (socket as any)?.conn?.transport
+      if (transport?.name === 'websocket') {
+        const ws = transport.socket as any
+        if (ws && ws.bufferedAmount > OUTBOUND_BUFFER_CAP) {
+          // Graceful backpressure: pause the socket instead of hard-terminating it.
+          // The renderer will reconnect/resume when it catches up, and we avoid
+          // dropping every client when a single consumer is slow.
+          try { socket.pause?.() } catch {}
+          const resume = () => {
+            try { socket.resume?.() } catch {}
+          }
+          ws.once?.('drain', resume)
+          ws.once?.('close', resume)
+        }
+      }
+    }
+  } catch {}
+}
+
+export class SessionManager extends EventEmitter {
+  sessions = new Map<string, Session>()
+  workspace: Workspace | null = null
+  worktrees: Worktree[] = []
+  workspaceSessionMaps = new Map<string, Map<string, Session>>()
+  private statusDetector: StatusDetector | null = null
+  private gitHelper: GitHelper | null = null
+  private worktreeHelper = new WorktreeHelper()
+  private io: any
+  private branchRefreshInterval: NodeJS.Timeout | null = null
+  private isWorkspaceSwitching = false
+  autoRestartSessions = false
+  private agentManager: any = null
+  orchestrator: AgentOrchestrator | null = null
+  sessionHistory: { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] = []
+  tokenUsageTracker = new TokenUsageTracker()
+  outputFilter: OutputFilterService
+  cavemanService = new CavemanService()
+  private contextWriter: ContextWriter | null = null
+  private lastStatusRefresh = new Map<string, number>()
+  private lastStatusBytes = new Map<string, number>()
+  private pendingOutput = new Map<string, { chunks: string[]; bytes: number; timer: ReturnType<typeof setTimeout> | null }>()
+
+  constructor(io: any, agentManager?: any, dataDir?: string) {
+    super()
+    this.io = io
+    this.outputFilter = new OutputFilterService(dataDir)
+    // Cumulative token savings persist across app restarts (filter-history.json
+    // + filter-stats.json in the user data dir). Do NOT reset on startup.
+    if (agentManager) this.agentManager = agentManager
+    if (dataDir) this.cavemanService.setDataDir(dataDir)
+    this.outputFilter.setOnCommandEvent((event) => {
+      try {
+        // Wire copies carry only a small output preview — the renderer only
+        // renders token counts, and full bodies accumulated in client state.
+        this.io.emit('command-filter-event', toWireEvent(event))
+      } catch {}
+    })
+    this.cavemanService.onRunComplete((sessionId, run) => {
+      try {
+        this.io.emit('caveman-run-complete', { sessionId, run })
+      } catch {}
+    })
+  }
+
+  setAgentManager(am: any) { this.agentManager = am }
+
+  setStatusDetector(d: StatusDetector) { this.statusDetector = d }
+  setGitHelper(g: GitHelper) { this.gitHelper = g }
+
+  getWorkspace(): Workspace | null {
+    return this.workspace
+  }
+
+  private ensureContextWriter(): ContextWriter | null {
+    const repoPath = this.workspace?.repository?.path
+    if (!repoPath) {
+      this.contextWriter = null
+      return null
+    }
+    if (!this.contextWriter) {
+      this.contextWriter = new ContextWriter(repoPath, this.orchestrator?.getStateManager() ?? null)
+    } else {
+      this.contextWriter.setStateManager(this.orchestrator?.getStateManager() ?? null)
+    }
+    return this.contextWriter
+  }
+
+  setWorkspace(workspace: Workspace | null) {
+    this.workspace = workspace
+    this.worktrees = []
+    if (!workspace) return
+    this.buildWorktreesFromWorkspace()
+    if (workspace.id && !this.workspaceSessionMaps.has(workspace.id)) {
+      this.workspaceSessionMaps.set(workspace.id, new Map())
+    }
+  }
+
+  private buildWorktreesFromWorkspace() {
+    if (!this.workspace) return
+    this.worktrees = []
+    const { repository, worktrees: wtConfig, terminals } = this.workspace
+
+    if (Array.isArray(terminals)) {
+      const seen = new Set<string>()
+      for (const t of terminals) {
+        const key = `${t.repository?.name}-${t.worktree}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        this.worktrees.push({
+          id: key,
+          worktreeId: t.worktree,
+          repositoryName: t.repository?.name,
+          repositoryPath: t.repository?.path,
+          path: t.worktreePath || path.join(t.repository?.path || '', t.worktree || ''),
+        })
+      }
+    } else if (repository && wtConfig?.enabled) {
+      const pairs = terminals?.pairs || 1
+      for (let i = 1; i <= pairs; i++) {
+        const wtId = wtConfig.namingPattern.replace('{n}', String(i))
+        this.worktrees.push({ id: wtId, path: path.join(repository.path, wtId) })
+      }
+    }
+  }
+
+  async switchWorkspacePreservingSessions(workspace: Workspace) {
+    if (!workspace?.id) throw new Error('Workspace missing id')
+    const prevId = this.workspace?.id || null
+    if (prevId === workspace.id) {
+      this.setWorkspace(workspace)
+      this.workspaceSessionMaps.set(workspace.id, this.sessions)
+      return { sessions: this.getSessionStates(), backlog: {} }
+    }
+    if (prevId && prevId !== workspace.id) {
+      this.workspaceSessionMaps.set(prevId, this.sessions)
+    }
+    this.setWorkspace(workspace)
+    const restored = this.workspaceSessionMaps.get(workspace.id)
+    this.sessions = restored || new Map()
+    this.workspaceSessionMaps.set(workspace.id, this.sessions)
+    // When sessions were restored from the session map, DO NOT re-create
+    // sessions from workspace.terminals — that data is stale and can have
+    // wrong agent types (e.g. 'claude' instead of 'opencode'), causing
+    // duplicate or incorrect sessions. Only restore from the live map.
+    if (!restored || restored.size === 0) {
+      await this.initializeSessions({ preserveExisting: true })
+    }
+    return { sessions: this.getSessionStates(), backlog: this.getUndeliveredOutputAndMarkDelivered() }
+  }
+
+  async initializeSessions(options: { preserveExisting?: boolean } = {}) {
+    this.isWorkspaceSwitching = true
+    if (!options.preserveExisting) {
+      this.cleanupAllSessions()
+    }
+    if (!this.workspace) {
+      this.isWorkspaceSwitching = false
+      return
+    }
+    if (!this.autoRestartSessions) {
+      this.isWorkspaceSwitching = false
+      return
+    }
+
+    // Ensure worktree directories exist
+    for (const wt of this.worktrees) {
+      try {
+        await fs.promises.access(wt.path)
+      } catch {
+        try {
+          await fs.promises.mkdir(wt.path, { recursive: true })
+        } catch { }
+      }
+    }
+
+    const promises: Promise<void>[] = []
+
+    if (Array.isArray(this.workspace.terminals)) {
+      for (const terminal of this.workspace.terminals) {
+        const wtKey = `${terminal.repository?.name}-${terminal.worktree}`
+        const wt = this.worktrees.find(w => w.id === wtKey)
+        if (!wt) continue
+        const sessionId = terminal.id
+        if (this.sessions.has(sessionId)) continue
+
+        let args: string[]
+        if (terminal.terminalType === 'claude') {
+          args = buildShellArgs(`cd ${shq(wt.path)}`)
+        } else {
+          args = buildShellArgs([
+            `cd ${shq(wt.path)}`,
+            `echo "=== ${sanitizeLabel(terminal.repository?.name)}/${sanitizeLabel(terminal.worktree)} ==="`,
+            `echo "Directory: ${sanitizeLabel(wt.path)}"`,
+            `echo "Branch: $(git branch --show-current 2>/dev/null || echo unknown)"`,
+            `echo ""`,
+          ])
+        }
+
+        promises.push(
+          Promise.resolve().then(() =>
+            this.createSession(sessionId, {
+              command: getDefaultShell(),
+              args,
+              cwd: wt.path,
+              type: terminal.terminalType,
+              worktreeId: terminal.worktree,
+              repositoryName: terminal.repository?.name,
+              repositoryType: terminal.repository?.type,
+            })
+          )
+        )
+      }
+    } else {
+      for (const wt of this.worktrees) {
+        const claudeId = `${wt.id}-claude`
+        if (!this.sessions.has(claudeId)) {
+          promises.push(
+            Promise.resolve().then(() =>
+              this.createSession(claudeId, {
+                command: getDefaultShell(),
+                args: buildShellArgs(`cd ${shq(wt.path)}`),
+                cwd: wt.path,
+                type: 'claude',
+                worktreeId: wt.id,
+              })
+            )
+          )
+        }
+        const serverId = `${wt.id}-server`
+        if (!this.sessions.has(serverId)) {
+          promises.push(
+            Promise.resolve().then(() =>
+              this.createSession(serverId, {
+                command: getDefaultShell(),
+                args: buildShellArgs([
+                  `cd ${shq(wt.path)}`,
+                  `echo "=== Server Terminal for ${sanitizeLabel(wt.id)} ==="`,
+                  `echo "Directory: ${sanitizeLabel(wt.path)}"`,
+                  `echo "Branch: $(git branch --show-current 2>/dev/null || echo unknown)"`,
+                  `echo ""`,
+                ]),
+                cwd: wt.path,
+                type: 'server',
+                worktreeId: wt.id,
+              })
+            )
+          )
+        }
+        if (this.gitHelper) {
+          promises.push(
+            Promise.resolve().then(() => this.updateGitBranch(wt.id, wt.path))
+          )
+        }
+      }
+    }
+    await Promise.all(promises)
+
+    if (this.workspace?.id) {
+      this.workspaceSessionMaps.set(this.workspace.id, this.sessions)
+    }
+    this.isWorkspaceSwitching = false
+    this.startBranchRefresh()
+  }
+
+  private scheduleTerminalOutput(sessionId: string, data: string): void {
+    let entry = this.pendingOutput.get(sessionId)
+    if (!entry) {
+      entry = { chunks: [], bytes: 0, timer: null }
+      this.pendingOutput.set(sessionId, entry)
+    }
+    entry.chunks.push(data)
+    entry.bytes += data.length
+    // Large bursts flush immediately; otherwise wait out the coalescing window.
+    if (entry.bytes >= OUTPUT_FLUSH_BYTES) {
+      this.flushTerminalOutput(sessionId)
+      return
+    }
+    if (!entry.timer) {
+      const e = entry
+      e.timer = setTimeout(() => {
+        e.timer = null
+        this.flushTerminalOutput(sessionId)
+      }, OUTPUT_FLUSH_MS)
+      e.timer.unref?.()
+    }
+  }
+
+  private flushTerminalOutput(sessionId: string): void {
+    const entry = this.pendingOutput.get(sessionId)
+    if (!entry) return
+    this.pendingOutput.delete(sessionId)
+    if (entry.timer) clearTimeout(entry.timer)
+    const data = entry.chunks.join('')
+    if (!data) return
+    // Only deliver for the live session object; after a workspace switch the
+    // data is still in the ring buffer and reaches the client via backlog.
+    const session = this.sessions.get(sessionId)
+    if (!session || session.pty === null) return
+    applyBackpressure(this.io)
+    try {
+      this.io.emit('terminal-output', { sessionId, data })
+    } catch { }
+    session.deliveredBufferLength = session.buffer.totalBytes
+  }
+
+  async createSession(sessionId: string, config: SessionConfig) {
+    if (!pty) throw new Error('node-pty unavailable')
+    const env: any = { ...process.env, TERM: 'xterm-color' }
+
+    // Windows: normalize PATH casing — env blocks are case-insensitive with unique keys.
+    // Spreading process.env gives us "Path" (Windows canonical), then setting "PATH" later
+    // creates duplicate keys. node-pty / ConPTY silently drops one — likely the prepended value.
+    if (process.platform === 'win32') {
+      // Find the existing PATH-like key in process.env
+      const existingPathKey = Object.keys(process.env).find(k => /^path$/i.test(k)) || 'Path'
+      const existingPath = env[existingPathKey] || ''
+      // Delete any other casing variant to prevent duplicates
+      for (const k of Object.keys(env)) {
+        if (/^path$/i.test(k) && k !== existingPathKey) delete env[k]
+      }
+      // Build PATH fresh below — just preserve the original value
+      env.__WIN32_ORIGINAL_PATH = existingPath
+    }
+
+    const isAgent = (AGENT_TYPES as readonly string[]).includes(config.type)
+    const binDir = AGNTSPCE_BIN_DIR
+
+    if (isAgent) {
+      // Build PATH: bundled wrappers → resolved agent binary dirs → login shell PATH → inherited PATH
+      const loginPath = getLoginPath()
+      const agentDirs = getAllAgentBinaryDirs()
+      const pathParts: string[] = []
+      if (fs.existsSync(binDir)) pathParts.push(binDir)
+      for (const d of agentDirs) {
+        if (!pathParts.includes(d)) pathParts.push(d)
+      }
+      const envPath = process.platform === 'win32'
+        ? (env.__WIN32_ORIGINAL_PATH || '')
+        : (env.PATH || env.Path || '')
+      if (loginPath) pathParts.push(loginPath)
+      if (envPath) pathParts.push(envPath)
+
+      // Set the canonical key
+      const pathKey = process.platform === 'win32'
+        ? (Object.keys(process.env).find(k => /^path$/i.test(k)) || 'Path')
+        : 'PATH'
+      env.AGNTSPCE_ORIGINAL_PATH = loginPath || envPath
+      env[pathKey] = pathParts.join(path.delimiter)
+    } else {
+      // For shell terminals, prepend the bin dir to PATH so wrapper
+      // commands (bin/git, bin/ls, etc.) resolve before system bins.
+      if (fs.existsSync(binDir)) {
+        const pathKey = process.platform === 'win32'
+          ? (Object.keys(process.env).find(k => /^path$/i.test(k)) || 'Path')
+          : 'PATH'
+        // Save the ORIGINAL PATH (without binDir) so bin/agntspce.mjs's
+        // resolveBinary() can find the real system binary (e.g. real git)
+        // instead of the hook script (bin/git), which would cause recursion.
+        const currentPath = env[pathKey] || ''
+        env.AGNTSPCE_ORIGINAL_PATH = currentPath
+        env[pathKey] = binDir + path.delimiter + currentPath
+      }
+    }
+
+    env.AGNTSPCE_ENABLED = '1'
+    env.AGNTSPCE_NODE_PATH = process.execPath
+    // Expose the session id so bin/agntspce.mjs can attribute wrapper token
+    // stats to the real session instead of a catch-all "system" bucket.
+    env.AGNTSPCE_SESSION_ID = sessionId
+
+    // Inject RTK session token and binary path.
+    // AGNTSPCE_RTK_SESSION is verified by the RTK binary's activation gate.
+    // AGNTSPCE_RTK_BINARY tells hook scripts where to find the binary.
+    env.AGNTSPCE_RTK_SESSION = rtkManager.generateRtkToken()
+    const activeRtkPath = rtkManager.getActiveRtkPath()
+    if (activeRtkPath) {
+      env.AGNTSPCE_RTK_BINARY = activeRtkPath
+    } else {
+      env.AGNTSPCE_RTK_BINARY = path.join(process.resourcesPath || '', 'rtk', process.platform === 'win32' ? 'rtk.exe' : 'rtk')
+    }
+
+    // AGNTSPCE_WRAPPER_PATH tells the RTK plugin where to find the agntspce
+    // wrapper. Prefer the .cmd shim (Windows) or the script (macOS/Linux),
+    // then fall back to the RTK install directory.
+    // On Windows, also set AGNTSPCE_JS so PowerShell hook functions can
+    // resolve agntspce.mjs without PATH lookup.
+    let wrapperPath = ''
+    if (AGNTSPCE_BIN_DIR) {
+      if (process.platform === 'win32') {
+        const cmdPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce.cmd')
+        if (fs.existsSync(cmdPath)) {
+          wrapperPath = cmdPath
+        } else {
+          wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
+        }
+      } else if (fs.existsSync(path.join(AGNTSPCE_BIN_DIR, 'agntspce'))) {
+        wrapperPath = path.join(AGNTSPCE_BIN_DIR, 'agntspce')
+      }
+    }
+    if (!wrapperPath) {
+      const rtkDir = activeRtkPath ? path.dirname(activeRtkPath) : path.join(process.resourcesPath || '', 'rtk')
+      const rtkWrapper = fs.existsSync(path.join(rtkDir, 'agntspce.cmd'))
+        ? path.join(rtkDir, 'agntspce.cmd')
+        : fs.existsSync(path.join(rtkDir, 'agntspce'))
+          ? path.join(rtkDir, 'agntspce')
+          : ''
+      if (rtkWrapper) wrapperPath = rtkWrapper
+    }
+    if (wrapperPath) env.AGNTSPCE_WRAPPER_PATH = wrapperPath
+
+    // On Windows, set AGNTSPCE_JS so hook scripts can find agntspce.mjs
+    // without relying on PATH, PATHEXT, or stale exe files.
+    if (process.platform === 'win32') {
+      const jsPath = wrapperPath
+        ? path.resolve(path.dirname(wrapperPath), 'agntspce.mjs')
+        : path.join(binDir, 'agntspce.mjs')
+      if (fs.existsSync(jsPath)) env.AGNTSPCE_JS = jsPath
+    }
+    const searchPath = getActiveSearchPath()
+    if (searchPath) {
+      env.AGNTSPCE_SEARCH_SESSION = generateSessionToken()
+      env.AGNTSPCE_SEARCH_BINARY = searchPath
+    }
+
+    if (this.workspace?.envVars) {
+      for (const [key, val] of Object.entries(this.workspace.envVars)) {
+        env[key] = val
+      }
+    }
+    let slotRelease: (() => void) | null = null
+    if (isAgent && this.orchestrator) {
+      try {
+        slotRelease = await this.orchestrator.acquireSlot()
+      } catch (err: any) {
+        console.error('[sessionManager] slot acquire failed, skipping session:', sessionId, err?.message || err)
+        return
+      }
+    }
+    let ptyProcess
+    try {
+      const resolvedCommand = resolveExecutablePath(config.command)
+      ptyProcess = pty.spawn(resolvedCommand, config.args, {
+        name: 'xterm-color',
+        cols: 80,
+        rows: 24,
+        cwd: config.cwd,
+        env,
+      })
+    } catch (spawnErr: any) {
+      slotRelease?.()
+      const shellPath = config.command || ''
+      const shellExists = fs.existsSync(resolveExecutablePath(shellPath))
+      let shellMode = '?'
+      try { if (shellExists) shellMode = fs.statSync(shellPath).mode.toString(8) } catch {}
+      console.error('[sessionManager] pty.spawn failed:', {
+        command: config.command,
+        args: config.args,
+        cwd: config.cwd,
+        cwdExists: fs.existsSync(config.cwd || ''),
+        shellExists,
+        shellMode,
+        envKeys: Object.keys(env).filter(k => !k.startsWith('AGNTSPCE_')),
+        error: spawnErr.message,
+        code: (spawnErr as any).code,
+        errno: (spawnErr as any).errno,
+      })
+      throw spawnErr
+    }
+
+    // Windows PATH sync: Node.js preserves the ORIGINAL casing of env var
+    // names (e.g. "Path" not "PATH") when spreading process.env. If we set
+    // env.PATH but env.Path still has the old value, child processes see the
+    // stale env.Path. Set both to be safe.
+    if (process.platform === 'win32') {
+      const winPath = env.PATH || env.Path
+      if (winPath) {
+        env.PATH = winPath
+        env.Path = winPath
+      }
+    }
+
+    const session: Session = {
+      id: sessionId,
+      pty: ptyProcess,
+      type: config.type as any,
+      worktreeId: config.worktreeId,
+      repositoryName: config.repositoryName,
+      repositoryType: config.repositoryType,
+      status: 'idle',
+      branch: 'unknown',
+      buffer: new RingBuffer(),
+      deliveredBufferLength: 0,
+      lastActivity: Date.now(),
+      tokenUsage: 0,
+      config,
+      statusChangedAt: Date.now(),
+      pendingStatus: null,
+      pendingStatusTimer: null,
+      cwdState: { current: config.cwd, previous: null, stack: [] },
+      autoStarted: false,
+      claudeLaunchState: null,
+      slotRelease: slotRelease
+        ? () => {
+            if (slotRelease) {
+              slotRelease()
+              slotRelease = null
+            }
+          }
+        : null,
+    }
+
+    ptyProcess.onData((data: string) => {
+      session.buffer.write(data)
+      session.lastActivity = Date.now()
+      this.orchestrator?.markHealthCheck(sessionId)
+
+      // Process through output filter (detects agntspce $ markers, compresses output, returns modified data for the frontend display)
+      const modifiedData = this.outputFilter.processOutput(sessionId, data)
+
+      session.tokenUsage = this.tokenUsageTracker.getUsage(sessionId)?.totalTokens || 0
+      this.tokenUsageTracker.trackOutput(sessionId, data)
+      const isActive = this.sessions.get(sessionId) === session
+      if (isActive) {
+        // Send modified data to frontend (with compression applied by
+        // outputFilter), coalesced into one packet per flush window.
+        this.scheduleTerminalOutput(sessionId, modifiedData)
+      }
+      // Status detection joins the full buffer and runs regexes — throttle it
+      // on the hot output path (processMonitor still refreshes every 5s).
+      const lastRefresh = this.lastStatusRefresh.get(sessionId) || 0
+      const now = Date.now()
+      if (now - lastRefresh >= 500) {
+        this.lastStatusRefresh.set(sessionId, now)
+        this.refreshSessionStatus(sessionId)
+      }
+      this.updateSessionContext(sessionId, data)
+    })
+
+    ptyProcess.onExit(({ exitCode, signal }: any) => {
+      // Deliver any coalesced output before the exit event so the renderer
+      // sees the final output in order.
+      this.flushTerminalOutput(sessionId)
+      session.slotRelease?.()
+      clearInterval(session.processMonitor!)
+      session.status = 'exited'
+      this.outputFilter.finalizeCommand(sessionId, exitCode ?? 1)
+      this.persistSessionBuffer(sessionId)
+      const isActive = this.sessions.get(sessionId) === session
+      if (isActive) {
+        try {
+          this.io.emit('session-exited', { sessionId, exitCode, signal })
+        } catch { }
+      }
+      const canRestart = !this.orchestrator || this.orchestrator.canRestart(sessionId)
+      if (isActive && config.type === 'claude' && this.autoRestartSessions && !this.isWorkspaceSwitching && canRestart) {
+        this.cleanupSessionBuffer(sessionId)
+        this.sessions.delete(sessionId)
+        this.orchestrator?.recordRestart(sessionId)
+        setTimeout(() => {
+          this.createSession(sessionId, {
+            ...config,
+            args: buildShellArgs(`cd ${shq(config.cwd)} && echo "Claude session ended. Type 'claude' to start a new session." && echo ""`),
+          })
+        }, 500)
+      } else {
+        this.cleanupSessionBuffer(sessionId)
+        this.sessions.delete(sessionId)
+      }
+    })
+
+    session.workspace = this.workspace?.id || null
+    this.sessions.set(sessionId, session)
+
+    if (this.orchestrator) {
+      this.orchestrator.registerSession(sessionId, ptyProcess.pid, config.worktreeId, config.type)
+    }
+
+    session.processMonitor = setInterval(() => {
+      this.refreshSessionStatus(session.id)
+    }, 5000)
+  }
+
+  writeToSession(sessionId: string, data: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session?.pty) return false
+    try {
+      const clean = data.replace(/\n$/, '').trim()
+      if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
+        this.cavemanService.setPendingPrompt(sessionId, clean)
+      }
+      session.pty.write(data)
+      return true
+    } catch { return false }
+  }
+
+  resizeSession(sessionId: string, cols: number, rows: number) {
+    const session = this.sessions.get(sessionId)
+    if (!session?.pty) return
+    try { session.pty.resize(cols, rows) } catch { }
+  }
+
+  // 2.2 per-agent context files: update `.agntspce/context/<agentId>.md` on
+  // output activity (throttled inside ContextWriter). Session type is the
+  // agent id (claude/codex/...) which matches the preamble naming.
+  private updateSessionContext(sessionId: string, tailOutput?: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    if (!(AGENT_TYPES as readonly string[]).includes(session.type)) return
+    const cw = this.ensureContextWriter()
+    if (!cw) return
+    const sm = this.orchestrator?.getStateManager()
+    const taskId = sm?.getSession(sessionId)?.taskId ?? null
+    cw.updateContext(session.type, {
+      tailOutput,
+      taskId,
+      branch: session.branch || null,
+      status: session.status,
+    })
+  }
+
+  // Final context flush on close: bypass throttle, write the full buffer tail,
+  // and mark the session exited so the file reflects the end state.
+  private finalizeSessionContext(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    if (!(AGENT_TYPES as readonly string[]).includes(session.type)) return
+    const cw = this.ensureContextWriter()
+    if (!cw) return
+    const sm = this.orchestrator?.getStateManager()
+    const taskId = sm?.getSession(sessionId)?.taskId ?? null
+    const tail = session.buffer?.snapshot?.() || ''
+    cw.updateContext(session.type, {
+      tailOutput: tail,
+      taskId,
+      branch: session.branch || null,
+      status: 'exited',
+      minIntervalMs: 0,
+    })
+  }
+
+  closeSession(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    this.flushTerminalOutput(sessionId)
+    session.slotRelease?.()
+    this.sessionHistory.push({
+      id: sessionId,
+      type: session.type,
+      worktreeId: session.worktreeId,
+      branch: session.branch,
+      status: session.status,
+      lastActivity: session.lastActivity,
+      closedAt: Date.now(),
+      agentId: session.agentStartConfig?.agentId,
+    })
+    if (this.sessionHistory.length > 200) this.sessionHistory = this.sessionHistory.slice(-200)
+    this.persistSessionBuffer(sessionId)
+    try {
+      clearInterval(session.processMonitor!)
+      if (session.pty) {
+        try { session.pty.kill() } catch { }
+      }
+    } catch { }
+    this.outputFilter.finalizeCommand(sessionId)
+    this.outputFilter.cleanup(sessionId)
+    this.cavemanService.cleanup(sessionId)
+    this.tokenUsageTracker.cleanup(sessionId)
+    this.finalizeSessionContext(sessionId)
+    this.sessions.delete(sessionId)
+    this.cleanupSessionBuffer(sessionId)
+    this.orchestrator?.unregisterSession(sessionId)
+    this.statusDetector?.reset(sessionId)
+    this.lastStatusRefresh.delete(sessionId)
+    this.lastStatusBytes.delete(sessionId)
+    return true
+  }
+
+  async createRawSession(type: string, workspacePath?: string, existingSessionId?: string): Promise<{ sessionId: string } | null> {
+    const sessionId = existingSessionId || `raw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const cwd = workspacePath || this.workspace?.repository?.path || process.env.HOME || os.homedir() || '/tmp'
+    const args = type === 'shell'
+      ? buildShellArgs([`cd ${shq(cwd)}`, `echo "Welcome to AgntSpce"`])
+      : buildShellArgs(`cd ${shq(cwd)}`)
+
+    try {
+      await this.createSession(sessionId, {
+        command: getDefaultShell(),
+        args,
+        cwd,
+        type,
+        worktreeId: '',
+        repositoryName: '',
+        repositoryType: '',
+      })
+      const session = this.sessions.get(sessionId)
+      if (!session) {
+        console.error('createRawSession: session not registered (slot denied):', type, sessionId)
+        return null
+      }
+      if (session && (AGENT_TYPES as readonly string[]).includes(type)) {
+        session.status = 'waiting'
+        this.io?.emit('status-change', { sessionId, status: 'waiting' })
+      }
+      return { sessionId }
+    } catch (e: any) {
+      console.error('createRawSession failed:', type, e?.message || e)
+      return null
+    }
+  }
+
+  restartSession(sessionId: string) {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const config = session.config
+    this.closeSession(sessionId)
+    setTimeout(() => this.createSession(sessionId, config), 300)
+  }
+
+  private persistSessionBuffer(sessionId: string) {
+    if (!this.workspace?.id) return
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const buf = session.buffer.snapshot()
+    if (buf) WorkspaceManager.getInstance().saveSessionBuffer(this.workspace.id, sessionId, buf)
+  }
+
+  private cleanupSessionBuffer(sessionId: string) {
+    if (!this.workspace?.id) return
+    WorkspaceManager.getInstance().deleteSessionBuffer(this.workspace.id, sessionId)
+  }
+
+  async saveAllSessionBuffers() {
+    if (!this.workspace?.id) return
+    const snapshots = new Map<string, string>()
+    for (const [id, s] of this.sessions) {
+      if (!s.pty || s.restorable) continue
+      const buf = s.buffer.snapshot()
+      if (buf) snapshots.set(id, buf)
+    }
+    await WorkspaceManager.getInstance().saveAllSessionBuffers(this.workspace.id, snapshots)
+  }
+
+  saveAllSessionBuffersSync() {
+    if (!this.workspace?.id) return
+    const snapshots = new Map<string, string>()
+    for (const [id, s] of this.sessions) {
+      if (!s.pty || s.restorable) continue
+      const buf = s.buffer.snapshot()
+      if (buf) snapshots.set(id, buf)
+    }
+    WorkspaceManager.getInstance().saveAllSessionBuffersSync(this.workspace.id, snapshots)
+  }
+
+  async restoreSessionBuffer(sessionId: string) {
+    if (!this.workspace?.id) return
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    const saved = await WorkspaceManager.getInstance().loadSessionBuffer(this.workspace.id, sessionId)
+    if (saved) {
+      session.buffer.write(saved)
+      // Mark ALL restored buffer content as delivered so it isn't replayed
+      // to the terminal as raw ANSI garbage. The buffer stays in memory for
+      // status detection; the agent starts fresh via startAgentWithConfig.
+      session.deliveredBufferLength = session.buffer.totalBytes
+    }
+  }
+
+  getSessionHistory(): { id: string, type: string, worktreeId: string, branch: string, status: string, lastActivity: number, closedAt: number, agentId?: string }[] {
+    return this.sessionHistory
+  }
+
+  getSessionSaveData(): SavedSessionData[] {
+    const data: SavedSessionData[] = []
+    for (const [id, s] of this.sessions) {
+      const config = s.agentStartConfig
+      data.push({
+        id,
+        type: s.type,
+        cwd: s.config?.cwd || '',
+        agentConfig: config
+          ? {
+              agentId: config.agentId,
+              mode: config.mode,
+              flags: config.flags,
+              model: config.model,
+              reasoning: config.reasoning,
+              verbosity: config.verbosity,
+              resumeId: config.resumeId,
+            }
+          : undefined,
+      })
+    }
+    return data
+  }
+
+  async restoreSessions(sessions: SavedSessionData[]): Promise<void> {
+    // Shells always restore live (they have no resume UI — a placeholder
+    // shell would be a dead terminal). The first agent also restores live
+    // (PTY + agent started, no resume button) — matching the pre-lazy-restore
+    // behavior. Remaining agents are registered as metadata-only placeholders
+    // and spawned on demand via resumeSession().
+    let isFirstAgent = true
+    for (const saved of sessions) {
+      if (this.sessions.has(saved.id)) continue
+      this.registerRestorableSession(saved)
+      if (saved.type === 'shell' || isFirstAgent) {
+        if ((AGENT_TYPES as readonly string[]).includes(saved.type)) isFirstAgent = false
+        await this.resumeSession(saved.id)
+      }
+    }
+  }
+
+  private registerRestorableSession(saved: SavedSessionData): void {
+    const cwd = saved.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+    const session: Session = {
+      id: saved.id,
+      pty: null,
+      type: saved.type as any,
+      worktreeId: '',
+      repositoryName: '',
+      repositoryType: '',
+      status: 'idle',
+      branch: 'unknown',
+      buffer: new RingBuffer(),
+      deliveredBufferLength: 0,
+      lastActivity: Date.now(),
+      tokenUsage: 0,
+      config: {
+        command: getDefaultShell(),
+        args: buildShellArgs(`cd ${shq(cwd)}`),
+        cwd,
+        type: saved.type,
+        worktreeId: '',
+        repositoryName: '',
+        repositoryType: '',
+      },
+      statusChangedAt: Date.now(),
+      pendingStatus: null,
+      pendingStatusTimer: null,
+      cwdState: { current: cwd, previous: null, stack: [] },
+      autoStarted: false,
+      claudeLaunchState: null,
+      restorable: true,
+      agentStartConfig: saved.agentConfig,
+      workspace: this.workspace?.id || null,
+    }
+    this.sessions.set(saved.id, session)
+  }
+
+  async resumeSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.pty || !session.restorable) return false
+
+    const savedType = session.type
+    const savedCwd = session.config?.cwd || this.workspace?.repository?.path || process.env.HOME || '/tmp'
+    const savedAgentConfig = session.agentStartConfig
+
+    // Spawn the real PTY for this session id.
+    const result = await this.createRawSession(savedType, savedCwd, sessionId)
+    if (!result) return false
+
+    // The placeholder is now a live session — clear the flag so the
+    // renderer creates the xterm instance and stops treating it as
+    // a saved-but-not-running session.
+    session.restorable = false
+
+    if (savedAgentConfig) {
+      try {
+        this.startAgentWithConfig(sessionId, savedAgentConfig)
+      } catch (e: any) {
+        console.error('resumeSession: agent start failed:', sessionId, e?.message || e)
+      }
+    }
+    await this.restoreSessionBuffer(sessionId)
+    return true
+  }
+
+  async createParallelTask(config: { agentId: string, mode: string, flags: string[], prompt: string, worktreeCount: number, model?: string, reasoning?: string, verbosity?: string, declaredFiles?: string[] }): Promise<{ sessionIds: string[], groupId: string }> {
+    const groupId = `parallel-${Date.now()}`
+    const agentCfg = this.agentManager?.getAgent(config.agentId)
+    const supportsWorktree = agentCfg?.capabilities?.supportsWorktree !== false
+    const sessionIds: string[] = []
+    const prompt = config.prompt || ''
+    const declaredFiles = Array.isArray(config.declaredFiles) ? config.declaredFiles : []
+
+    let count: number
+    let usedWorktrees: any[]
+
+    if (supportsWorktree) {
+      const availableWts = this.worktrees.filter(wt => {
+        const existingType = [...this.sessions.values()].find(s => s.worktreeId === wt.id && s.type === config.agentId)
+        return !existingType
+      })
+      count = Math.min(config.worktreeCount, availableWts.length || 1)
+      usedWorktrees = availableWts
+    } else {
+      count = 1
+      usedWorktrees = []
+    }
+
+    for (let i = 0; i < count; i++) {
+      const cwd = supportsWorktree && usedWorktrees[i]
+        ? usedWorktrees[i].path
+        : (this.workspace?.repository?.path || process.env.HOME || '/tmp')
+      const worktreeId = supportsWorktree && usedWorktrees[i]
+        ? usedWorktrees[i].id
+        : (this.workspace?.id || 'default')
+      const sessionId = `${groupId}-${i}`
+      await this.createSession(sessionId, {
+        command: getDefaultShell(),
+        args: buildShellArgs(`cd ${shq(cwd)}`),
+        cwd,
+        type: config.agentId,
+        worktreeId,
+      })
+      const session = this.sessions.get(sessionId)
+      if (session) {
+        session.sessionGroupId = groupId
+        session.status = 'waiting'
+        try { this.io.emit('status-change', { sessionId, status: 'waiting' }) } catch {}
+      }
+      sessionIds.push(sessionId)
+    }
+
+    if (sessionIds.length > 0) {
+      // 1.5 claim enforcement: each group member's declared scope is claimed
+      // before any agent launches. Siblings in the group share isolated
+      // worktrees, so they are excluded from blocking each other — but they
+      // still block against non-group active tasks.
+      for (const sid of sessionIds) {
+        if (declaredFiles.length === 0) continue
+        const groupExclusion = sessionIds.filter(other => other !== sid)
+        const enforced = this.orchestrator?.enforceSessionClaims(sid, config.agentId, declaredFiles, groupExclusion)
+        if (enforced === false) {
+          for (const rollbackId of sessionIds) this.closeSession(rollbackId)
+          throw new Error(`Parallel task blocked: declared files overlap another active task for session ${sid}. Resolve the claim conflict and retry.`)
+        }
+      }
+
+      setTimeout(() => {
+        for (const sid of sessionIds) {
+          try {
+            this.startAgentWithConfig(sid, {
+              agentId: config.agentId,
+              mode: config.mode,
+              flags: config.flags,
+              model: config.model,
+              reasoning: config.reasoning,
+              verbosity: config.verbosity,
+              declaredFiles,
+              excludeSessionIds: sessionIds.filter(other => other !== sid),
+              prompt,
+            })
+          } catch {}
+        }
+      }, 500)
+    }
+
+    return { sessionIds, groupId }
+  }
+
+  startAgentWithConfig(sessionId: string, config: any) {
+    const session = this.sessions.get(sessionId)
+    if (!session || !this.agentManager) return
+    const validation = this.agentManager.validateConfig(config)
+    if (!validation.valid) throw new Error(validation.error)
+
+    // 1.5 claim enforcement: the session's task must declare its file scope
+    // before the agent starts, and it must not overlap another active task.
+    if (this.orchestrator && (AGENT_TYPES as readonly string[]).includes(config.agentId)) {
+      const declared = Array.isArray(config.declaredFiles) ? config.declaredFiles : []
+      const excluded = Array.isArray(config.excludeSessionIds) ? config.excludeSessionIds : []
+      const enforced = this.orchestrator.enforceSessionClaims(sessionId, config.agentId, declared, excluded)
+      if (!enforced) {
+        throw new Error('Session blocked: declared files overlap another active task. Resolve the claim conflict and retry.')
+      }
+    }
+
+    if (this.cavemanService.isEnabled(sessionId) && this.workspace?.repository?.path) {
+      this.cavemanService.writeSkillFiles(this.workspace.repository.path, config.agentId)
+    }
+
+    const command = this.agentManager.buildCommand(config.agentId, config.mode, config)
+    const baseCmd = command.split(/\s+/)[0]
+    const resolvedPath = resolveAgent(baseCmd)
+    if (!resolvedPath) {
+      console.warn(`[agntspce] Agent "${baseCmd}" not resolved — PATH may not include it: ${command}`)
+    }
+    const newline = process.platform === 'win32' ? '\r\n' : '\n'
+    // Force-set session environment variables directly before launching agent,
+    // ensuring the agent CLI (claude, opencode, etc.) and any subprocesses inherit them.
+    const binDir = AGNTSPCE_BIN_DIR || path.resolve(__dirname, '..', '..', 'bin')
+    // Windows needs the .cmd shim (PowerShell/cmd cannot execute the
+    // extensionless POSIX script); POSIX platforms use the bare script.
+    const wrapperName = process.platform === 'win32' ? 'agntspce.cmd' : 'agntspce'
+    const wrapperPathEnv = AGNTSPCE_BIN_DIR ? path.join(AGNTSPCE_BIN_DIR, wrapperName) : (process.resourcesPath ? path.join(process.resourcesPath, 'rtk', wrapperName) : path.resolve(__dirname, '..', '..', 'bin', wrapperName))
+    const envPrefix = process.platform === 'win32'
+      ? `$env:AGNTSPCE_ENABLED="1"; $env:AGNTSPCE_WRAPPER_PATH="${wrapperPathEnv}"; $env:AGNTSPCE_RTK_SESSION="${rtkManager.generateRtkToken()}"; $env:PATH="${binDir};$env:PATH"; `
+      : `export AGNTSPCE_ENABLED=1; export AGNTSPCE_WRAPPER_PATH="${wrapperPathEnv}"; export AGNTSPCE_RTK_SESSION="${rtkManager.generateRtkToken()}"; export PATH="${binDir}:$PATH"; `
+    this.writeToSession(sessionId, envPrefix + command + newline)
+
+    // 2.1 dispatch preamble: deliver the shared orchestration state as the
+    // agent's first input after it boots (agents are interactive CLIs that
+    // read stdin; a small delay lets the TUI finish starting). If a prompt is
+    // supplied (parallel tasks), it follows the preamble in the same write so
+    // the agent gets context then its task.
+    const isFreshDispatch = config.mode !== 'resume' && config.mode !== 'continue' && !config.resumeId
+    const sm = this.orchestrator?.getStateManager()
+    if (sm || config.prompt) {
+      try {
+        let body = ''
+        if (sm && isFreshDispatch) {
+          const ownTaskId = sm.getSession(sessionId)?.taskId || undefined
+          const preamble = sm.buildDispatchPreamble(config.agentId, ownTaskId ? [ownTaskId] : [])
+          if (preamble) body = preamble
+        }
+        if (config.prompt) {
+          body = body ? `${body}\n\nDispatch task:\n${config.prompt}` : config.prompt
+        }
+        if (body) {
+          const sid = sessionId
+          const payload = body
+          setTimeout(() => {
+            const s = this.sessions.get(sid)
+            if (s?.pty && s.status !== 'exited') {
+              this.writeToSession(sid, payload + newline)
+            }
+          }, 2200)
+        }
+      } catch (err: any) {
+        console.warn('[agntspce] Dispatch preamble failed:', sessionId, err?.message || err)
+      }
+    }
+
+    session.autoStarted = true
+    session.claudeLaunchState = 'launched'
+    session.agentStartConfig = config
+    try {
+      this.io.emit('agent-started', { sessionId, config })
+    } catch {}
+  }
+
+  toggleCaveman(sessionId: string, enabled: boolean, level?: string): void {
+    this.cavemanService.setEnabled(sessionId, enabled, level)
+
+    const session = this.sessions.get(sessionId)
+    const agentId = session?.agentStartConfig?.agentId || 'claude'
+
+    if (enabled && this.workspace?.repository?.path) {
+      this.cavemanService.writeSkillFiles(this.workspace.repository.path, agentId)
+    } else if (this.workspace?.repository?.path) {
+      this.cavemanService.removeSkillFiles(this.workspace.repository.path, agentId)
+    }
+  }
+
+  getCavemanState(sessionId: string) {
+    return this.cavemanService.getState(sessionId)
+  }
+
+  getAllCavemanStates() {
+    return this.cavemanService.getAllStates()
+  }
+
+  getCavemanAggregateStats() {
+    return this.cavemanService.getAggregateStats()
+  }
+
+  getWorktrees(): Worktree[] {
+    return this.worktrees
+  }
+
+  getSessionStates(): Record<string, any> {
+    const states: Record<string, any> = {}
+    for (const [id, s] of this.sessions) {
+      states[id] = {
+        id: s.id,
+        type: s.type,
+        worktreeId: s.worktreeId,
+        repositoryName: s.repositoryName,
+        repositoryType: s.repositoryType,
+        status: s.status,
+        branch: s.branch,
+        lastActivity: s.lastActivity,
+        sessionGroupId: s.sessionGroupId,
+        restorable: !!s.restorable,
+      }
+    }
+    return states
+  }
+
+  getUndeliveredOutputAndMarkDelivered(): Record<string, string> {
+    const backlog: Record<string, string> = {}
+    for (const [id, s] of this.sessions) {
+      const totalWritten = s.buffer.totalBytes
+      const deliveredTotal = s.deliveredBufferLength
+      if (totalWritten <= deliveredTotal) continue
+      const snapshot = s.buffer.snapshot()
+      const undeliveredBytes = totalWritten - deliveredTotal
+      const undelivered = snapshot.slice(-undeliveredBytes)
+      if (undelivered) backlog[id] = undelivered
+      s.deliveredBufferLength = totalWritten
+    }
+    return backlog
+  }
+
+cleanupAllSessions() {
+  if (this.branchRefreshInterval) {
+    clearInterval(this.branchRefreshInterval)
+    this.branchRefreshInterval = null
+  }
+  for (const [id] of this.sessions) this.closeSession(id)
+  this.sessions.clear()
+  this.orchestrator?.shutdownAll()
+}
+
+  async updateGitBranch(worktreeId: string, cwd: string, force = false) {
+    if (!this.gitHelper) return
+    const branch = await this.gitHelper.getCurrentBranch(cwd, force)
+    for (const [, s] of this.sessions) {
+      if (s.worktreeId === worktreeId || s.config?.cwd === cwd) {
+        if (s.branch === branch) continue
+        s.branch = branch
+        try {
+          this.io.emit('branch-change', { sessionId: s.id, branch, worktreeId })
+        } catch { }
+      }
+    }
+  }
+
+  private refreshSessionStatus(sessionId: string) {
+    if (!this.statusDetector) return
+    const session = this.sessions.get(sessionId)
+    if (!session || session.status === 'exited') return
+
+    // Idle guard: if no new output arrived since the last scan and the session
+    // is already idle, the expensive buffer snapshot + detectStatus regex scan
+    // cannot change anything — skip it entirely. New output (onData) forces a
+    // refresh via lastStatusRefresh throttle, and processMonitor still runs the
+    // full scan when buffer bytes changed (catches silent transitions).
+    const bytes = session.buffer.totalBytes
+    if (session.status === 'idle' && this.lastStatusBytes.get(sessionId) === bytes) return
+    this.lastStatusBytes.set(sessionId, bytes)
+
+    const oldStatus = session.status
+    const isAgentType = (AGENT_TYPES as readonly string[]).includes(session.type)
+    const status = this.statusDetector.detectStatus(sessionId, session.buffer.snapshot(), {
+      agent: isAgentType ? session.type : null,
+    })
+    if (status !== session.status) {
+      session.status = status as any
+      session.statusChangedAt = Date.now()
+      try {
+        this.io.emit('status-change', { sessionId, status })
+      } catch { }
+    }
+
+    if (status !== oldStatus) {
+      if ((oldStatus === 'busy' || oldStatus === 'waiting') && (status === 'idle' || status === 'exited')) {
+        this.cavemanService.endRun(sessionId)
+        // Don't finalize if a safety net timer is pending — it will fire
+        // when data stops arriving, preventing output fragmentation across
+        // rapid status transitions (e.g. detectStatus → idle for small buffers).
+        if (!this.outputFilter.hasPendingTimer(sessionId)) {
+          this.outputFilter.finalizeCommand(sessionId)
+        }
+      } else if (oldStatus === 'idle' && status === 'busy') {
+        this.cavemanService.startRun(sessionId)
+      }
+    }
+  }
+
+  private startBranchRefresh() {
+    if (this.branchRefreshInterval) clearInterval(this.branchRefreshInterval)
+    const refresh = () => {
+      for (const wt of this.worktrees) {
+        const wtId = wt.worktreeId || wt.id
+        this.updateGitBranch(wtId, wt.path)
+      }
+    }
+    refresh()
+    this.branchRefreshInterval = setInterval(refresh, 30000)
+  }
+}

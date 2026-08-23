@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Agent wrapper: intercepts agent CLI invocations for RTK tracking.
+# Passes through to the real binary; emits the agntspce marker so
+# OutputFilterService can detect and filter output.
+
+set -uo pipefail
+
+AGENT="droid"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Find the real agent binary, excluding this wrapper directory to avoid recursion.
+WRAPPER_DIR="$SCRIPT_DIR"
+REAL_BIN=""
+IFS=':' read -ra PATH_DIRS <<< "${PATH:-/usr/bin:/bin}"
+for dir in "${PATH_DIRS[@]}"; do
+  [ -z "$dir" ] && continue
+  resolved="$(cd "$dir" 2>/dev/null && pwd)" || continue
+  [ "$resolved" = "$WRAPPER_DIR" ] && continue
+  if [ -x "$dir/$AGENT" ] && [ -f "$dir/$AGENT" ]; then
+    REAL_BIN="$dir/$AGENT"
+    break
+  fi
+done
+
+# Fallback: try system command lookup, excluding our wrapper dir to avoid recursion
+if [ -z "$REAL_BIN" ]; then
+  REAL_BIN=""
+  for dir in "${PATH_DIRS[@]}"; do
+    [ -z "$dir" ] && continue
+    resolved="$(cd "$dir" 2>/dev/null && pwd)" || continue
+    [ "$resolved" = "$WRAPPER_DIR" ] && continue
+    if [ -x "$dir/$AGENT" ] && [ -f "$dir/$AGENT" ]; then
+      REAL_BIN="$dir/$AGENT"
+      break
+    fi
+  done
+  if [ -z "$REAL_BIN" ]; then
+    REAL_BIN="$(echo "$AGENT")"
+  fi
+fi
+
+# Ensure session environment variables are set for this agent and any subprocesses
+export AGNTSPCE_ENABLED="1"
+export AGNTSPCE_WRAPPER_PATH="${AGNTSPCE_WRAPPER_PATH:-${SCRIPT_DIR}/agntspce}"
+export PATH="${SCRIPT_DIR}:${PATH}"
+
+# Emit the RTK marker to stdout so it is visible in terminal output
+echo "agntspce \$ ${AGENT} $*"
+
+exec "$REAL_BIN" "$@"

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec "${AGNTSPCE_WRAPPER_PATH:-agntspce}" run "cargo" "$@"

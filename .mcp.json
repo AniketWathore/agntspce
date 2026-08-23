@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agntspce-search": {
+      "command": "/Users/prashik/Library/Application Support/AgntSpce/search/python/bin/agntspce-search",
+      "type": "stdio"
+    }
+  }
+}
