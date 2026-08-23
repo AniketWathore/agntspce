@@ -251,7 +251,6 @@ type HookPatchResult = { patched: string[] }
 function patchHookCommands(rtkBinaryPath: string): HookPatchResult {
   const patched: string[] = []
   if (!rtkBinaryPath) return { patched }
-  const binaryName = path.basename(rtkBinaryPath) // 'rtk' or 'rtk.exe'
   // JSON-escaped absolute path. Spaces in userData dirs require shell quoting.
   const absCommand = `"${rtkBinaryPath.replace(/"/g, '\\"')}"`
 
@@ -286,14 +285,21 @@ function patchHookCommands(rtkBinaryPath: string): HookPatchResult {
           const hookDefs = Array.isArray(entry?.hooks) ? entry.hooks : []
           for (const h of hookDefs) {
             if (typeof h?.command !== 'string') continue
-            const trimmed = h.command.trim()
-            // Match `rtk hook <anything>` or `<...>/rtk hook <anything>`
-            if (trimmed === `${binaryName} hook claude` || trimmed.endsWith(`${path.sep}${binaryName} hook claude`)) {
-              h.command = `${absCommand} hook claude`
-              changed = true
-            }
+            if (!matchesRtkHook(h.command.trim())) continue
+            h.command = `${absCommand} hook claude`
+            changed = true
           }
         }
+        // Drop duplicate matcher blocks left by repeated registrations —
+        // each copy runs the hook again on every Bash call.
+        const seen = new Set<string>()
+        const deduped = hooks.filter((entry: any) => {
+          const key = JSON.stringify(entry)
+          if (seen.has(key)) { changed = true; return false }
+          seen.add(key)
+          return true
+        })
+        data.hooks.PreToolUse = deduped
       }
       if (changed) {
         fs.writeFileSync(c.file, JSON.stringify(data, null, 2), 'utf-8')
@@ -305,6 +311,21 @@ function patchHookCommands(rtkBinaryPath: string): HookPatchResult {
     }
   }
   return { patched }
+
+  function matchesRtkHook(trimmed: string): boolean {
+    // Accept every registered form of the hook binary reference:
+    //   rtk hook claude                     (bare — what `rtk init -g` writes)
+    //   rtk.exe hook claude                 (Windows basename form)
+    //   "C:\...\rtk.exe" hook claude        (quoted absolute path)
+    //   /Users/x/.../rtk hook claude        (POSIX absolute path)
+    // The registered command uses the bare name even when the active binary
+    // is rtk.exe, so matching on basename(rtkBinaryPath) alone misses it.
+    const m = /^(.+?)\s+hook\s+claude$/.exec(trimmed)
+    if (!m) return false
+    const unquoted = m[1].replace(/^"+|"+$/g, '')
+    const base = unquoted.split(/[\\/]/).pop() || ''
+    return base === 'rtk' || base === 'rtk.exe'
+  }
 }
 
 function generateRtkToken(): string {
