@@ -100,11 +100,16 @@ async function main() {
     }
     console.log('  Extracting...')
 
-    // Extract
-    const result = spawnSync('tar', ['xzf', archivePath, '-C', scratch], {
+    // Extract in-place via cwd instead of `-C <abs-path>`: GNU tar on Windows
+    // interprets a drive-letter argument like "E:\..." as a remote host spec
+    // ("Cannot connect to E: resolve failed"). The bare archive name contains
+    // no colon, and cwd pins both input and output to the scratch dir.
+    const result = spawnSync('tar', ['xzf', ARCHIVE_NAME], {
       stdio: 'inherit',
       encoding: 'utf-8',
       timeout: 120000,
+      cwd: scratch,
+      windowsHide: true,
     })
 
     if (result.status !== 0) {
@@ -145,12 +150,18 @@ async function main() {
     const fsPromises = await import('node:fs/promises')
 
     if (process.platform === 'win32') {
-      // Windows: locate and create .bat wrapper
+      // Windows: locate the console-script entry point (the cross-built bundle
+      // ships it under bin/, pip-style installs use Scripts/) and create a
+      // .cmd/.bat wrapper pair next to python.exe.
       const scriptsDir = join(pythonDir, 'Scripts')
+      const binDir = join(pythonDir, 'bin')
       const pythonExe = join(pythonDir, 'python.exe')
-      const entryPoints = ['agntspce-search', 'agntspce-search.exe']
-      for (const ep of entryPoints) {
-        const epPath = join(scriptsDir, ep)
+      const entryPoints = [
+        join(scriptsDir, 'agntspce-search'),
+        join(scriptsDir, 'agntspce-search.exe'),
+        join(binDir, 'agntspce-search'),
+      ]
+      for (const epPath of entryPoints) {
         if (existsSync(epPath) && existsSync(pythonExe)) {
           const pyPath = join(scriptsDir, 'agntspce-search.py')
           try {
@@ -165,6 +176,24 @@ set PYTHONHOME=%~dp0..
           await fsPromises.writeFile(join(scriptsDir, 'agntspce-search.bat'), batWrapper, 'utf-8')
           console.log('  Created Windows .bat wrapper')
           break
+        }
+      }
+
+      // The MCP SDK declares pywin32 only for native builds; the portable
+      // bundle is assembled on macOS so the dependency is missing. Without it,
+      // importing mcp fails on Windows (`No module named 'pywintypes'`).
+      if (existsSync(pythonExe)) {
+        const probe = spawnSync(pythonExe, ['-c', 'import pywintypes'], { encoding: 'utf-8' })
+        if (probe.status !== 0) {
+          console.log('  Installing pywin32 (required by the MCP SDK on Windows)...')
+          const pipResult = spawnSync(
+            pythonExe,
+            ['-m', 'pip', 'install', '--no-warn-script-location', '--quiet', 'pywin32'],
+            { stdio: 'inherit', timeout: 300000, windowsHide: true },
+          )
+          if (pipResult.status !== 0) {
+            console.warn('  [warn] pywin32 install failed — agntspce-search MCP may not start')
+          }
         }
       }
     } else {

@@ -74,12 +74,32 @@ function getInstalledSearchDir(): string {
   return path.join(app.getPath('userData'), 'search')
 }
 
+// Bootstrap executed by the bundled interpreter to start the MCP stdio server.
+// The portable bundle ships no native executable entry point, so on Windows the
+// server is launched as: <bundle>/python/python.exe -c <bootstrap>.
+const MCP_BOOTSTRAP = 'import asyncio; from semble.mcp import serve; asyncio.run(serve())'
+
 function getInstalledBinaryPath(): string {
   const searchDir = getInstalledSearchDir()
   if (process.platform === 'win32') {
-    return path.join(searchDir, 'python', 'Scripts', 'agntspce-search.exe')
+    // No .exe exists in the cross-built bundle — the launchable binary is the
+    // bundled interpreter itself (see resolveMcpLaunch for the full command).
+    return path.join(searchDir, 'python', 'python.exe')
   }
   return path.join(searchDir, 'python', 'bin', 'agntspce-search')
+}
+
+// Full stdio launch specification for the agntspce-search MCP server.
+// Returns null when the installed bundle cannot launch the server.
+function resolveMcpLaunch(): { command: string; args?: string[] } | null {
+  if (process.platform === 'win32') {
+    const pyExe = path.join(getInstalledSearchDir(), 'python', 'python.exe')
+    if (!fs.existsSync(pyExe)) return null
+    return { command: pyExe, args: ['-c', MCP_BOOTSTRAP] }
+  }
+  const binPath = getInstalledBinaryPath()
+  if (!fs.existsSync(binPath)) return null
+  return { command: binPath }
 }
 
 function findInstalledBinary(candidates: string[]): string | null {
@@ -113,8 +133,9 @@ function getInstalledBinaryCandidates(): string[] {
   const searchDir = getInstalledSearchDir()
   if (process.platform === 'win32') {
     return [
+      path.join(searchDir, 'python', 'python.exe'),
       path.join(searchDir, 'python', 'Scripts', 'agntspce-search.exe'),
-      path.join(searchDir, 'python', 'Scripts', 'agntspce-search'),
+      path.join(searchDir, 'python', 'Scripts', 'agntspce-search.cmd'),
       path.join(searchDir, 'python', 'bin', 'agntspce-search'),
     ]
   }
@@ -154,8 +175,17 @@ exec "$SCRIPT_DIR/python3" "${pyPath}" "$@"
   }
 }
 
+// Windows portable CPython uses <bundle>/python/Lib/site-packages; the POSIX
+// bundle nests it under lib/python3.x/.
+function getSitePackagesDir(searchDir: string): string {
+  if (process.platform === 'win32') {
+    return path.join(searchDir, 'python', 'Lib', 'site-packages')
+  }
+  return path.join(searchDir, 'python', 'lib', 'python3.13', 'site-packages')
+}
+
 function cleanupStaleSitePackages(searchDir: string): void {
-  const sitePkgs = path.join(searchDir, 'python', 'lib', 'python3.13', 'site-packages')
+  const sitePkgs = getSitePackagesDir(searchDir)
   if (!fs.existsSync(sitePkgs)) return
   try {
     for (const entry of fs.readdirSync(sitePkgs)) {
@@ -175,8 +205,12 @@ function cleanupStaleSitePackages(searchDir: string): void {
 }
 
 function isPackageBroken(searchDir: string): boolean {
-  const sitePkgs = path.join(searchDir, 'python', 'lib', 'python3.13', 'site-packages')
-  return !fs.existsSync(path.join(sitePkgs, 'agntspce_search'))
+  const sitePkgs = getSitePackagesDir(searchDir)
+  // The distribution installs the server as `semble` (older builds used
+  // `agntspce_search`) — broken only when neither package is present.
+  const hasAgntspce = fs.existsSync(path.join(sitePkgs, 'agntspce_search'))
+  const hasSemble = fs.existsSync(path.join(sitePkgs, 'semble'))
+  return !hasAgntspce && !hasSemble
 }
 
 function installSearch(): string | null {
@@ -261,21 +295,18 @@ type InjectResult = { agent: string; action: 'created' | 'updated' | 'unchanged'
 
 function injectClaudeCodeConfig(projectPath: string): InjectResult {
   const mcpPath = path.resolve(projectPath, '.mcp.json')
-  const binaryPath = getInstalledBinaryPath()
-  if (!binaryPath) return { agent: 'claude', action: 'error' }
-  if (!fs.existsSync(binaryPath)) {
+  const launch = resolveMcpLaunch()
+  if (!launch) {
     try { if (fs.existsSync(mcpPath)) fs.rmSync(mcpPath) } catch {}
     return { agent: 'claude', action: 'error' }
   }
 
-  const entry = {
-    mcpServers: {
-      'agntspce-search': {
-        command: binaryPath,
-        type: 'stdio',
-      },
-    },
+  const serverEntry: Record<string, unknown> = {
+    command: launch.command,
+    type: 'stdio',
   }
+  if (launch.args) serverEntry.args = launch.args
+  const entry = { mcpServers: { 'agntspce-search': serverEntry } }
 
   const newContent = JSON.stringify(entry, null, 2) + '\n'
 
@@ -291,17 +322,17 @@ function injectClaudeCodeConfig(projectPath: string): InjectResult {
 }
 
 function injectOpenCodeConfig(): InjectResult {
-  const binaryPath = getInstalledBinaryPath()
-  if (!binaryPath) return { agent: 'opencode', action: 'error' }
-  if (!fs.existsSync(binaryPath)) {
+  const launch = resolveMcpLaunch()
+  if (!launch) {
     removeOpenCodeConfig()
     return { agent: 'opencode', action: 'error' }
   }
 
   const configPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.jsonc')
   const mcpKey = 'agntspce-search'
+  // OpenCode local MCP servers take the command as an argv array.
   const entryValue = {
-    command: [binaryPath],
+    command: launch.args ? [launch.command, ...launch.args] : [launch.command],
     type: 'local',
     enabled: true,
   }
@@ -327,7 +358,7 @@ function injectOpenCodeConfig(): InjectResult {
       config = JSON.parse(jsonc)
     } catch {
       console.warn('[agntspce] Failed to parse OpenCode config — injecting new mcp section via text')
-      return injectOpenCodeConfigTextFallback(configPath, binaryPath)
+      return injectOpenCodeConfigTextFallback(configPath, entryValue.command)
     }
 
     if (!config.mcp) config.mcp = {}
@@ -347,8 +378,8 @@ function injectOpenCodeConfig(): InjectResult {
   }
 }
 
-function injectOpenCodeConfigTextFallback(configPath: string, binaryPath: string): InjectResult {
-  const entryText = `"agntspce-search": ${JSON.stringify({ command: [binaryPath], type: 'local', enabled: true }, null, 2)}`
+function injectOpenCodeConfigTextFallback(configPath: string, command: string[]): InjectResult {
+  const entryText = `"agntspce-search": ${JSON.stringify({ command, type: 'local', enabled: true }, null, 2)}`
 
   let raw: string
   try {
