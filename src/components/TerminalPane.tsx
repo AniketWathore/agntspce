@@ -39,6 +39,54 @@ interface Props {
 // visible again (the designated retry boundary).
 let webglAttachFailedGlobally = false
 
+// ── Terminal instance parking (Superset v1-terminal-cache / VS Code model) ──
+// Layout and focus switches used to UNMOUNT and REBUILD the whole xterm +
+// WebGL stack per pane (each layout branch renders a different tree position),
+// which made agent switching take seconds. Instead, on unmount the live
+// terminal element is parked (detached from the DOM but fully functional —
+// subscriptions keep writing into it) and the next mount for the same session
+// reparents it instantly. WebGL is released while parked (Orca
+// suspendPaneRendering); scrollback is 200 lines so parked memory is tiny.
+interface ParkedTerminal {
+  el: HTMLDivElement
+  term: Terminal
+  fitAddon: FitAddon
+  scheduler: TerminalWriteScheduler | null
+      unsub: (() => void) | undefined
+      themeObserver: MutationObserver
+      onVisibilityChange: () => void
+      releaseWebgl: () => void
+      attachWebgl: () => void
+  alive: boolean
+  mounted: boolean
+  lastUsed: number
+}
+const parkedTerminals = new Map<string, ParkedTerminal>()
+const PARKED_TERMINAL_LIMIT = 6
+
+function disposeParkedEntry(id: string, entry: ParkedTerminal): void {
+  entry.alive = false
+  try { entry.el.remove() } catch { }
+  try { entry.unsub?.() } catch { }
+  try { entry.themeObserver.disconnect() } catch { }
+  document.removeEventListener('visibilitychange', entry.onVisibilityChange)
+  entry.releaseWebgl()
+  try { entry.scheduler?.dispose() } catch { }
+  try { entry.term.dispose() } catch { }
+  parkedTerminals.delete(id)
+}
+
+function evictParkedTerminals(): void {
+  if (parkedTerminals.size <= PARKED_TERMINAL_LIMIT) return
+  const candidates = [...parkedTerminals.entries()]
+    .filter(([, e]) => !e.mounted)
+    .sort((a, b) => a[1].lastUsed - b[1].lastUsed)
+  for (const [id, entry] of candidates) {
+    if (parkedTerminals.size <= PARKED_TERMINAL_LIMIT) break
+    disposeParkedEntry(id, entry)
+  }
+}
+
 export default memo(function TerminalPane(props: Props) {
   const { session, onInput, onResize, onResumeSession, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles } = props
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -103,6 +151,38 @@ export default memo(function TerminalPane(props: Props) {
     // (saves GPU/memory for many saved-but-not-running sessions).
     if (session.restorable) return
 
+    const container = terminalRef.current
+
+    // ── Reuse path: a parked instance for this session exists ───────────
+    // `cached.el` is our OWN host div (never a React-owned node), so moving it
+    // between containers is always safe.
+    const cached = parkedTerminals.get(session.id)
+    if (cached && cached.alive) {
+      if (cached.el.parentElement !== container) container.appendChild(cached.el)
+      cached.mounted = true
+      cached.lastUsed = Date.now()
+      termInstance.current = cached.term
+      fitAddonRef.current = cached.fitAddon
+      schedulerRef.current = cached.scheduler
+      // Re-attach GPU rendering: park() releases the WebGL context, so every
+      // remount must re-arm it or the pane silently stays on canvas forever.
+      requestAnimationFrame(() => { if (cached.alive && cached.mounted) cached.attachWebgl() })
+      try { cached.fitAddon.fit() } catch { }
+      requestAnimationFrame(() => {
+        if (cached.alive && cached.mounted) { try { cached.fitAddon.fit() } catch { } }
+      })
+      cached.term.focus()
+      return () => {
+        cached.mounted = false
+        try { cached.el.remove() } catch { }
+        cached.releaseWebgl()
+        evictParkedTerminals()
+        if (termInstance.current === cached.term) termInstance.current = null
+        if (fitAddonRef.current === cached.fitAddon) fitAddonRef.current = null
+        if (schedulerRef.current === cached.scheduler) schedulerRef.current = null
+      }
+    }
+
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -117,7 +197,14 @@ export default memo(function TerminalPane(props: Props) {
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
 
-    term.open(terminalRef.current)
+    // xterm renders into OUR host div, not the React-owned ref div. Parking
+    // detaches only the host — React's node is never moved or removed, which
+    // keeps React reconciliation safe (StrictMode double-mounts included).
+    const host = document.createElement('div')
+    host.className = 'terminal-instance-host'
+    container.appendChild(host)
+
+    term.open(host)
 
     // ── WebGL renderer with hygiene (Orca/Superset pattern) ────────
     // GPU-accelerated rendering keeps full-screen agent-TUI redraws cheap;
@@ -130,6 +217,14 @@ export default memo(function TerminalPane(props: Props) {
     // - window hidden → context released; visible → re-attached
     let webgl: WebglAddon | null = null
     let webglContextLost = false
+
+    // Live-view guard reads the registry (single source of truth), NOT a
+    // closure flag — a parked instance must be able to re-attach WebGL when
+    // it is reused later, long after this effect's cleanup ran.
+    function isViewLive(): boolean {
+      const e = parkedTerminals.get(session.id)
+      return !e || (e.alive && e.mounted)
+    }
 
     function releaseWebgl(): void {
       if (!webgl) return
@@ -144,7 +239,7 @@ export default memo(function TerminalPane(props: Props) {
     }
 
     function attachWebgl(): void {
-      if (webgl || webglContextLost || webglAttachFailedGlobally || document.hidden) return
+      if (!isViewLive() || webgl || webglContextLost || webglAttachFailedGlobally || document.hidden) return
       try {
         const addon = new WebglAddon()
         addon.onContextLoss(() => {
@@ -176,7 +271,6 @@ export default memo(function TerminalPane(props: Props) {
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
-
     function doFit() {
       try { fitAddon.fit() } catch { }
     }
@@ -271,14 +365,16 @@ export default memo(function TerminalPane(props: Props) {
     }
 
     const unsub = onTerminalOutputRef.current?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
-      if (sid === session.id && termInstance.current) {
-        if (!backlogDone) {
-          pendingLive.push(data)
-          return
-        }
-        if (scheduler) scheduler.write(data)
-        else term.write(data)
+      // NOTE: must not depend on termInstance.current — it is nulled while
+      // this pane is parked, and parked terminals MUST keep receiving live
+      // output so a remount never needs a backlog replay.
+      if (sid !== session.id) return
+      if (!backlogDone) {
+        pendingLive.push(data)
+        return
       }
+      if (scheduler) scheduler.write(data)
+      else term.write(data)
     })
 
     const themeObserver = new MutationObserver(() => {
@@ -286,17 +382,49 @@ export default memo(function TerminalPane(props: Props) {
     })
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
+    // Register for parking: on unmount the instance is kept alive (detached
+    // from the DOM) so the next layout/focus switch for this session reuses it
+    // instead of rebuilding xterm + WebGL from scratch. Subscription and theme
+    // observer stay active while parked — the terminal keeps receiving live
+    // output, so remounts are seamless with no backlog replay needed.
+    parkedTerminals.set(session.id, {
+      el: host,
+      term,
+      fitAddon,
+      scheduler,
+      unsub,
+      themeObserver,
+      onVisibilityChange,
+      releaseWebgl,
+      attachWebgl,
+      alive: true,
+      mounted: true,
+      lastUsed: Date.now(),
+    })
+
     return () => {
       cancelAnimationFrame(fitRaf)
       cancelAnimationFrame(webglAttachRaf)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      unsub?.()
-      themeObserver.disconnect()
-      releaseWebgl()
-      scheduler?.dispose()
+      const entry = parkedTerminals.get(session.id)
+      if (entry && entry.term === term) {
+        // Park: detach ONLY our host div (React's container stays intact),
+        // release GPU context, keep everything else alive.
+        entry.mounted = false
+        try { host.remove() } catch { }
+        releaseWebgl()
+        evictParkedTerminals()
+      } else {
+        // Entry was replaced meanwhile (should not happen) — full teardown.
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+        unsub?.()
+        themeObserver.disconnect()
+        releaseWebgl()
+        scheduler?.dispose()
+        term.dispose()
+      }
       if (schedulerRef.current === scheduler) schedulerRef.current = null
-      term.dispose()
       termInstance.current = null
+      fitAddonRef.current = null
     }
   }, [session.id, session.restorable])
 

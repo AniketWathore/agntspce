@@ -18,6 +18,10 @@ app.name = 'AgntSpce'
 // bounded enough that a runaway leak still surfaces (Orca uses 128, Superset
 // 256; Tabby's 9000 masks leaks).
 app.commandLine.appendSwitch('max-active-webgl-contexts', '128')
+// TEMP DEBUG: CDP access for diagnosing renderer issues (remove after).
+if (process.env.AGNTSPCE_DEBUG_CDP) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.AGNTSPCE_DEBUG_CDP)
+}
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {

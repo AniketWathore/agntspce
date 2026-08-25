@@ -149,12 +149,29 @@ export function useSocket(): UseSocketReturn {
   // Pending terminal output per session, accumulated as chunks. Joining happens
   // once at flush time — re-slicing a 64KB string on every incoming chunk was
   // O(n²) under sustained output.
+  //
+  // Flush timing: when the window is visible we schedule on requestAnimationFrame
+  // (echo lands within one display frame instead of waiting out a fixed timer —
+  // this was half of the keystroke-latency tax). Hidden/throttled windows never
+  // fire rAF, so a short fallback timer guarantees delivery either way;
+  // first-to-fire runs and cancels its sibling. The OUTPUT_CAP trim below keeps
+  // memory bounded regardless of which path fires.
   const OUTPUT_CAP = 65536
+  const FLUSH_FALLBACK_MS = 40
+  const FLUSH_HIDDEN_MS = 30
   const outputBuffer = useRef<Record<string, { chunks: string[], bytes: number }>>({})
   const outputTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const outputRaf = useRef(0)
 
   const flushOutput = useCallback(() => {
-    outputTimer.current = null
+    if (outputRaf.current) {
+      cancelAnimationFrame(outputRaf.current)
+      outputRaf.current = 0
+    }
+    if (outputTimer.current) {
+      clearTimeout(outputTimer.current)
+      outputTimer.current = null
+    }
     const buffer = outputBuffer.current
     outputBuffer.current = {}
     for (const [sessionId, entry] of Object.entries(buffer)) {
@@ -181,8 +198,13 @@ export function useSocket(): UseSocketReturn {
       entry.chunks = entry.chunks.slice(i)
       entry.bytes -= dropped
     }
-    if (!outputTimer.current) {
-      outputTimer.current = setTimeout(flushOutput, 30)
+    if (!outputTimer.current && !outputRaf.current) {
+      if (!document.hidden) {
+        outputRaf.current = requestAnimationFrame(() => { outputRaf.current = 0; flushOutput() })
+        outputTimer.current = setTimeout(flushOutput, FLUSH_FALLBACK_MS)
+      } else {
+        outputTimer.current = setTimeout(flushOutput, FLUSH_HIDDEN_MS)
+      }
     }
   }, [flushOutput])
 
@@ -234,6 +256,10 @@ socket.emit('get-cumulative-stats', {})
     socket.on('status-change', (data: StatusChange) => {
       setSessions(prev => {
         if (!prev[data.sessionId]) return prev
+        // No-op guard: identical status must not create a new sessions object
+        // (a fresh object re-renders the whole App tree). Agents can emit
+        // bursts of same-value events during rapid TUI transitions.
+        if (prev[data.sessionId].status === data.status) return prev
         return { ...prev, [data.sessionId]: { ...prev[data.sessionId], status: data.status as any } }
       })
       statusChangeCbs.current.forEach(cb => cb(data))
@@ -242,6 +268,7 @@ socket.emit('get-cumulative-stats', {})
     socket.on('branch-change', (data: BranchChange) => {
       setSessions(prev => {
         if (!prev[data.sessionId]) return prev
+        if (prev[data.sessionId].branch === data.branch) return prev
         return { ...prev, [data.sessionId]: { ...prev[data.sessionId], branch: data.branch } }
       })
       branchChangeCbs.current.forEach(cb => cb(data))

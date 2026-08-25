@@ -1931,6 +1931,14 @@
   overflow: hidden;
 }
 
+/* Inner wrapper owned by TerminalPane (not React) so the xterm element can be
+   parked/reparented across layout switches without touching React's DOM. */
+.terminal-instance-host {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 .terminal-instance .xterm {
   height: 100%;
   padding: 4px;

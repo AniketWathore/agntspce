@@ -152,13 +152,30 @@ const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
 // chunk floods both processes with allocations. A 16ms window matches one
 // display frame (the renderer already coalesces at 30ms, so perceived latency
 // is unchanged).
-const OUTPUT_FLUSH_MS = 16
+const OUTPUT_FLUSH_MS = 2
 // 64KB frames instead of 512KB: giant frames mean giant string joins and
 // socket writes on both sides (GC churn → renderer main-thread stalls during
 // multi-agent floods). 64KB still amortizes packet overhead; the renderer
 // scheduler re-slices to 16KB parse-sized chunks anyway. Same pattern as
 // Orca's daemon batcher (16–64KB slices).
+//
+// Why the batch window is 2ms, not 16ms: every coalescing hop charges its
+// half-window to keystroke echo latency. Orca measured ~8ms of end-to-end
+// typing lag from two 8ms hops and cut both to 2ms; flood coalescing stays
+// effective because size-triggered flushes (OUTPUT_FLUSH_BYTES) dominate
+// under real load. Keystroke echo additionally bypasses this timer entirely
+// via the interactive fast path below.
 const OUTPUT_FLUSH_BYTES = 64 * 1024
+
+// ── Interactive output fast path (Orca pty.ts pattern) ────────────────────
+// After a user keystroke, agent TUIs redraw small prompt regions. Waiting for
+// even a 2ms batch timer is fine, but echo must never queue BEHIND bulk
+// output already pending for the same session — it jumps straight out.
+const INTERACTIVE_OUTPUT_WINDOW_MS = 100        // ≤100ms since last keystroke
+const INTERACTIVE_OUTPUT_MAX_CHARS = 1024       // ≤1KB always counts
+const INTERACTIVE_REDRAW_MAX_CHARS = 16 * 1024  // bigger ANSI redraws count too
+const INTERACTIVE_OUTPUT_BUDGET_CHARS = 32 * 1024 // rolling cap per input episode
+
 // Hard ceiling on a single session's pending (pre-flush) output. Coalescing
 // normally keeps this well under OUTPUT_FLUSH_BYTES, but if the renderer ever
 // stalls (e.g. a past re-render storm) Socket.IO backpressure pauses the
@@ -440,6 +457,12 @@ export class SessionManager extends EventEmitter {
   }
 
   private scheduleTerminalOutput(sessionId: string, data: string): void {
+    // Interactive fast path: output shortly after a keystroke (echo / TUI
+    // prompt redraw) flushes immediately instead of waiting out the batch
+    // window, and never sits behind previously queued bulk output.
+    // IMPORTANT: the chunk is ALWAYS stored first — flushing before storing
+    // would drop it whenever no buffer exists yet (first chunk of a burst).
+    const immediate = this.shouldFlushInteractive(sessionId, data)
     let entry = this.pendingOutput.get(sessionId)
     if (!entry) {
       entry = { chunks: [], bytes: 0, timer: null }
@@ -459,8 +482,9 @@ export class SessionManager extends EventEmitter {
       entry.chunks = entry.chunks.slice(i)
       entry.bytes -= dropped
     }
-    // Large bursts flush immediately; otherwise wait out the coalescing window.
-    if (entry.bytes >= OUTPUT_FLUSH_BYTES) {
+    // Immediate flush for interactive output; large bursts flush immediately;
+    // everything else waits out the coalescing window.
+    if (immediate || entry.bytes >= OUTPUT_FLUSH_BYTES) {
       this.flushTerminalOutput(sessionId)
       return
     }
@@ -472,6 +496,32 @@ export class SessionManager extends EventEmitter {
       }, OUTPUT_FLUSH_MS)
       e.timer.unref?.()
     }
+  }
+
+  private lastInputAt = new Map<string, number>()
+  private interactiveBudgetChars = new Map<string, number>()
+
+  private shouldFlushInteractive(sessionId: string, data: string): boolean {
+    const lastInputAt = this.lastInputAt.get(sessionId)
+    if (lastInputAt === undefined) return false
+    const now = Date.now()
+    if (now - lastInputAt > INTERACTIVE_OUTPUT_WINDOW_MS) {
+      this.interactiveBudgetChars.delete(sessionId)
+      return false
+    }
+    // ≤1KB always latency-sensitive; bigger chunks only if they look like an
+    // ANSI redraw (agent TUIs repaint >1KB per keypress) — plain command
+    // output stays on the throughput path.
+    const isRedraw = data.length <= INTERACTIVE_OUTPUT_MAX_CHARS ||
+      (data.length <= INTERACTIVE_REDRAW_MAX_CHARS && data.includes('\x1b['))
+    if (!isRedraw) {
+      this.interactiveBudgetChars.delete(sessionId)
+      return false
+    }
+    const used = this.interactiveBudgetChars.get(sessionId) ?? 0
+    if (used + data.length > INTERACTIVE_OUTPUT_BUDGET_CHARS) return false
+    this.interactiveBudgetChars.set(sessionId, used + data.length)
+    return true
   }
 
   private flushTerminalOutput(sessionId: string, force = false): void {
@@ -820,6 +870,10 @@ export class SessionManager extends EventEmitter {
     const session = this.sessions.get(sessionId)
     if (!session?.pty) return false
     try {
+      // Stamp the keystroke time — arms the interactive echo fast path so the
+      // agent's redraw comes straight back instead of waiting out the batcher.
+      this.lastInputAt.set(sessionId, Date.now())
+      this.interactiveBudgetChars.delete(sessionId)
       const clean = data.replace(/\n$/, '').trim()
       if (clean && !/^(claude|opencode|gemini|codex)\b/i.test(clean) && !/^--/.test(clean)) {
         this.cavemanService.setPendingPrompt(sessionId, clean)
@@ -908,6 +962,8 @@ export class SessionManager extends EventEmitter {
     this.statusDetector?.reset(sessionId)
     this.lastStatusRefresh.delete(sessionId)
     this.lastStatusBytes.delete(sessionId)
+    this.lastInputAt.delete(sessionId)
+    this.interactiveBudgetChars.delete(sessionId)
     return true
   }
 

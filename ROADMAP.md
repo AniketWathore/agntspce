@@ -22,10 +22,111 @@ what changed, why, and how it was verified, so no change is a mystery later.
 | 4 | HIDDEN GATE — bound cost while window minimized (main-side) | ⬜ After Phase 1 diagnostics confirm need |
 | 5 | HEADROOM — `--max-old-space-size` renderer clamp | ⬜ Optional |
 | 6 | ShellTerminal scheduler parity (shell terminals still write direct) | ⬜ Follow-up |
+| 6a | LATENCY — interactive echo fast path (2ms batch + bypass) + rAF flush | ✅ Done 2026-08-25 |
+| 6b | RE-RENDERS — no-op guards on status/branch events | ✅ Done 2026-08-25 |
+| 6c | SWITCHING — park/reuse xterm instances across layout changes | ✅ Done 2026-08-25 |
+| 7 | DAEMON — move node-pty out of Electron main process | ⬜ Large structural follow-up |
+| 8 | HIDDEN DELIVERY GATE — drop bytes for fully-hidden panes | ⬜ Needs main-side model first (see #7) |
 
 ---
 
 ## Change log
+
+### 2026-08-25 — Round 5 (interactive latency + switching, reference-driven)
+
+Symptoms: agent feels laggier than a native CLI; multiple simultaneous agents /
+layout switches are slow. Reference deep-dive (Orca `pty.ts` interactive path +
+`pane-terminal-output-scheduler`, Superset `INPUT_LAG_FIXES.md` +
+`v1-terminal-cache`) identified three causes; all fixed.
+
+**6a — Keystroke echo latency (~50–80ms → ~one frame)**
+- `electron/services/sessionManager.ts`: batch window `OUTPUT_FLUSH_MS`
+  16ms → **2ms** (Orca's measured value: each hop charges its half-window to
+  typing latency). New **interactive fast path**: `writeToSession` stamps
+  `lastInputAt` per session and resets a 32KB rolling budget;
+  `shouldFlushInteractive()` flushes immediately (no batching) when output
+  arrives ≤100ms after a keystroke and is ≤1KB, or ≤16KB containing ANSI CSI
+  (agent TUIs redraw >1KB per keypress). Maps cleaned up in `closeSession`.
+- `src/hooks/useSocket.ts`: the 30ms renderer coalescing timer is now
+  **requestAnimationFrame-aligned** when the window is visible (echo lands
+  within one display frame); 40ms fallback timer covers hidden/throttled
+  windows where rAF never fires. First-to-fire cancels its sibling; OUTPUT_CAP
+  trim unchanged so hidden-window memory stays bounded.
+
+**6b — No-op re-render elimination**
+- `src/hooks/useSocket.ts`: `status-change` / `branch-change` handlers return
+  the previous state object when the value is identical instead of always
+  allocating a new `sessions` object — a fresh object re-renders the ENTIRE
+  App tree, and agents emit bursts of same-value events during rapid TUI
+  transitions (Superset INPUT_LAG_FIXES root-cause pattern).
+
+**6c — Instant pane/layout switching (xterm parking)**
+- `src/components/TerminalPane.tsx`: every layout branch (`side-left`,
+  `grid`, `side-right`, focus/fullscreen) renders the same session at a
+  different JSX tree position, so React used to UNMOUNT and REBUILD xterm +
+  WebGL per switch. Now instances are **parked on unmount** (detached from
+  DOM but fully alive — subscription keeps writing live output into them,
+  theme observer stays attached) and **reparented instantly on remount**
+  for the same session (Superset v1-terminal-cache / VS Code model).
+  WebGL released while parked (Orca suspend-on-hide); LRU evicts beyond 6
+  parked terminals with full teardown. Backlog replay only happens on true
+  fresh creation, never on reuse (content continuity preserved by the live
+  subscription).
+
+**Verification**: tsc clean; vitest 121/121. RTK/agntspce-search-mcp, chat,
+sessions, workspaces untouched.
+
+#### Round 5a hotfix (same day) — black screen in `electron:dev`
+
+The parking change originally registered the **React-owned ref div** as the
+parked element. React StrictMode double-mounts the same component instance,
+so the reuse path executed `container.appendChild(cached.el)` where both were
+the *same node* → `HierarchyRequestError` → React error boundary → black
+screen. Reproduced via `ELECTRON_ENABLE_LOGGING=1` renderer console capture.
+
+Fix (`src/components/TerminalPane.tsx`, `src/App.css`):
+- xterm now opens into our OWN host div (`.terminal-instance-host`, sized
+  100%×100% inside the React container). Parking detaches only the host;
+  React's node is never moved or removed → reconciliation-safe under
+  StrictMode and all layout branches.
+- Reuse path guards with `parentElement !== container` before appending.
+- Subscription no longer depends on `termInstance.current` (nulled while
+  parked) — parked terminals now genuinely keep receiving live output.
+- Verified: full `electron:dev` boot with logging → vite connected, React
+  mounted, create→park→reuse exercised, zero errors; tsc clean; 121/121 tests.
+
+#### Round 5b hotfix (same day) — dropped output / dead typing in agent terminals
+
+User report: nothing could be typed anywhere; Claude started but showed
+nothing. Root cause found by auditing the Round 5 interactive fast path:
+
+**Bug 1 (critical, output loss)** — `scheduleTerminalOutput` flushed BEFORE
+storing the chunk when the interactive path triggered:
+`flushTerminalOutput()` returns early when no pending buffer exists yet, so
+the **first chunk of every post-keystroke burst was silently discarded**.
+Claude's TUI repaints small ANSI frames after each keypress → most frames
+lost → terminal appeared blank/frozen and echo never rendered (typing "did
+nothing" visually). Fix: always store the chunk first, then choose flush
+timing (`immediate || size-threshold || timer`). Ordering preserved, zero
+drops.
+
+**Bug 2** — reused (parked) terminals never re-attached WebGL after park
+released it: every layout switch silently degraded that pane to canvas
+forever. Fix: `attachWebgl` stored on the parked entry and re-armed via rAF
+on remount.
+
+**Bug 3** — the WebGL live-guard used a closure boolean set false by the
+creating effect's cleanup, permanently blocking re-attach for reused
+instances. Replaced with a registry-backed `isViewLive()` check (single
+source of truth).
+
+Also added an env-gated CDP debug switch in main.ts
+(`AGNTSPCE_DEBUG_CDP=<port>`) for renderer diagnostics.
+
+Verification: tsc clean, 121/121 tests, full dev boot with logging shows
+zero errors. Interactive flow needs one real manual pass: start an agent,
+type, confirm echo + TUI renders; toggle Split/Focus a few times and confirm
+the pane stays GPU-rendered and responsive.
 
 ### 2026-08-25 — Round 4 (Phases 1–3, reference-driven rewrite)
 
