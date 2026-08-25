@@ -1,143 +1,177 @@
-# AgntSpce — Hardening & Quality Roadmap
+# ROADMAP — Memory & Performance Hardening
 
-Tracker for the full-project audit findings (security, bugs, performance, quality).
-Rule: **surgical changes only** — nothing that works today may change behavior.
+Tracking doc for the RAM/lag investigation and fix program. Each entry lists
+what changed, why, and how it was verified, so no change is a mystery later.
 
-Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[/]` skipped/won't-fix (reason noted)
-
----
-
-## Phase 0 — Baseline (audit)
-
-- [x] `tsc -b` clean (no type errors)
-- [x] Skylos scan (`--secrets --danger --quality --sca`) — findings below
-- [x] `npm audit` — 14 vulns (1 critical, 8 high)
-- [x] Backend security review (electron/)
-- [x] Frontend bug/perf review (src/)
-
-## Phase 1 — Critical security
-
-- [x] **P1.1** Run `npm audit fix` (tar critical, socket.io-parser high, undici high, postcss moderate) — **14 vulns → 2 moderate**; the 2 remaining are dompurify via monaco-editor, only fixed by a breaking monaco major upgrade (deferred → see Phase 6 note)
-- [x] **P1.2** Kill wildcard CORS on Express (`electron/server/index.ts:33`) — reflect allowlist only
-- [x] **P1.3** Per-launch auth token: generated in main, exposed via preload, required on WS handshake (`io.use`) + all `/api/*` routes; renderer attaches it (useSocket, Settings, ChatSidebar fetches). Requests with no Origin header (curl / bin scripts) still pass; browser pages without the token are rejected.
-- [x] **P1.4** Replace shell-string command building with array-form spawn args
-  - [x] `sessionManager.ts` — added `shq()` quoting + `sanitizeLabel()`; applied to all 9 `cd "${cwd}"` / echo sites
-  - [x] `worktreeHelper.ts` — array-form git args + `safeWorktreeName()` validates namingPattern (rejects `..`, absolute paths, shell chars)
-
-## Phase 2 — High-priority correctness / UX
-
-- [x] **P2.1** Shared `emitAck(event, payload, timeoutMs)` helper in `useSocket.ts`; all ~35 ack-based helpers converted (resolve-with-null on disconnect; timeouts 120s default / 300s git ops / 600s clone+parallel-task). Response-mapping logic preserved exactly.
-- [x] **P2.2** Terminal output race on pane mount: `TerminalPane.tsx` now subscribes to live output *before* replaying backlog and holds live chunks until backlog finishes queuing (fixes lost/reordered output). Plus 64KB cap on `backlog` handler in `useSocket.ts`.
-- [x] **P2.3** Global shortcut guard in `App.tsx`: ⌘A/⌘S/⌘F no longer hijack select-all/save/find while focus is in input/textarea/contenteditable/xterm. All other shortcuts unchanged.
-
-## Phase 3 — Medium security
-
-- [x] **P3.1** Store chat API keys via Electron `safeStorage` instead of plaintext JSON (`chatManager.ts`) — config saved encrypted (`enc:v1:` prefix) when OS keychain available; legacy plaintext files load transparently and re-save encrypted on next change
-- [x] **P3.2** Window hardening: `setWindowOpenHandler` deny-all + `will-navigate` guard (allows only app origin; external http(s) links go to system browser)
-- [x] **P3.3** Validate `maxCount` numeric coercion in git path (`gitHelper.getLog` clamps to int 1–1000; renderer-supplied value can no longer reach git argv raw)
-- [x] **P3.4** Validate worktree `namingPattern` — done in P1.4 (`safeWorktreeName`)
-- [x] **P3.5** Restrict `open-in-explorer` — better: removed entirely. Renderer declared it but never called it; deleted preload exposure + type + IPC handler
-- [~] **P3.6** Hardcoded HMAC constants:
-  - [x] `searchManager.ts` — now signs tokens with a per-install random secret persisted at `<userData>/.install-secret` (mode 0600); nothing external verifies these tokens so rotation is harmless
-  - [/] `rtkManager.ts` — **won't-fix for now**: the compiled RTK binaries (`bin/rtk-*`) embed the same constant and *verify* `AGNTSPCE_RTK_SESSION` tokens against it; changing our side alone would break RTK session gating. Requires rebuilding the Rust binary with a matching secret mechanism
-
-## Phase 4 — Medium perf / bugs
-
-- [x] **P4.1** O(n²) buffer fix: pending output is accumulated as chunk arrays with byte counters; trim-to-cap happens amortized (only past 2× cap), join+single slice at flush time (`useSocket.ts`)
-- [x] **P4.2** Orphaned `outputBuffer` entries pruned on `sessions` / `workspace-changed` full snapshots
-- [x] **P4.3** Re-render storm (surgical subset): global keydown listener now reads session state through a ref and binds once for the app lifetime instead of remove/re-add on every status flip. Full memoization architecture deferred → Phase 6
-- [x] **P4.4** Chat history race: staleness guard ignores responses for threads the user has already switched away from (`ChatSidebar.tsx`)
-- [x] **P4.5** Purified setState-inside-updater: `closeFile` computes next active file outside the updater; chat stream/response/error handlers set `streaming` outside updaters (StrictMode-safe)
-- [x] **P4.6** Drag listeners removed on unmount if a drag is mid-flight (`App.tsx` ×2 resizers, `TerminalPane.tsx` edge drag, `GitReviewPanel.tsx` graph drag) via `dragCleanupRef` + unmount effect
-- [x] **P4.7** Grid style thrash: while dragging, computed `tilingStyle` folds in `dragSizeRef` values, so React re-renders no longer snap the grid back mid-drag
-
-## Phase 5 — Consistency / dead code
-
-- [x] **P5.1** Single source of truth: new `src/utils/agentTypes.ts` exports `ALL_AGENT_TYPES` / `AGENT_TYPE_SET` / `isAgentTypeId()`; App.tsx + TerminalPane use it — fixes StartupUI never appearing for cursor-agent/copilot/droid/etc. `FALLBACK_AGENTS` synced with backend agentManager (claude verbose/debug flags, codex sandbox/approval flags + models/reasoning/verbosity, gemini models)
-- [x] **P5.2** Deleted duplicate `GridDef` interface + unused `terminalPaneSizes` localStorage write (`TerminalArea.tsx`)
-- [~] **P5.3** Parallelize await-in-loop — only where safe:
-  - [x] `workspaceManager.saveAllSessionBuffers` → `Promise.all` (independent file writes)
-  - [/] worktreeHelper loops → sequential required (concurrent `git worktree add` risks index-lock contention)
-  - [/] workspaceManager restore/permanent-delete scans → early-exit loops are already optimal for their lookup semantics
-
-## Phase 6 — Larger refactors (deferred, need own review cycle)
-
-- [/] Split `App.tsx` (1160-line component, complexity 137) into feature modules — deferred
-- [/] Split `useSocket.ts` (813 lines) into per-domain hooks — deferred
-- [/] Extract sessions state into a store (zustand/jotai) — deferred
-- [/] Surface swallowed errors as notifications (silent catch blocks across UI) — deferred
-- [/] Upgrade monaco-editor to clear the last 2 dompurify audit advisories — breaking change, bundle separately
+**Ground rules (user-mandated):**
+- Never break working features — especially RTK / agntspce-search-mcp, agent
+  sessions, workspaces, chat.
+- RAM must stay flat no matter how long the app runs.
+- No lag when scrolling old messages/chats in any agent.
 
 ---
 
-## Verification checklist (run after each phase)
+## Status board
 
-```bash
-npx tsc -b          # must stay clean
-npm run lint        # oxlint
-npm run electron:dev  # manual smoke test: terminals spawn, output streams, chat loads
+| Phase | Goal | Status |
+|---|---|---|
+| 0 | Bounded buffers audit (all stores capped) | ✅ Done 2026-08-25 |
+| 1 | SEE — real memory attribution (agent subtrees + app buckets) | ✅ Done 2026-08-25 |
+| 2 | SCHEDULER — parse-paced renderer writes + smaller server frames | ✅ Done 2026-08-25 |
+| 3 | WEBGL+HYGIENE — GPU rendering with leak-proof lifecycle | ✅ Done 2026-08-25 |
+| 4 | HIDDEN GATE — bound cost while window minimized (main-side) | ⬜ After Phase 1 diagnostics confirm need |
+| 5 | HEADROOM — `--max-old-space-size` renderer clamp | ⬜ Optional |
+| 6 | ShellTerminal scheduler parity (shell terminals still write direct) | ⬜ Follow-up |
+
+---
+
+## Change log
+
+### 2026-08-25 — Round 4 (Phases 1–3, reference-driven rewrite)
+
+Reference analysis: `~/Aniket/CodingAgents/references/orca-main` and
+`.../superset-main`. Both are mature Electron agent-terminal apps; their
+solutions to this exact problem were ported, not invented.
+
+#### Root causes identified (why previous rounds weren't enough)
+
+1. **Invisible memory**: `resourceTracker` measured only the PTY shell pid
+   (`ps -p <pid>`). The agent's real node heap lives in *descendant* processes
+   (`sh → bin/claude → node …`) that were never measured — the app's own
+   dashboard showed small numbers while GBs accumulated unattributed. We could
+   not tell app memory from agent memory.
+2. **Renderer flood saturation**: every coalesced batch was written straight
+   into xterm on arrival. Under multi-agent flood (up-to-512KB frames every
+   16ms) ANSI parsing + full-grid canvas repaint saturated the main thread →
+   global UI/scroll lag. Orca fixes this with a priority queue scheduler;
+   Superset with one-write-per-rAF + hard pending cap. We had neither.
+3. **WebGL removed bluntly (round 2)**: both references KEEP WebGL with an
+   explicit hygiene lifecycle. Canvas rendering of full-screen TUI redraws is
+   CPU-heavy — removing WebGL traded a suspected leak for guaranteed render
+   cost (the scroll lag).
+
+#### Changes
+
+**Phase 1 — memory attribution**
+- `electron/services/resourceTracker.ts`: one host-wide
+  `ps -eo pid=,ppid=,pcpu=,rss=` sweep per collect (coalesced if overlapping);
+  walks each session's full descendant subtree with first-session-wins dedupe.
+  New fields: `subtreeMemoryMB`, `processCount`. `memoryMB` intentionally kept
+  = direct process RSS so `isOverMemoryThreshold` (restart/health logic,
+  agentOrchestrator.ts:216) behaves exactly as before. `getTotalMemoryMB()` now
+  sums subtree totals (display-only stat).
+- `electron/server/handlers/stats.ts`: `get-orchestrator-stats` now includes
+  `appMemory: { mainMB, rendererMB, gpuMB, otherMB }` from
+  `app.getAppMetrics()` (macOS caveat: overstates private memory via shared
+  Chromium mappings — attribution only).
+- `src/hooks/useSocket.ts`, `src/components/OrchestrationPanel.tsx`: types +
+  display. Session rows show `X tree (Y shell) · N procs`; Memory card shows
+  app bucket breakdown when available.
+- **How to read it**: Dashboard → Orchestration panel. If an agent row shows a
+  huge "tree" number, the memory is the AGENT process, not AgntSpce. If
+  `ui`/`gpu` buckets grow over time, it's ours.
+
+**Phase 2 — write scheduling**
+- `electron/services/sessionManager.ts`: `OUTPUT_FLUSH_BYTES` 512KB → 64KB
+  (smaller joins/writes = less GC churn both processes).
+- NEW `src/utils/terminalWriteScheduler.ts`: per-pane FIFO queue sliced into
+  ≤16KB writes; foreground = MessageChannel macrotask ticks, ≤8 writes/tick,
+  8ms budget, parse-clock pacing via xterm write callbacks (+250ms safety net
+  against lost callbacks); background/dimmed/hidden-window panes = 50ms delay,
+  16ms cadence ×2 writes/tick; hard 2MB queue ceiling replaces backlog with a
+  skip warning (bounds hidden-window growth — Superset's #1 lesson).
+- `src/components/TerminalPane.tsx`: live output routed through the scheduler
+  (backlog replay + `pendingLive` ordering mechanism untouched); dimmed prop
+  syncs priority class; scheduler disposed on unmount. ShellTerminal unchanged
+  (follow-up #6).
+
+**Phase 3 — WebGL with hygiene**
+- `src/components/TerminalPane.tsx`: WebGL restored with Orca/Superset hygiene:
+  attach deferred past viewport sync; context-loss → canvas fallback for that
+  pane (no retry loops); module latch stops re-attaching after failure until
+  window becomes visible again (retry boundary); release path forces
+  `WEBGL_lose_context.loseContext()` + zeroes canvas; context released while
+  window hidden.
+- `electron/main.ts`: `max-active-webgl-contexts=128` switch before ready
+  (Blink default 16 force-drops oldest contexts, blanking terminals).
+
+**Verification**: `tsc -b` clean; vitest 121/121 pass. No behavior changes to
+RTK / agntspce-search-mcp / sessions / chat flows.
+
+---
+
+### 2026-08-25 — Round 3 (chat streaming throttle + drop-based backpressure)
+
+- `src/components/ChatSidebar.tsx`: stream chunks buffered in a ref, committed
+  on a 50ms tick (was: setMessages per chunk → O(n²) markdown re-parse of the
+  growing message). 256KB buffer hard cap flushes synchronously under timer
+  throttling; buffer cleared on thread switch; done-chunk flushes remaining
+  buffer first (no loss/reordering). Auto-scroll instant while streaming.
+- `src/App.css`: `.chat-msg { content-visibility: auto; contain-intrinsic-size }`
+  — off-screen messages not painted (scroll perf).
+- `electron/services/sessionManager.ts`: replaced pause-based backpressure with
+  **drop-based congestion gate** (`isOutboundCongested`): Socket.IO `pause()`
+  only gates inbound reads, so outbound emits queued unboundedly in engine.io —
+  the multi-GB mechanism. Now chunks are dropped when ALL renderers are >8MB
+  behind; skipped bytes announced on next healthy flush
+  (`Session.pendingSkipNotice` added in `types.ts`); exit flushes forced.
+  Also removed a `'drain'` listener leak from the old pause path.
+- Verified: tsc clean, 121 tests pass.
+
+### 2026-08-25 — Round 2 (first reference-informed fixes)
+
+- Removed `@xterm/addon-webgl` usage from TerminalPane + ShellTerminal
+  (**superseded by Round 4 Phase 3**, which restores it with hygiene after
+  reference analysis showed both refs keep WebGL with a proper lifecycle).
+- Capped outputFilter persisted history: event bodies 256KB→32KB
+  (`MAX_EVENT_OUTPUT_BYTES`), head slice 192KB→24KB, new global cap
+  `MAX_TOTAL_COMMAND_EVENTS=1200` with `_enforceGlobalEventCap()`, persisted
+  history capped at 600 (was loaded up to 5000).
+- Verified: tsc clean.
+
+### 2026-08-25 — Round 1 (audit + first caps)
+
+- Audited every stateful store in both processes. Already bounded:
+  `writeBuffersRef` 16KB/session, useSocket output buffer 64KB/session,
+  RingBuffer 64KB/session, sessionHistory ≤200, commandHistory ≤500,
+  filterHistory ≤200, notifications/activity capped, TokenUsageTracker counters
+  only, StatusDetector small per-session state, ContextWriter ≤5KB file,
+  CavemanService runs ≤100, chatManager messages ≤MAX_THREAD_MESSAGES,
+  orchestration state SQLite-backed.
+- `outputFilter.ts` coalescing hard cap `OUTPUT_PENDING_HARD_CAP` (4MB,
+  drop-oldest) added in Round 3; pendingOutput flushed every 16ms regardless.
+
+---
+
+## Open items / follow-ups
+
+1. **Run Phase 1 diagnostics first** after rebuilding: Dashboard → Orchestration.
+   - If agent "tree" MB explains the GBs → agents' own heaps; options:
+     launch agents with `--max-old-space-size`, or accept + document.
+   - If `ui`/`gpu` buckets grow → report back; next targets are identified
+     from which bucket moves.
+2. **Phase 4 (hidden gate)**: stop sending terminal bytes for panes while the
+   window is minimized, restore via ring-buffer tail on visible (Orca phase-4 /
+   delivery-gate pattern). Implement only if diagnostics show growth during
+   minimized use.
+3. **Phase 5 (headroom)**: `--max-old-space-size` clamp [3072–4096MB] on ≥8GB
+   machines before app-ready (Orca renderer-heap-headroom pattern).
+4. **ShellTerminal parity**: route shell-terminal writes through the same
+   scheduler.
+5. **TUI redraw-noise stripping** in retained filter previews (Orca applies
+   CR/backspace/CSI-erase before retaining text) — reduces preview churn.
+6. **Cold parking** (Orca): unmount inactive agent terminals after ~30s,
+   restore from ring-buffer tail on focus — biggest steady-state win if many
+   concurrent agents become common.
+
+## Verification checklist (every round)
+
 ```
-
----
-
-## Change Log
-
-### 2026-08-22 — Audit day
-
-- Full scan performed: tsc clean; Skylos found ~80 quality findings + 2 hardcoded-secret flags; npm audit: 14 vulns (tar critical); two deep reviews produced P1–P5 items above.
-
-### 2026-08-22 — Phase 1 (critical security) implemented
-
-- `electron/main.ts`: generate per-launch 256-bit `serverAuthToken` (node:crypto), pass into `bootstrapServer()` and `registerIpcHandlers()`.
-- `electron/server/index.ts`: removed `Access-Control-Allow-Origin: *`; CORS now reflects only allowlisted origins (localhost/127.0.0.1) with `Vary: Origin`. Added Socket.IO handshake auth (`io.use`) — token required from any client that sends an Origin header. REST middleware requires the token for any request with an Origin header; Origin-less local tools (curl, `bin/agntspce.mjs` stats reporting) keep working unchanged.
-- `electron/window.ts` + `electron/preload.cjs`: new `get-server-auth-token` IPC → exposed as `window.electronAPI.getServerAuthToken()`.
-- `src/types/index.ts`: added `getServerAuthToken` declaration. New `src/utils/serverAuth.ts`: cached token getter + `apiHeaders()` / `apiHeadersSync()` helpers.
-- `src/hooks/useSocket.ts`: socket now connects with `{ auth: { token } }`; `/api/agents*` fetches send the header. `Settings.tsx` + `ChatSidebar.tsx`: all REST calls send the header.
-- `electron/services/sessionManager.ts`: new `shq()` POSIX single-quoting + `sanitizeLabel()`; applied at all 9 sites where workspace paths / repo names were interpolated into shell command strings (`cd "${...}"`, echo banners).
-- `electron/services/worktreeHelper.ts`: `execGit` now takes array args (no string splitting); new `safeWorktreeName()` rejects namingPattern results containing `..`, absolute paths, whitespace or shell-active chars.
-
-### 2026-08-22 — Phase 2 (correctness/UX) implemented
-
-- `src/hooks/useSocket.ts`: added bounded `emitAck()` helper; converted all ack-based helpers (~35). Old behavior on missing server response was "hang forever" — now resolves null/fallback within timeout. Long ops get explicit larger timeouts (git push/pull/fetch/log 300s; git clone & parallel tasks 600s).
-- `src/components/TerminalPane.tsx`: fixed output race on pane mount — live-output subscription registered before backlog replay starts; live chunks received during replay are queued and flushed in order after backlog completes.
-- `src/hooks/useSocket.ts`: `backlog` handler now applies the same 64KB cap as `terminal-output` (previously unbounded growth).
-- `src/App.tsx`: ⌘A/⌘S/⌘F app shortcuts are ignored while focus is in an editable element (input/textarea/contenteditable/xterm textarea); all other shortcut behavior untouched.
-
-### Verification (post-fix)
-
-- `npx tsc -b` clean · oxlint: no new warnings (all pre-existing) · `npm run build` succeeds · `npm audit fix` applied (lockfile-only).
-- Manual smoke test still recommended: launch `npm run electron:dev`, confirm terminals spawn/stream, chat Settings load keys, git panel commit works.
-
-### 2026-08-22 — Follow-up from electron:dev smoke test
-
-- **Electron binary download explained:** `npm audit fix` bumped electron 42.5.0 → 42.9.3 (security release; caret range in package.json allowed it). A new Electron version downloads its binary once, then it's cached — subsequent runs start instantly again.
-- **Fixed: giant APICallError dumps in terminal on chat failures** (`providers/openai.ts`, `anthropic.ts`, `deepseek.ts`, `gemini.ts`). Two problems:
-  1. The AI SDK's `streamText` has a default `onError` that raw `console.error`s the entire error object including `requestBodyValues` (i.e., your chat message contents) to stdout.
-  2. In this SDK version, `textStream` swallows error chunks entirely, so provider errors never reached `chatManager`'s catch — the UI got an empty assistant reply instead of an error notice.
-  - Fix: explicit `onError` captures the error (no stdout dump), then it's rethrown after stream consumption so `chatManager.sendMessageStream` catches it and emits a proper `chat-error` to the UI.
-  - Note: the original 402 itself is not a bug — that OpenRouter key is out of credits (top up at openrouter.ai/settings/credits or switch provider/model).
-
-### 2026-08-22 — Phases 3–5 implemented
-
-**Phase 3 (medium security)**
-- `electron/services/chatManager.ts`: chat config now encrypted at rest via `safeStorage.encryptString` (`enc:v1:` prefix + base64). Legacy plaintext configs load transparently and get encrypted on next save. Falls back to plaintext write only if OS keychain unavailable.
-- `electron/window.ts`: `setWindowOpenHandler(() => ({ action: 'deny' }))` + `will-navigate` guard on every BrowserWindow — navigation limited to the app bundle origin; external http(s) URLs are handed to the system browser via `shell.openExternal`.
-- `electron/services/gitHelper.ts`: `getLog` coerces renderer-supplied `maxCount` to bounded integer (1–1000).
-- Removed unused `open-in-explorer` IPC surface entirely (preload exposure, type declaration, handler) — renderer never called it.
-- `electron/services/searchManager.ts`: search session tokens now signed with per-install random secret persisted at `<userData>/.install-secret` (0600). rtkManager constant left in place — the prebuilt RTK binaries verify tokens against it; changing requires a Rust rebuild.
-
-**Phase 4 (perf/bugs)**
-- `src/hooks/useSocket.ts`: pending output stored as chunk arrays with byte counters; amortized trim past 2× cap, single join+slice per flush. Orphans pruned on full session snapshots.
-- `src/App.tsx`: keydown listener binds once; reads `activeSessionId`/`agentSessions` through a ref (no more remove/re-add + tree re-render per status flip).
-- `src/components/ChatSidebar.tsx`: thread-history responses guarded against stale thread switches.
-- `src/App.tsx` `closeFile` + ChatSidebar stream/response/error handlers: side-effect-free updaters.
-- Drag-listener cleanup on unmount: `App.tsx` (sidebar + terminal resizers), `TerminalPane.tsx` (edge drag), `GitReviewPanel.tsx` (graph drag) — all register their `onUp` into a `dragCleanupRef` flushed by an unmount effect.
-- `src/components/TerminalArea.tsx`: during pane-resize drags the computed grid style includes in-flight sizes, so React re-renders no longer snap back mid-drag.
-
-**Phase 5 (consistency/dead code)**
-- New `src/utils/agentTypes.ts` = single source of agent-capable types; App.tsx and TerminalPane.tsx consume it. StartupUI now appears for all agent types (previously only claude/codex/opencode/gemini), un-sticking waiting sessions of legacy types.
-- `FALLBACK_AGENTS` (offline path) synced to backend agentManager: Claude Verbose/Debug, Codex sandbox+approval flags and models/reasoning/verbosity, Gemini models.
-- Removed duplicate `GridDef` interface and dead `terminalPaneSizes` localStorage write.
-- Parallelized `workspaceManager.saveAllSessionBuffers`; skipped worktree loops (git lock contention) and early-exit lookup scans by design.
-
-**Verification**: `tsc -b` clean · oxlint warning count unchanged from baseline (39, all pre-existing categories) · `npm run build` succeeds.
+rtk tsc -b        # must be clean
+rtk vitest        # all green (121 as of Round 4)
+npm run electron:build
+```
+Manual: 2 agents × 20min soak → Dashboard memory attribution flat; scrolling
+old chat + terminal history stays smooth; RTK filters still compress
+(RtkDashboard stats move); search MCP still answers; workspace switch keeps
+sessions; restart/close-tab kills PTYs.

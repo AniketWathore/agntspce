@@ -5327,6 +5327,11 @@
   display: flex;
   gap: 8px;
   max-width: 100%;
+  /* Paint virtualization: off-screen messages are not laid out/painted, which
+     keeps scrolling through long chat histories fast even with thousands of
+     markdown-rendered messages. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
 }
 
 .chat-msg.user {

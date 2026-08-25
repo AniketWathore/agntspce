@@ -60,9 +60,19 @@ const toPlainLine = (raw: string) => raw
 // "lines"; without caps those flow into command history (200/session,
 // persisted up to 5000 total) and are loaded back at startup.
 const MAX_ACCUM_LINE_CHARS = 8 * 1024
-const MAX_EVENT_OUTPUT_BYTES = 256 * 1024
-const EVENT_HEAD_BYTES = 192 * 1024
+// Retained body size per event. 256KB × 2 (raw + filtered) × up to 200 events
+// per session previously let the in-memory + persisted command history grow to
+// ~100–250MB for a single long agent run. 32KB is more than enough for the
+// dashboard's token/preview display and bounds per-event memory.
+const MAX_EVENT_OUTPUT_BYTES = 32 * 1024
+const EVENT_HEAD_BYTES = 24 * 1024
 const WIRE_PREVIEW_BYTES = 2 * 1024
+// Global ceiling on retained command events (across ALL sessions). The
+// per-session 200-cap alone does not stop unbounded growth when many sessions
+// run over time, and history is deliberately kept after a session closes — so
+// without a global cap the main-process heap grows for the whole app lifetime.
+const MAX_TOTAL_COMMAND_EVENTS = 1200
+const MAX_PERSISTED_COMMAND_EVENTS = 600
 
 // Keep head + tail of oversized text so token accounting and previews stay useful.
 function capStoredOutput(text: string): string {
@@ -156,7 +166,7 @@ export class OutputFilterService {
       const parsed = JSON.parse(data) as CommandEvent[]
       if (!Array.isArray(parsed)) return
       // Keep the most recent slice if the file somehow grew beyond the cap.
-      const events = parsed.length > 5000 ? parsed.slice(-5000) : parsed
+      const events = parsed.length > MAX_PERSISTED_COMMAND_EVENTS ? parsed.slice(-MAX_PERSISTED_COMMAND_EVENTS) : parsed
       this._commandHistory.clear()
       for (const e of events) {
         if (!e || typeof e.sessionId !== 'string') continue
@@ -178,7 +188,11 @@ export class OutputFilterService {
     try {
       const all: CommandEvent[] = []
       for (const [, hist] of this._commandHistory) all.push(...hist)
-      if (all.length > 5000) all.splice(0, all.length - 5000)
+      // Most-recent-first ordering matches the in-memory view; cap what we
+      // persist so the on-disk JSON (and the reload on next startup) stays
+      // bounded instead of growing without limit.
+      all.sort((a, b) => b.timestamp - a.timestamp)
+      if (all.length > MAX_PERSISTED_COMMAND_EVENTS) all.length = MAX_PERSISTED_COMMAND_EVENTS
       fs.mkdirSync(path.dirname(this._historyFilePath), { recursive: true })
       fs.writeFileSync(this._historyFilePath, JSON.stringify(all), 'utf-8')
     } catch {}
@@ -209,6 +223,32 @@ export class OutputFilterService {
     this._statsCache = null
     this.onCommandEvent?.(event)
     this._scheduleHistorySave()
+    this._enforceGlobalEventCap()
+  }
+
+  // Keep total retained events bounded across all sessions. Oldest events
+  // (by timestamp) are dropped first, trimming from the front of each affected
+  // per-session array. Runs only when the cap is exceeded, so steady-state cost
+  // is a single O(total) scan per finalized command — fine at this volume.
+  private _enforceGlobalEventCap(): void {
+    let total = 0
+    for (const h of this._commandHistory.values()) total += h.length
+    if (total <= MAX_TOTAL_COMMAND_EVENTS) return
+    const flat: { sid: string; ts: number }[] = []
+    for (const [sid, h] of this._commandHistory) {
+      for (const e of h) flat.push({ sid, ts: e.timestamp })
+    }
+    flat.sort((a, b) => a.ts - b.ts)
+    const toRemove = total - MAX_TOTAL_COMMAND_EVENTS
+    const counts = new Map<string, number>()
+    for (let i = 0; i < toRemove; i++) {
+      const r = flat[i]
+      counts.set(r.sid, (counts.get(r.sid) || 0) + 1)
+    }
+    for (const [sid, n] of counts) {
+      const h = this._commandHistory.get(sid)
+      if (h && n > 0) h.splice(0, Math.min(n, h.length))
+    }
   }
 
   private clearTimer(sessionId: string) {

@@ -19,7 +19,8 @@ export interface OrchestratorStats {
   concurrency: { active: number, queued: number, max: number }
   sessionCount: number
   totalMemoryMB: number
-  resourceUsage: { sessionId: string, pid: number, cpuPercent: number, memoryMB: number, collectedAt: number }[]
+  resourceUsage: { sessionId: string, pid: number, cpuPercent: number, memoryMB: number, subtreeMemoryMB?: number, processCount?: number, collectedAt: number }[]
+  appMemory?: { mainMB: number, rendererMB: number, gpuMB: number, otherMB: number } | null
   orchestration: {
     agents: { total: number; active: number; idle: number; paused: number }
     tasks: Record<string, number>

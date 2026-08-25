@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback, memo, type CSSProperties, type ReactNode } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import type { SessionState, AgentConfig, AgentStartConfig } from '../types'
 import TerminalPane from './TerminalPane'
@@ -239,14 +238,10 @@ const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, 
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
     term.open(terminalRef.current)
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        try { webglAddon.dispose() } catch {}
-        try { term.loadAddon(new WebglAddon()) } catch {}
-      })
-      term.loadAddon(webglAddon)
-    } catch {}
+    // NOTE: @xterm/addon-webgl is intentionally omitted — its renderer leaks
+    // GPU/JS cell buffers under sustained full-screen redraws (agent TUIs),
+    // causing unbounded RAM growth and progressive lag. The built-in canvas
+    // renderer is memory-stable for this workload.
     function doFit() { try { fitAddon.fit() } catch {} }
     let fitRaf = 0
     let fitAttempts = 0

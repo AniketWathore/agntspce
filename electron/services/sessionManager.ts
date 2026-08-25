@@ -153,28 +153,45 @@ const OUTBOUND_BUFFER_CAP = 8 * 1024 * 1024
 // display frame (the renderer already coalesces at 30ms, so perceived latency
 // is unchanged).
 const OUTPUT_FLUSH_MS = 16
-const OUTPUT_FLUSH_BYTES = 512 * 1024
+// 64KB frames instead of 512KB: giant frames mean giant string joins and
+// socket writes on both sides (GC churn → renderer main-thread stalls during
+// multi-agent floods). 64KB still amortizes packet overhead; the renderer
+// scheduler re-slices to 16KB parse-sized chunks anyway. Same pattern as
+// Orca's daemon batcher (16–64KB slices).
+const OUTPUT_FLUSH_BYTES = 64 * 1024
+// Hard ceiling on a single session's pending (pre-flush) output. Coalescing
+// normally keeps this well under OUTPUT_FLUSH_BYTES, but if the renderer ever
+// stalls (e.g. a past re-render storm) Socket.IO backpressure pauses the
+// socket while the PTY keeps producing data. Capping here guarantees the main
+// process can never accumulate unbounded terminal-output buffers regardless
+// of client health — oldest bytes are dropped instead of growing without limit.
+const OUTPUT_PENDING_HARD_CAP = 4 * 1024 * 1024
 
-function applyBackpressure(io: any): void {
+// True when EVERY connected renderer is congested enough that another emit
+// would only pile into an unbounded engine.io send buffer.
+//
+// Why drop instead of pause: Socket.IO's socket.pause() gates INBOUND reads,
+// not outbound writes — while "paused", every io.emit still queues packets in
+// the transport's send buffer, which is how the main process previously grew
+// to multi-GB under a stalled renderer. Terminal output is lossy-tolerable
+// (agent TUIs repaint full screens continuously), so once all consumers are
+// past OUTBOUND_BUFFER_CAP we simply skip the chunk; flushTerminalOutput
+// leaves a skip notice that self-heals on the next healthy flush.
+function isOutboundCongested(io: any): boolean {
   try {
+    let measured = 0
     for (const [, socket] of io.sockets.sockets) {
       const transport = (socket as any)?.conn?.transport
-      if (transport?.name === 'websocket') {
-        const ws = transport.socket as any
-        if (ws && ws.bufferedAmount > OUTBOUND_BUFFER_CAP) {
-          // Graceful backpressure: pause the socket instead of hard-terminating it.
-          // The renderer will reconnect/resume when it catches up, and we avoid
-          // dropping every client when a single consumer is slow.
-          try { socket.pause?.() } catch {}
-          const resume = () => {
-            try { socket.resume?.() } catch {}
-          }
-          ws.once?.('drain', resume)
-          ws.once?.('close', resume)
-        }
-      }
+      if (transport?.name !== 'websocket') continue // can't measure — treat as healthy
+      const ws = transport.socket as any
+      if (!ws || typeof ws.bufferedAmount !== 'number') continue
+      measured++
+      if (ws.bufferedAmount <= OUTBOUND_BUFFER_CAP) return false // one healthy consumer is enough
     }
-  } catch {}
+    return measured > 0
+  } catch {
+    return false
+  }
 }
 
 export class SessionManager extends EventEmitter {
@@ -430,6 +447,18 @@ export class SessionManager extends EventEmitter {
     }
     entry.chunks.push(data)
     entry.bytes += data.length
+    // Enforce the hard ceiling: drop oldest chunks if we somehow exceed it
+    // (defends against a stalled client under Socket.IO backpressure).
+    if (entry.bytes > OUTPUT_PENDING_HARD_CAP) {
+      let dropped = 0
+      let i = 0
+      while (i < entry.chunks.length && dropped < entry.bytes - OUTPUT_PENDING_HARD_CAP) {
+        dropped += entry.chunks[i].length
+        i++
+      }
+      entry.chunks = entry.chunks.slice(i)
+      entry.bytes -= dropped
+    }
     // Large bursts flush immediately; otherwise wait out the coalescing window.
     if (entry.bytes >= OUTPUT_FLUSH_BYTES) {
       this.flushTerminalOutput(sessionId)
@@ -445,7 +474,7 @@ export class SessionManager extends EventEmitter {
     }
   }
 
-  private flushTerminalOutput(sessionId: string): void {
+  private flushTerminalOutput(sessionId: string, force = false): void {
     const entry = this.pendingOutput.get(sessionId)
     if (!entry) return
     this.pendingOutput.delete(sessionId)
@@ -456,8 +485,22 @@ export class SessionManager extends EventEmitter {
     // data is still in the ring buffer and reaches the client via backlog.
     const session = this.sessions.get(sessionId)
     if (!session || session.pty === null) return
-    applyBackpressure(this.io)
+    // Drop-based congestion control: if every renderer is >8MB behind, queueing
+    // more bytes would grow engine.io's send buffer without bound. Drop instead
+    // (TUIs repaint constantly so frames self-heal) and remember how much was
+    // skipped — the next healthy flush announces it, and deliveredBufferLength
+    // is left stale so a workspace switch resends the ring-buffer tail.
+    if (!force && isOutboundCongested(this.io)) {
+      session.pendingSkipNotice = (session.pendingSkipNotice || 0) + data.length
+      return
+    }
     try {
+      if (session.pendingSkipNotice && session.pendingSkipNotice > 0) {
+        const skipped = session.pendingSkipNotice
+        session.pendingSkipNotice = 0
+        const kb = Math.max(1, Math.round(skipped / 1024))
+        this.io.emit('terminal-output', { sessionId, data: `\r\n[agntspce: skipped ~${kb} KB of output while the view was busy]\r\n` })
+      }
       this.io.emit('terminal-output', { sessionId, data })
     } catch { }
     session.deliveredBufferLength = session.buffer.totalBytes
@@ -730,8 +773,9 @@ export class SessionManager extends EventEmitter {
 
     ptyProcess.onExit(({ exitCode, signal }: any) => {
       // Deliver any coalesced output before the exit event so the renderer
-      // sees the final output in order.
-      this.flushTerminalOutput(sessionId)
+      // sees the final output in order. Forced: exit summaries are small and
+      // there is no later flush to announce a skip for this session.
+      this.flushTerminalOutput(sessionId, true)
       session.slotRelease?.()
       clearInterval(session.processMonitor!)
       session.status = 'exited'

@@ -9,6 +9,7 @@ import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 import StartupUI from './StartupUI'
 import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
 import { isAgentTypeId } from '../utils/agentTypes'
+import { createTerminalWriteScheduler, type TerminalWriteScheduler } from '../utils/terminalWriteScheduler'
 
 interface Props {
   session: SessionState
@@ -32,11 +33,18 @@ interface Props {
   edgeHandles?: ('left' | 'right' | 'top' | 'bottom')[]
 }
 
+// WebGL hygiene latch (Orca pattern): once an attach fails (GPU process dead,
+// WebGL blocked), stop retrying for every pane/mount — each attempt burns a
+// canvas and a failed getContext. The latch clears when the window becomes
+// visible again (the designated retry boundary).
+let webglAttachFailedGlobally = false
+
 export default memo(function TerminalPane(props: Props) {
   const { session, onInput, onResize, onResumeSession, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles } = props
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const schedulerRef = useRef<TerminalWriteScheduler | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
   const [showStartup, setShowStartup] = useState(false)
   const onTerminalOutputRef = useRef(onTerminalOutput)
@@ -111,16 +119,63 @@ export default memo(function TerminalPane(props: Props) {
 
     term.open(terminalRef.current)
 
-    // GPU-accelerated rendering: dramatically faster for large scrollback and
-    // multi-terminal layouts. Falls back to the default renderer on failure.
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        try { webglAddon.dispose() } catch {}
-        try { term.loadAddon(new WebglAddon()) } catch {}
-      })
-      term.loadAddon(webglAddon)
-    } catch {}
+    // ── WebGL renderer with hygiene (Orca/Superset pattern) ────────
+    // GPU-accelerated rendering keeps full-screen agent-TUI redraws cheap;
+    // the canvas fallback repaints the whole grid on CPU and is what made
+    // terminals feel sluggish under flood. Leak modes are handled explicitly:
+    // - context loss → fall back to canvas for this pane (no retry loops)
+    // - attach failure once → module latch stops further attempts
+    // - release → force WEBGL_lose_context + zero the canvas so the driver
+    //   context cannot outlive disposal (Chromium context-budget protection)
+    // - window hidden → context released; visible → re-attached
+    let webgl: WebglAddon | null = null
+    let webglContextLost = false
+
+    function releaseWebgl(): void {
+      if (!webgl) return
+      try {
+        const renderer = (webgl as unknown as { _renderer?: { _gl?: WebGLRenderingContext; _canvas?: HTMLCanvasElement } })._renderer
+        renderer?._gl?.getExtension('WEBGL_lose_context')?.loseContext()
+        const canvas = renderer?._canvas
+        if (canvas) { canvas.width = 0; canvas.height = 0 }
+      } catch { }
+      try { webgl.dispose() } catch { }
+      webgl = null
+    }
+
+    function attachWebgl(): void {
+      if (webgl || webglContextLost || webglAttachFailedGlobally || document.hidden) return
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          // Chromium reclaims contexts under GPU pressure; recreating here can
+          // loop. Stay on canvas until the next visibility resume.
+          webglContextLost = true
+          releaseWebgl()
+          try { term.refresh(0, term.rows - 1) } catch { }
+        })
+        term.loadAddon(addon)
+        webgl = addon
+      } catch {
+        webglAttachFailedGlobally = true
+        try { term.refresh(0, term.rows - 1) } catch { }
+      }
+    }
+
+    // Defer past xterm's post-open viewport sync (attach during open races it).
+    const webglAttachRaf = requestAnimationFrame(() => attachWebgl())
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        releaseWebgl()
+      } else {
+        // Retry boundary: clear latches, re-arm GPU rendering.
+        webglAttachFailedGlobally = false
+        webglContextLost = false
+        requestAnimationFrame(() => attachWebgl())
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     function doFit() {
       try { fitAddon.fit() } catch { }
@@ -149,6 +204,17 @@ export default memo(function TerminalPane(props: Props) {
     termInstance.current = term
 
     term.focus()
+
+    // ── Output write scheduling ─────────────────────────────────────
+    // Flood output goes through a per-pane scheduler (parse-paced, priority-
+    // classed, hard-capped) instead of straight into xterm, so one flooding
+    // agent can't starve the main thread and lag every pane. Dimmed/background
+    // panes drain slowly; the focused pane gets parse-clocked fast drains.
+    let scheduler: TerminalWriteScheduler | null = null
+    try {
+      scheduler = createTerminalWriteScheduler(term, !dimmed)
+      schedulerRef.current = scheduler
+    } catch { scheduler = null }
 
     // Windows: handle Ctrl+C/V manually since menu roles with accelerators
     // would intercept the key events before xterm.js's textarea can handle them.
@@ -197,7 +263,8 @@ export default memo(function TerminalPane(props: Props) {
           requestAnimationFrame(loadChunk)
         } else {
           backlogDone = true
-          for (const d of pendingLive.splice(0)) term.write(d)
+          // Enqueue held-back live data through the scheduler (order preserved).
+          for (const d of pendingLive.splice(0)) scheduler?.write(d)
         }
       }
       loadChunk()
@@ -209,7 +276,8 @@ export default memo(function TerminalPane(props: Props) {
           pendingLive.push(data)
           return
         }
-        term.write(data)
+        if (scheduler) scheduler.write(data)
+        else term.write(data)
       }
     })
 
@@ -220,12 +288,23 @@ export default memo(function TerminalPane(props: Props) {
 
     return () => {
       cancelAnimationFrame(fitRaf)
+      cancelAnimationFrame(webglAttachRaf)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       unsub?.()
       themeObserver.disconnect()
+      releaseWebgl()
+      scheduler?.dispose()
+      if (schedulerRef.current === scheduler) schedulerRef.current = null
       term.dispose()
       termInstance.current = null
     }
   }, [session.id, session.restorable])
+
+  // Keep the scheduler's priority class in sync with focus state (dimmed =
+  // background pane → slow drain; focused → parse-clocked fast drain).
+  useEffect(() => {
+    schedulerRef.current?.setForeground(!dimmed)
+  }, [dimmed])
 
   useEffect(() => {
     if (!fitAddonRef.current || !paneRef.current) return

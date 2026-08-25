@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import useSocketEvent from '../hooks/useSocketEvent'
@@ -67,6 +67,55 @@ function formatTime(ts: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' · ' +
     d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
+
+// Memoized so that unrelated re-renders (e.g. the parent App re-rendering on
+// every status/command event, or a sibling message streaming in) do NOT force
+// all ~2000 messages to be re-parsed by ReactMarkdown. Without this, an open
+// chat with a long history re-parses the entire history several times per
+// second, saturating the renderer's main thread — which in turn stalls Socket.IO
+// processing and lets the main process accumulate an unbounded terminal-output
+// buffer (the multi-GB RAM growth). Only the message whose object actually
+// changed (the one streaming) re-renders.
+const MessageItem = memo(function MessageItem({ msg }: { msg: ChatMessage }) {
+  return (
+    <div className={`chat-msg ${msg.role}${msg.error ? ' chat-msg-error' : ''}`}>
+      <div className="chat-msg-avatar">
+        <i className={`codicon ${msg.role === 'assistant' ? 'codicon-robot' : 'codicon-person'}`} style={{ fontSize: 14 }}></i>
+      </div>
+      <div className="chat-msg-content">
+        <div className="chat-msg-sender">
+          {msg.role === 'assistant' ? 'Assistant' : 'You'}
+          {msg.model && <span className="chat-msg-provider"> · {msg.model}</span>}
+        </div>
+        <div className="chat-msg-text">
+          {msg.role === 'assistant' ? (
+            <div className="chat-md">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+              {msg.streaming && msg.content && <span className="chat-cursor">|</span>}
+              {!msg.content && msg.streaming && <span className="chat-cursor">|</span>}
+            </div>
+          ) : (
+            <>
+              {msg.content || (msg.streaming ? <span className="chat-cursor">|</span> : '')}
+              {msg.streaming && msg.content && <span className="chat-cursor">|</span>}
+            </>
+          )}
+          {!msg.attachments?.length ? null : (
+            <div className="chat-msg-attachments">
+              {msg.attachments.map((a, ai) => a.kind === 'image' && a.dataUrl ? (
+                <img key={ai} src={a.dataUrl} alt={a.name} className="chat-msg-att-thumb" title={a.name} />
+              ) : (
+                <span key={ai} className="chat-msg-att-file" title={a.name}>
+                  <i className="codicon codicon-file" />{a.name}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+})
 
 export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: Props) {
   const [providers, setProviders] = useState<ChatModelInfo[]>([])
@@ -160,7 +209,9 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     if (distanceFromBottom < 80) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      // Instant scroll while streaming: a smooth animation restarted on every
+      // commit tick visibly stutters and keeps layout work in flight.
+      messagesEndRef.current?.scrollIntoView({ behavior: streaming ? 'auto' : 'smooth' })
     }
   }, [messages, streaming])
 
@@ -208,37 +259,75 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
     }
   }, [providers, selectedProvider, socket])
 
+  // ── Stream commit throttling ────────────────────────────────
+  // Committing every stream chunk to React state re-parses the entire growing
+  // markdown document on each arrival — O(n²) over a long response, and the
+  // dominant cause of chat jank while an agent streams. Chunks accumulate in a
+  // ref and are committed on a fixed tick instead: identical final content,
+  // bounded render rate. (Same pattern as superset's StreamingMessageText.)
+  const STREAM_COMMIT_MS = 50
+  const STREAM_BUFFER_HARD_CAP = 256 * 1024
+  const streamBufRef = useRef('')
+  const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushStreamBuffer = useCallback(() => {
+    if (streamTimerRef.current) {
+      clearTimeout(streamTimerRef.current)
+      streamTimerRef.current = null
+    }
+    const buffered = streamBufRef.current
+    if (!buffered) return
+    streamBufRef.current = ''
+    setMessages(prev => {
+      const last = prev[prev.length - 1]
+      if (!last || last.role !== 'assistant' || !last.streaming) return prev
+      const updated = [...prev]
+      updated[updated.length - 1] = { ...last, content: last.content + buffered }
+      return updated
+    })
+  }, [])
+
+  // Switching threads mid-stream must not leak buffered text from the previous
+  // thread into the new thread's messages.
+  useEffect(() => {
+    streamBufRef.current = ''
+    if (streamTimerRef.current) {
+      clearTimeout(streamTimerRef.current)
+      streamTimerRef.current = null
+    }
+  }, [threadId])
+
   useSocketEvent<StreamChunk>(socket.onChatStreamChunk, (chunk) => {
     if (chunk.threadId !== threadId) return
     if (chunk.done) {
       setStreaming(false)
-    }
-    setMessages(prev => {
-      const last = prev[prev.length - 1]
-      const isStreamingAssistant = last?.role === 'assistant' && last.streaming
-      if (chunk.done) {
-        if (isStreamingAssistant) {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            ...last,
-            content: last.content + chunk.content,
-            streaming: false,
-          }
-          return updated
-        }
-        return prev
+      // Finalize with whatever is still buffered so nothing is lost or reordered.
+      const buffered = streamBufRef.current
+      streamBufRef.current = ''
+      if (streamTimerRef.current) {
+        clearTimeout(streamTimerRef.current)
+        streamTimerRef.current = null
       }
-      if (isStreamingAssistant) {
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (!last || last.role !== 'assistant' || !last.streaming) return prev
         const updated = [...prev]
-        updated[updated.length - 1] = {
-          ...last,
-          content: last.content + chunk.content,
-        }
+        updated[updated.length - 1] = { ...last, content: last.content + buffered, streaming: false }
         return updated
-      }
-      return prev
-    })
-  }, [socket, threadId])
+      })
+      return
+    }
+    streamBufRef.current += chunk.content
+    // Hard cap: if timers are throttled (e.g. hidden window), flush
+    // synchronously rather than letting the buffer grow without bound.
+    if (streamBufRef.current.length >= STREAM_BUFFER_HARD_CAP) {
+      flushStreamBuffer()
+      return
+    }
+    if (!streamTimerRef.current) {
+      streamTimerRef.current = setTimeout(flushStreamBuffer, STREAM_COMMIT_MS)
+    }
+  }, [socket, threadId, flushStreamBuffer])
 
   useSocketEvent<{ threadId: string; message: ChatMessage }>(socket.onChatResponse, (data) => {
     if (data.threadId !== threadId) return
@@ -436,42 +525,7 @@ export default function ChatSidebar({ onClose, onNavigateToSettings, socket }: P
   }
 
   const renderMessage = (msg: ChatMessage, i: number) => (
-    <div key={msg.id || i} className={`chat-msg ${msg.role}${msg.error ? ' chat-msg-error' : ''}`}>
-      <div className="chat-msg-avatar">
-        <i className={`codicon ${msg.role === 'assistant' ? 'codicon-robot' : 'codicon-person'}`} style={{ fontSize: 14 }}></i>
-      </div>
-      <div className="chat-msg-content">
-        <div className="chat-msg-sender">
-          {msg.role === 'assistant' ? 'Assistant' : 'You'}
-          {msg.model && <span className="chat-msg-provider"> · {msg.model}</span>}
-        </div>
-        <div className="chat-msg-text">
-          {msg.role === 'assistant' ? (
-            <div className="chat-md">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-              {msg.streaming && msg.content && <span className="chat-cursor">|</span>}
-              {!msg.content && msg.streaming && <span className="chat-cursor">|</span>}
-            </div>
-          ) : (
-            <>
-              {msg.content || (msg.streaming ? <span className="chat-cursor">|</span> : '')}
-              {msg.streaming && msg.content && <span className="chat-cursor">|</span>}
-            </>
-          )}
-          {!msg.attachments?.length ? null : (
-            <div className="chat-msg-attachments">
-              {msg.attachments.map((a, ai) => a.kind === 'image' && a.dataUrl ? (
-                <img key={ai} src={a.dataUrl} alt={a.name} className="chat-msg-att-thumb" title={a.name} />
-              ) : (
-                <span key={ai} className="chat-msg-att-file" title={a.name}>
-                  <i className="codicon codicon-file" />{a.name}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <MessageItem key={msg.id || i} msg={msg} />
   )
 
   return (

@@ -120,7 +120,11 @@ export default function OrchestrationPanel({ getOrchestratorStats }: { getOrches
         <StatCard
           label="Memory"
           value={formatMB(stats?.totalMemoryMB ?? 0)}
-          sub={`${stats?.resourceUsage?.length ?? 0} sampled sessions`}
+          sub={
+            stats?.appMemory
+              ? `agents · app: main ${formatMB(stats.appMemory.mainMB)} · ui ${formatMB(stats.appMemory.rendererMB)} · gpu ${formatMB(stats.appMemory.gpuMB)}`
+              : `${stats?.resourceUsage?.length ?? 0} sampled sessions`
+          }
         />
       </div>
 
@@ -242,7 +246,11 @@ export default function OrchestrationPanel({ getOrchestratorStats }: { getOrches
               <div key={r.sessionId} className="orch-session-row">
                 <span className="orch-session-name">{r.sessionId.slice(0, 12)}</span>
                 <span className="orch-session-value">
-                  {r.cpuPercent?.toFixed?.(1) ?? '0'}% CPU · {formatMB(r.memoryMB ?? 0)} · pid {r.pid}
+                  {r.cpuPercent?.toFixed?.(1) ?? '0'}% CPU ·{' '}
+                  {r.subtreeMemoryMB != null
+                    ? `${formatMB(r.subtreeMemoryMB)} tree (${formatMB(r.memoryMB ?? 0)} shell)${r.processCount ? ` · ${r.processCount} procs` : ''}`
+                    : formatMB(r.memoryMB ?? 0)}
+                  {' '}· pid {r.pid}
                 </span>
               </div>
             ))}
