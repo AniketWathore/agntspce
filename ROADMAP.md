@@ -32,6 +32,40 @@ what changed, why, and how it was verified, so no change is a mystery later.
 
 ## Change log
 
+### 2026-08-25 — Round 6 (multi-agent re-render storm + shell parity)
+
+**Token dashboard audit (user question: "too many tokens saved — real or bug?")**
+Verdict: **real, not double-counted.** Verified end-to-end:
+- `bin/agntspce.mjs` intercepts agent tool commands, feeds the agent the
+  FILTERED output, and reports true raw-vs-filtered counts via HTTP.
+- HTTP↔PTY dedup is implemented (`_recentTokenReports`, `_pendingStats`
+  check) and unit-tested (outputFilter.test.ts covers both arrival orders).
+- `getAllStats()` uses command history as single source of truth; no
+  cumulative+history double counting. Estimator consistent on both sides
+  (`chars/4`).
+- 90% reductions are plausible for filter-matched verbose commands (build/
+  test/spinner output); Aug-22 sessions at ~50% reflect a different command
+  mix.
+- Known semantics caveat (pre-existing, NOT a bug): the fallback path also
+  counts generic terminal-display compression of non-LLM-bound output toward
+  "Saved from LLM context", so the headline can overstate *LLM* savings
+  specifically. Relabeling is a future UI nicety, deliberately not changed.
+
+**Fix A — ShellTerminal parity** (`src/components/TerminalArea.tsx`)
+Shell terminals were the last unscheduled write path (straight `term.write`)
+and canvas-rendered. Now they use the same per-pane scheduler and WebGL with
+context-loss fallback as agent panes.
+
+**Fix B — analytics event batching** (`src/hooks/useSocket.ts`)
+`command-filter-event` / `execution-event` / `filter-event` each committed a
+new React state array immediately → full App re-render PER COMPLETED TOOL
+CALL. Parallel agents finish dozens/second → guaranteed re-render storm
+(the remaining multi-agent lag). Events now buffer in refs and commit on a
+250ms tick (dashboards lag ≤250ms; terminal path untouched). Buffers cleared
+on reconnect + unmount.
+
+Verification: tsc clean, 121/121 tests, clean boot with logging.
+
 ### 2026-08-25 — Round 5 (interactive latency + switching, reference-driven)
 
 Symptoms: agent feels laggier than a native CLI; multiple simultaneous agents /

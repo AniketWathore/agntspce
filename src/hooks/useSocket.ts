@@ -163,6 +163,61 @@ export function useSocket(): UseSocketReturn {
   const outputTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const outputRaf = useRef(0)
 
+  // ── Analytics event batching ─────────────────────────────────────
+  // Every completed tool call emits command-filter-event / execution-event /
+  // filter-event. Committing each one to React state immediately re-renders
+  // the whole App tree per event — with several agents finishing dozens of
+  // tool calls per second, that is a guaranteed re-render storm and the main
+  // remaining source of multi-agent lag. Events now accumulate in refs and
+  // commit on a 250ms tick; dashboards see at most a quarter-second delay,
+  // and the terminal output path is completely unaffected.
+  const EVENT_BATCH_MS = 250
+  const cmdEventBuf = useRef<CommandEvent[]>([])
+  const searchEventBuf = useRef<CommandEvent[]>([])
+  const execEventBuf = useRef<ExecutionEvent[]>([])
+  const filterEventBuf = useRef<FilterEvent[]>([])
+  const filterDeltaBuf = useRef<{ ob: number; fb: number; ot: number; ft: number } | null>(null)
+  const eventBatchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushEventBatches = useCallback(() => {
+    eventBatchTimer.current = null
+    if (cmdEventBuf.current.length) {
+      const batch = cmdEventBuf.current
+      cmdEventBuf.current = []
+      setCommandHistory(prev => [...batch.slice().reverse(), ...prev].slice(0, 500))
+    }
+    if (searchEventBuf.current.length) {
+      const batch = searchEventBuf.current
+      searchEventBuf.current = []
+      setSearchEvents(prev => [...batch.slice().reverse(), ...prev].slice(0, 100))
+    }
+    if (execEventBuf.current.length) {
+      const batch = execEventBuf.current
+      execEventBuf.current = []
+      setExecutionHistory(prev => [...batch.slice().reverse(), ...prev].slice(0, 100))
+    }
+    if (filterEventBuf.current.length || filterDeltaBuf.current) {
+      const fBatch = filterEventBuf.current
+      const delta = filterDeltaBuf.current
+      filterEventBuf.current = []
+      filterDeltaBuf.current = null
+      setFilterStats(prev => ({
+        totalOriginalBytes: prev.totalOriginalBytes + (delta?.ob ?? 0),
+        totalFilteredBytes: prev.totalFilteredBytes + (delta?.fb ?? 0),
+        totalOriginalTokens: prev.totalOriginalTokens + (delta?.ot ?? 0),
+        totalFilteredTokens: prev.totalFilteredTokens + (delta?.ft ?? 0),
+        eventsProcessed: prev.eventsProcessed + fBatch.length,
+      }))
+      if (fBatch.length) setFilterHistory(prev => [...fBatch.slice().reverse(), ...prev].slice(0, 200))
+    }
+  }, [])
+
+  const scheduleEventBatch = useCallback(() => {
+    if (!eventBatchTimer.current) {
+      eventBatchTimer.current = setTimeout(flushEventBatches, EVENT_BATCH_MS)
+    }
+  }, [flushEventBatches])
+
   const flushOutput = useCallback(() => {
     if (outputRaf.current) {
       cancelAnimationFrame(outputRaf.current)
@@ -234,6 +289,12 @@ export function useSocket(): UseSocketReturn {
       setCommandHistory([])
       setSearchEvents([])
       setExecutionHistory([])
+      cmdEventBuf.current = []
+      searchEventBuf.current = []
+      execEventBuf.current = []
+      filterEventBuf.current = []
+      filterDeltaBuf.current = null
+      if (eventBatchTimer.current) { clearTimeout(eventBatchTimer.current); eventBatchTimer.current = null }
 socket.emit('get-cumulative-stats', {})
       socket.emit('get-filter-stats', {})
     })
@@ -335,23 +396,21 @@ socket.emit('get-cumulative-stats', {})
   })
 
   socket.on('filter-event', (event: FilterEvent) => {
-    setFilterStats(prev => ({
-      totalOriginalBytes: prev.totalOriginalBytes + event.originalBytes,
-      totalFilteredBytes: prev.totalFilteredBytes + event.filteredBytes,
-      totalOriginalTokens: prev.totalOriginalTokens + event.originalTokens,
-      totalFilteredTokens: prev.totalFilteredTokens + event.filteredTokens,
-      eventsProcessed: prev.eventsProcessed + 1,
-    }))
-    setFilterHistory(prev => [event, ...prev].slice(0, 200))
+    filterEventBuf.current.push(event)
+    filterDeltaBuf.current = {
+      ob: (filterDeltaBuf.current?.ob ?? 0) + event.originalBytes,
+      fb: (filterDeltaBuf.current?.fb ?? 0) + event.filteredBytes,
+      ot: (filterDeltaBuf.current?.ot ?? 0) + event.originalTokens,
+      ft: (filterDeltaBuf.current?.ft ?? 0) + event.filteredTokens,
+    }
+    scheduleEventBatch()
     filterEventCbs.current.forEach(cb => cb(event))
   })
 
   socket.on('command-filter-event', (event: CommandEvent) => {
     const isSearch = event.command.startsWith('agntspce-search')
-    setCommandHistory(prev => [event, ...prev].slice(0, 500))
-    if (isSearch) {
-      setSearchEvents(prev => [event, ...prev].slice(0, 100))
-    }
+    cmdEventBuf.current.push(event)
+    if (isSearch) searchEventBuf.current.push(event)
     // Throttle the stats refetch — a burst of commands used to trigger a
     // round trip (and a server-side history rescan) per event.
     const now = Date.now()
@@ -359,14 +418,12 @@ socket.emit('get-cumulative-stats', {})
       lastStatsFetchAt.current = now
       socket.emit('get-cumulative-stats', {})
     }
+    scheduleEventBatch()
   })
 
   socket.on('execution-event', (event: ExecutionEvent) => {
-    setExecutionHistory(prev => [event, ...prev].slice(0, 100))
-  })
-
-  socket.on('cumulative-stats', (data: { stats: FilterStats }) => {
-    setFilterStats(data.stats)
+    execEventBuf.current.push(event)
+    scheduleEventBatch()
   })
 
   socket.on('filter-stats', (data: { stats: FilterStats; history: FilterEvent[]; commandHistory: CommandEvent[] }) => {
@@ -385,6 +442,10 @@ socket.emit('get-cumulative-stats', {})
       if (outputTimer.current) {
         clearTimeout(outputTimer.current)
         flushOutput()
+      }
+      if (eventBatchTimer.current) {
+        clearTimeout(eventBatchTimer.current)
+        eventBatchTimer.current = null
       }
       socketRef.current?.disconnect()
     }
