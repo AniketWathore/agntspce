@@ -435,7 +435,8 @@ export default memo(function TerminalPane(props: Props) {
   }, [dimmed])
 
   useEffect(() => {
-    if (!fitAddonRef.current || !paneRef.current) return
+    const el = paneRef.current
+    if (!el) return
     let raf = 0
     const observer = new ResizeObserver(() => {
       if (raf) return
@@ -446,7 +447,7 @@ export default memo(function TerminalPane(props: Props) {
         } catch { }
       })
     })
-    observer.observe(paneRef.current)
+    observer.observe(el)
     return () => {
       cancelAnimationFrame(raf)
       observer.disconnect()
