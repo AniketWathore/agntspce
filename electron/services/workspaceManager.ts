@@ -12,7 +12,7 @@ import {
 } from './orchestration/bootstrap'
 import { FileIndexer } from './fileIndexer'
 
-const CONFIG_DIR = path.join(os.homedir(), '.agent-workspace')
+const CONFIG_DIR = path.join(os.homedir(), '.agntspce')
 
 export class WorkspaceManager {
   private workspaces = new Map<string, Workspace>()

@@ -8,7 +8,9 @@ import StatusDot from './StatusDot'
 import { getAgentColorImage, getAgentTextImage } from '../agentImages'
 import StartupUI from './StartupUI'
 import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
+import { eventMatchesRegisteredAppShortcut } from '../utils/shortcuts'
 import { isAgentTypeId } from '../utils/agentTypes'
+import { createTerminalWriteScheduler, type TerminalWriteScheduler } from '../utils/terminalWriteScheduler'
 
 interface Props {
   session: SessionState
@@ -32,11 +34,66 @@ interface Props {
   edgeHandles?: ('left' | 'right' | 'top' | 'bottom')[]
 }
 
+// WebGL hygiene latch (Orca pattern): once an attach fails (GPU process dead,
+// WebGL blocked), stop retrying for every pane/mount — each attempt burns a
+// canvas and a failed getContext. The latch clears when the window becomes
+// visible again (the designated retry boundary).
+let webglAttachFailedGlobally = false
+
+// ── Terminal instance parking (Superset v1-terminal-cache / VS Code model) ──
+// Layout and focus switches used to UNMOUNT and REBUILD the whole xterm +
+// WebGL stack per pane (each layout branch renders a different tree position),
+// which made agent switching take seconds. Instead, on unmount the live
+// terminal element is parked (detached from the DOM but fully functional —
+// subscriptions keep writing into it) and the next mount for the same session
+// reparents it instantly. WebGL is released while parked (Orca
+// suspendPaneRendering); scrollback is 200 lines so parked memory is tiny.
+interface ParkedTerminal {
+  el: HTMLDivElement
+  term: Terminal
+  fitAddon: FitAddon
+  scheduler: TerminalWriteScheduler | null
+      unsub: (() => void) | undefined
+      themeObserver: MutationObserver
+      onVisibilityChange: () => void
+      releaseWebgl: () => void
+      attachWebgl: () => void
+  alive: boolean
+  mounted: boolean
+  lastUsed: number
+}
+const parkedTerminals = new Map<string, ParkedTerminal>()
+const PARKED_TERMINAL_LIMIT = 6
+
+function disposeParkedEntry(id: string, entry: ParkedTerminal): void {
+  entry.alive = false
+  try { entry.el.remove() } catch { }
+  try { entry.unsub?.() } catch { }
+  try { entry.themeObserver.disconnect() } catch { }
+  document.removeEventListener('visibilitychange', entry.onVisibilityChange)
+  entry.releaseWebgl()
+  try { entry.scheduler?.dispose() } catch { }
+  try { entry.term.dispose() } catch { }
+  parkedTerminals.delete(id)
+}
+
+function evictParkedTerminals(): void {
+  if (parkedTerminals.size <= PARKED_TERMINAL_LIMIT) return
+  const candidates = [...parkedTerminals.entries()]
+    .filter(([, e]) => !e.mounted)
+    .sort((a, b) => a[1].lastUsed - b[1].lastUsed)
+  for (const [id, entry] of candidates) {
+    if (parkedTerminals.size <= PARKED_TERMINAL_LIMIT) break
+    disposeParkedEntry(id, entry)
+  }
+}
+
 export default memo(function TerminalPane(props: Props) {
   const { session, onInput, onResize, onResumeSession, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles } = props
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const schedulerRef = useRef<TerminalWriteScheduler | null>(null)
   const paneRef = useRef<HTMLDivElement>(null)
   const [showStartup, setShowStartup] = useState(false)
   const onTerminalOutputRef = useRef(onTerminalOutput)
@@ -95,6 +152,38 @@ export default memo(function TerminalPane(props: Props) {
     // (saves GPU/memory for many saved-but-not-running sessions).
     if (session.restorable) return
 
+    const container = terminalRef.current
+
+    // ── Reuse path: a parked instance for this session exists ───────────
+    // `cached.el` is our OWN host div (never a React-owned node), so moving it
+    // between containers is always safe.
+    const cached = parkedTerminals.get(session.id)
+    if (cached && cached.alive) {
+      if (cached.el.parentElement !== container) container.appendChild(cached.el)
+      cached.mounted = true
+      cached.lastUsed = Date.now()
+      termInstance.current = cached.term
+      fitAddonRef.current = cached.fitAddon
+      schedulerRef.current = cached.scheduler
+      // Re-attach GPU rendering: park() releases the WebGL context, so every
+      // remount must re-arm it or the pane silently stays on canvas forever.
+      requestAnimationFrame(() => { if (cached.alive && cached.mounted) cached.attachWebgl() })
+      try { cached.fitAddon.fit() } catch { }
+      requestAnimationFrame(() => {
+        if (cached.alive && cached.mounted) { try { cached.fitAddon.fit() } catch { } }
+      })
+      cached.term.focus()
+      return () => {
+        cached.mounted = false
+        try { cached.el.remove() } catch { }
+        cached.releaseWebgl()
+        evictParkedTerminals()
+        if (termInstance.current === cached.term) termInstance.current = null
+        if (fitAddonRef.current === cached.fitAddon) fitAddonRef.current = null
+        if (schedulerRef.current === cached.scheduler) schedulerRef.current = null
+      }
+    }
+
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -109,19 +198,80 @@ export default memo(function TerminalPane(props: Props) {
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
 
-    term.open(terminalRef.current)
+    // xterm renders into OUR host div, not the React-owned ref div. Parking
+    // detaches only the host — React's node is never moved or removed, which
+    // keeps React reconciliation safe (StrictMode double-mounts included).
+    const host = document.createElement('div')
+    host.className = 'terminal-instance-host'
+    container.appendChild(host)
 
-    // GPU-accelerated rendering: dramatically faster for large scrollback and
-    // multi-terminal layouts. Falls back to the default renderer on failure.
-    try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        try { webglAddon.dispose() } catch {}
-        try { term.loadAddon(new WebglAddon()) } catch {}
-      })
-      term.loadAddon(webglAddon)
-    } catch {}
+    term.open(host)
 
+    // ── WebGL renderer with hygiene (Orca/Superset pattern) ────────
+    // GPU-accelerated rendering keeps full-screen agent-TUI redraws cheap;
+    // the canvas fallback repaints the whole grid on CPU and is what made
+    // terminals feel sluggish under flood. Leak modes are handled explicitly:
+    // - context loss → fall back to canvas for this pane (no retry loops)
+    // - attach failure once → module latch stops further attempts
+    // - release → force WEBGL_lose_context + zero the canvas so the driver
+    //   context cannot outlive disposal (Chromium context-budget protection)
+    // - window hidden → context released; visible → re-attached
+    let webgl: WebglAddon | null = null
+    let webglContextLost = false
+
+    // Live-view guard reads the registry (single source of truth), NOT a
+    // closure flag — a parked instance must be able to re-attach WebGL when
+    // it is reused later, long after this effect's cleanup ran.
+    function isViewLive(): boolean {
+      const e = parkedTerminals.get(session.id)
+      return !e || (e.alive && e.mounted)
+    }
+
+    function releaseWebgl(): void {
+      if (!webgl) return
+      try {
+        const renderer = (webgl as unknown as { _renderer?: { _gl?: WebGLRenderingContext; _canvas?: HTMLCanvasElement } })._renderer
+        renderer?._gl?.getExtension('WEBGL_lose_context')?.loseContext()
+        const canvas = renderer?._canvas
+        if (canvas) { canvas.width = 0; canvas.height = 0 }
+      } catch { }
+      try { webgl.dispose() } catch { }
+      webgl = null
+    }
+
+    function attachWebgl(): void {
+      if (!isViewLive() || webgl || webglContextLost || webglAttachFailedGlobally || document.hidden) return
+      try {
+        const addon = new WebglAddon()
+        addon.onContextLoss(() => {
+          // Chromium reclaims contexts under GPU pressure; recreating here can
+          // loop. Stay on canvas until the next visibility resume.
+          webglContextLost = true
+          releaseWebgl()
+          try { term.refresh(0, term.rows - 1) } catch { }
+        })
+        term.loadAddon(addon)
+        webgl = addon
+      } catch {
+        webglAttachFailedGlobally = true
+        try { term.refresh(0, term.rows - 1) } catch { }
+      }
+    }
+
+    // Defer past xterm's post-open viewport sync (attach during open races it).
+    const webglAttachRaf = requestAnimationFrame(() => attachWebgl())
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        releaseWebgl()
+      } else {
+        // Retry boundary: clear latches, re-arm GPU rendering.
+        webglAttachFailedGlobally = false
+        webglContextLost = false
+        requestAnimationFrame(() => attachWebgl())
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
     function doFit() {
       try { fitAddon.fit() } catch { }
     }
@@ -150,13 +300,34 @@ export default memo(function TerminalPane(props: Props) {
 
     term.focus()
 
+    // ── Output write scheduling ─────────────────────────────────────
+    // Flood output goes through a per-pane scheduler (parse-paced, priority-
+    // classed, hard-capped) instead of straight into xterm, so one flooding
+    // agent can't starve the main thread and lag every pane. Dimmed/background
+    // panes drain slowly; the focused pane gets parse-clocked fast drains.
+    let scheduler: TerminalWriteScheduler | null = null
+    try {
+      scheduler = createTerminalWriteScheduler(term, !dimmed)
+      schedulerRef.current = scheduler
+    } catch { scheduler = null }
+
     // Windows: handle Ctrl+C/V manually since menu roles with accelerators
     // would intercept the key events before xterm.js's textarea can handle them.
+    // Also intercept registered app shortcuts (Ctrl+D, Ctrl+A, etc.) before xterm
+    // sends them to the PTY — on Windows xterm consumes Ctrl+key combos internally.
     if (navigator.platform?.startsWith('Win')) {
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true
         const ctrl = e.ctrlKey || e.metaKey
         if (!ctrl) return true
+
+        // Block xterm from processing registered app shortcuts so the global
+        // keydown handler in App.tsx can fire instead.
+        if (eventMatchesRegisteredAppShortcut(e)) {
+          e.preventDefault()
+          return false
+        }
+
         const key = e.key.toLowerCase()
         if (key === 'c') {
           if (e.shiftKey || term.hasSelection()) {
@@ -197,20 +368,24 @@ export default memo(function TerminalPane(props: Props) {
           requestAnimationFrame(loadChunk)
         } else {
           backlogDone = true
-          for (const d of pendingLive.splice(0)) term.write(d)
+          // Enqueue held-back live data through the scheduler (order preserved).
+          for (const d of pendingLive.splice(0)) scheduler?.write(d)
         }
       }
       loadChunk()
     }
 
     const unsub = onTerminalOutputRef.current?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
-      if (sid === session.id && termInstance.current) {
-        if (!backlogDone) {
-          pendingLive.push(data)
-          return
-        }
-        term.write(data)
+      // NOTE: must not depend on termInstance.current — it is nulled while
+      // this pane is parked, and parked terminals MUST keep receiving live
+      // output so a remount never needs a backlog replay.
+      if (sid !== session.id) return
+      if (!backlogDone) {
+        pendingLive.push(data)
+        return
       }
+      if (scheduler) scheduler.write(data)
+      else term.write(data)
     })
 
     const themeObserver = new MutationObserver(() => {
@@ -218,17 +393,61 @@ export default memo(function TerminalPane(props: Props) {
     })
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
+    // Register for parking: on unmount the instance is kept alive (detached
+    // from the DOM) so the next layout/focus switch for this session reuses it
+    // instead of rebuilding xterm + WebGL from scratch. Subscription and theme
+    // observer stay active while parked — the terminal keeps receiving live
+    // output, so remounts are seamless with no backlog replay needed.
+    parkedTerminals.set(session.id, {
+      el: host,
+      term,
+      fitAddon,
+      scheduler,
+      unsub,
+      themeObserver,
+      onVisibilityChange,
+      releaseWebgl,
+      attachWebgl,
+      alive: true,
+      mounted: true,
+      lastUsed: Date.now(),
+    })
+
     return () => {
       cancelAnimationFrame(fitRaf)
-      unsub?.()
-      themeObserver.disconnect()
-      term.dispose()
+      cancelAnimationFrame(webglAttachRaf)
+      const entry = parkedTerminals.get(session.id)
+      if (entry && entry.term === term) {
+        // Park: detach ONLY our host div (React's container stays intact),
+        // release GPU context, keep everything else alive.
+        entry.mounted = false
+        try { host.remove() } catch { }
+        releaseWebgl()
+        evictParkedTerminals()
+      } else {
+        // Entry was replaced meanwhile (should not happen) — full teardown.
+        document.removeEventListener('visibilitychange', onVisibilityChange)
+        unsub?.()
+        themeObserver.disconnect()
+        releaseWebgl()
+        scheduler?.dispose()
+        term.dispose()
+      }
+      if (schedulerRef.current === scheduler) schedulerRef.current = null
       termInstance.current = null
+      fitAddonRef.current = null
     }
   }, [session.id, session.restorable])
 
+  // Keep the scheduler's priority class in sync with focus state (dimmed =
+  // background pane → slow drain; focused → parse-clocked fast drain).
   useEffect(() => {
-    if (!fitAddonRef.current || !paneRef.current) return
+    schedulerRef.current?.setForeground(!dimmed)
+  }, [dimmed])
+
+  useEffect(() => {
+    const el = paneRef.current
+    if (!el) return
     let raf = 0
     const observer = new ResizeObserver(() => {
       if (raf) return
@@ -239,7 +458,7 @@ export default memo(function TerminalPane(props: Props) {
         } catch { }
       })
     })
-    observer.observe(paneRef.current)
+    observer.observe(el)
     return () => {
       cancelAnimationFrame(raf)
       observer.disconnect()

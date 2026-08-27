@@ -12,6 +12,17 @@ import { createWindow, getMainWindow, registerIpcHandlers, rebuildMenu } from '.
 app.setName('AgntSpce')
 app.name = 'AgntSpce'
 
+// Each terminal pane holds one WebGL context. Blink force-drops the OLDEST
+// WebGL context past its default cap of 16 per renderer, which blanks random
+// terminals in multi-pane layouts. 128 covers realistic layouts while staying
+// bounded enough that a runaway leak still surfaces (Orca uses 128, Superset
+// 256; Tabby's 9000 masks leaks).
+app.commandLine.appendSwitch('max-active-webgl-contexts', '128')
+// TEMP DEBUG: CDP access for diagnosing renderer issues (remove after).
+if (process.env.AGNTSPCE_DEBUG_CDP) {
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.AGNTSPCE_DEBUG_CDP)
+}
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()

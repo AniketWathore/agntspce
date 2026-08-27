@@ -27,7 +27,7 @@ import type { TerminalOutput, AgentConfig, AgentStartConfig, SessionState, OpenF
 import '@vscode/codicons/dist/codicon.css'
 import './App.css'
 import { assetUrl } from './utils/assetUrl'
-import { parseCombo, eventMatches, type ShortcutCombo } from './utils/shortcuts'
+import { parseCombo, eventMatches, registerShortcutCombos, type ShortcutCombo } from './utils/shortcuts'
 import { AGENT_TYPE_SET } from './utils/agentTypes'
 
 const AGENTS_LIST: { id: string; name: string; icon: string }[] = [
@@ -550,6 +550,12 @@ function App() {
       .filter((s): s is { id: string; combo: ShortcutCombo; display: string; action: () => void } => s !== null)
   }, [commanderCommands])
 
+  // Register shortcut combos globally so xterm's attachCustomKeyEventHandler
+  // can intercept them before xterm sends them to the PTY.
+  useEffect(() => {
+    registerShortcutCombos(shortcuts.map(s => s.combo))
+  }, [shortcuts])
+
   const commanderDisplay = useMemo(() => {
     return commanderCommands.map(c => {
       const parsed = c.combo ? parseCombo(c.combo) : null
@@ -640,12 +646,16 @@ function App() {
         case 'show-dashboard': ref.handleToggleView('dashboard'); break
         case 'show-git-review': ref.handleToggleView('git-review'); break
         case 'show-settings': ref.handleToggleView('settings'); break
-        case 'show-shortcuts': alert(
-          '⌘A — New Agent\n⌘S — Shell Panel\n⌘N — New Workspace\n⌘O — Open Workspace\n⌘T — New Window\n' +
-          '⌘B — Chat Sidebar\n⌘E — Workspace Sidebar\n⌘F — Focus Mode\n' +
-          '⌘D — Dashboard\n⌘G — Git Review\n⌘J — Settings\n⌘K — Command Palette\n' +
-          '⌘Tab / ⌘⇧Tab — Cycle Tabs\n⌘1-9 — Go to Tab'
-        ); break
+        case 'show-shortcuts': {
+          const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+          const mod = isMac ? '⌘' : 'Ctrl+'
+          alert(
+            `${mod}A — New Agent\n${mod}S — Shell Panel\n${mod}N — New Workspace\n${mod}O — Open Workspace\n${mod}T — New Window\n` +
+            `${mod}B — Chat Sidebar\n${mod}E — Workspace Sidebar\n${mod}F — Focus Mode\n` +
+            `${mod}D — Dashboard\n${mod}G — Git Review\n${mod}J — Settings\n${mod}K — Command Palette\n` +
+            `${isMac ? '⌘' : 'Ctrl+'}Tab / ${isMac ? '⌘⇧' : 'Ctrl+Shift+'}Tab — Cycle Tabs\n${mod}1-9 — Go to Tab`
+          ); break
+        }
         case 'show-about': alert('AgntSpce — Currently in Beta'); break
       }
     })
@@ -687,14 +697,17 @@ function App() {
       const match = shortcuts.find(s => eventMatches(e, s.combo))
       if (match) {
         // Don't hijack editing verbs (select-all / save / find) while the
-        // user is typing in an input, textarea, Monaco editor or xterm.
+        // user is typing in a regular input, textarea, or Monaco editor.
+        // xterm is excluded because its attachCustomKeyEventHandler already
+        // intercepts registered shortcuts before they reach xterm's textarea.
         const target = e.target as HTMLElement | null
         const inEditable = !!target && (
           target.tagName === 'INPUT' ||
           target.tagName === 'TEXTAREA' ||
           target.isContentEditable
         )
-        if (inEditable && /^[asf]$/i.test(e.key)) return
+        const inXterm = !!target?.closest?.('.xterm')
+        if (inEditable && !inXterm && /^[asf]$/i.test(e.key)) return
         e.preventDefault()
         match.action()
       }

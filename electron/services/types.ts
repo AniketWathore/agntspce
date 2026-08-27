@@ -14,6 +14,9 @@ export interface Session {
   branch: string
   buffer: RingBuffer
   deliveredBufferLength: number
+  // Bytes of terminal output dropped while every renderer socket was
+  // congested (drop-based backpressure). Announced on the next healthy flush.
+  pendingSkipNotice?: number
   lastActivity: number
   tokenUsage: number
   config: SessionConfig

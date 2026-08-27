@@ -1,6 +1,34 @@
 import type { Socket } from 'socket.io'
+import { app } from 'electron'
 import type { ServerContext } from '../context'
 import { toWireEvent } from '../../services/outputFilter'
+import type { AppMemoryBuckets } from '../../services/resourceTracker'
+
+// Electron's own view of its processes (main/renderer/GPU/other). On macOS,
+// RSS here includes large shared Chromium library mappings, so these numbers
+// OVERSTATE private memory — they're for attribution ("which bucket grew?"),
+// not exact accounting. Pattern from Orca's memory collector.
+function getAppMemoryBuckets(): AppMemoryBuckets | null {
+  try {
+    const metrics = app?.getAppMetrics?.()
+    if (!Array.isArray(metrics)) return null
+    const buckets: AppMemoryBuckets = { mainMB: 0, rendererMB: 0, gpuMB: 0, otherMB: 0 }
+    for (const m of metrics) {
+      // workingSetSize is already reported in MB.
+      const mb = Math.round((m as any)?.memory?.workingSetSize ?? 0)
+      switch (m.type) {
+        case 'browser': buckets.mainMB += mb; break
+        case 'renderer':
+        case 'tab': buckets.rendererMB += mb; break
+        case 'gpu': buckets.gpuMB += mb; break
+        default: buckets.otherMB += mb; break
+      }
+    }
+    return buckets
+  } catch {
+    return null
+  }
+}
 
 // History payloads go to the renderer for display of token counts only;
 // output bodies are trimmed so large histories don't bloat client memory.
@@ -72,6 +100,7 @@ export function registerStatsHandlers(ctx: ServerContext, socket: Socket): void 
         totalMemoryMB: ctx.agentOrchestrator.getTotalMemoryMB(),
         resourceUsage: ctx.agentOrchestrator.getAllResourceUsage(),
         orchestration: ctx.agentOrchestrator.getOrchestrationStats(),
+        appMemory: getAppMemoryBuckets(),
       })
     } catch (error: any) {
       if (callback) callback?.({ ok: false, error: error.message })

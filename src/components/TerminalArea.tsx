@@ -8,6 +8,8 @@ import TerminalPane from './TerminalPane'
 import AgentPicker from './AgentPicker'
 import { getAgentColorImage } from '../agentImages'
 import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
+import { eventMatchesRegisteredAppShortcut } from '../utils/shortcuts'
+import { createTerminalWriteScheduler, type TerminalWriteScheduler } from '../utils/terminalWriteScheduler'
 
 export interface PageView {
   id: string
@@ -195,8 +197,9 @@ const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, 
 }) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
 
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const shellSchedulerRef = useRef<TerminalWriteScheduler | null>(null)
   function buildTheme() {
     function v(name: string): string {
       return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -239,14 +242,23 @@ const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, 
     term.loadAddon(fitAddon)
     fitAddonRef.current = fitAddon
     term.open(terminalRef.current)
+    // GPU rendering with the same hygiene rules as agent panes (context-loss
+    // falls back to canvas). Keeps shell output cheap to draw while agents
+    // flood other panes.
     try {
-      const webglAddon = new WebglAddon()
-      webglAddon.onContextLoss(() => {
-        try { webglAddon.dispose() } catch {}
-        try { term.loadAddon(new WebglAddon()) } catch {}
-      })
-      term.loadAddon(webglAddon)
+      const webgl = new WebglAddon()
+      webgl.onContextLoss(() => { try { webgl.dispose() } catch {} })
+      term.loadAddon(webgl)
     } catch {}
+
+    // Route live output through the per-pane scheduler (parse-paced, capped)
+    // instead of writing straight into xterm — otherwise N flooding agents +
+    // an active shell saturate the main thread together.
+    let shellScheduler: ReturnType<typeof createTerminalWriteScheduler> | null = null
+    try {
+      shellScheduler = createTerminalWriteScheduler(term, true)
+      shellSchedulerRef.current = shellScheduler
+    } catch { shellScheduler = null }
     function doFit() { try { fitAddon.fit() } catch {} }
     let fitRaf = 0
     let fitAttempts = 0
@@ -271,6 +283,14 @@ const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, 
         if (e.type !== 'keydown') return true
         const ctrl = e.ctrlKey || e.metaKey
         if (!ctrl) return true
+
+        // Block xterm from processing registered app shortcuts so the global
+        // keydown handler in App.tsx can fire instead.
+        if (eventMatchesRegisteredAppShortcut(e)) {
+          e.preventDefault()
+          return false
+        }
+
         const key = e.key.toLowerCase()
         if (key === 'c') {
           if (e.shiftKey || term.hasSelection()) {
@@ -296,13 +316,16 @@ const ShellTerminal = memo(function ShellTerminal({ session, onInput, onResize, 
     if (writeData) term.write(writeData)
 
     const unsub = onTerminalOutput?.(({ sessionId: sid, data }: { sessionId: string, data: string }) => {
-      if (sid === session.id && termInstance.current) {
-        termInstance.current.write(data)
+      if (sid === session.id) {
+        if (shellScheduler) shellScheduler.write(data)
+        else termInstance.current?.write(data)
       }
     })
 
     return () => {
       cancelAnimationFrame(fitRaf)
+      shellScheduler?.dispose()
+      if (shellSchedulerRef.current === shellScheduler) shellSchedulerRef.current = null
       unsub?.()
       themeObserver.disconnect()
       term.dispose()

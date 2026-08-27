@@ -50,6 +50,7 @@
   "build": {
     "appId": "com.agentworkspace.app",
     "productName": "AgntSpce",
+    "npmRebuild": false,
     "directories": {
       "output": "release"
     },
@@ -67,6 +68,7 @@
       "rtk/**",
       "bin/agntspce",
       "bin/agntspce.mjs",
+      "bin/*.cmd",
       "bin/cargo",
       "bin/docker",
       "bin/git",
