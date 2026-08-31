@@ -1561,10 +1561,125 @@
   height: 100%;
   overflow: hidden;
   transition: grid-template-columns 0.18s ease, grid-template-rows 0.18s ease;
+  position: relative;
 }
 
-.terminal-area.no-transition {
+.terminal-area.no-transition,
+.terminal-area-hscroll.no-transition,
+.terminal-area-flex.no-transition {
   transition: none !important;
+}
+
+.terminal-area.no-transition .terminal-pane,
+.terminal-area-hscroll.no-transition .terminal-pane,
+.terminal-area-flex.no-transition .terminal-pane {
+  transition: none !important;
+}
+
+.terminal-area-flex {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  padding: 0 4px 4px;
+  min-height: 0;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-area-hscroll {
+  position: relative;
+}
+
+/* Orca flex-tree — binary splits */
+.pane-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  gap: 0;
+}
+.pane-split.horizontal {
+  flex-direction: row;
+}
+.pane-split.vertical {
+  flex-direction: column;
+}
+.pane-split-child {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.pane-divider {
+  flex-shrink: 0;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+}
+.pane-divider.horizontal {
+  width: 4px;
+  cursor: col-resize;
+}
+.pane-divider.vertical {
+  height: 4px;
+  cursor: row-resize;
+}
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  background: transparent;
+  transition: background 0.12s;
+}
+.pane-divider.horizontal::after {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+}
+.pane-divider.vertical::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+}
+.pane-divider:hover::after,
+.pane-divider.dragging::after {
+  background: var(--accent);
+}
+.pane-divider.dragging {
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.pane-ghost-divider {
+  position: absolute;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0.9;
+}
+
+.pane-ghost-divider.vertical {
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  cursor: col-resize;
+  transform: translateX(-50%);
+}
+
+.pane-ghost-divider.horizontal {
+  left: 4px;
+  right: 4px;
+  height: 4px;
+  cursor: row-resize;
+  transform: translateY(-50%);
 }
 
 .terminal-area.dragging {
@@ -1745,9 +1860,14 @@
   min-height: 0;
   min-width: 0;
   position: relative;
-  will-change: transform;
-  backface-visibility: hidden;
-  transform: translateZ(0);
+  contain: layout paint;
+}
+
+.terminal-pane.is-dragging .terminal-instance-host,
+.terminal-pane.is-dragging .xterm-viewport,
+.terminal-pane.is-dragging canvas {
+  width: 100% !important;
+  transition: none !important;
 }
 
 .terminal-pane.dimmed {
