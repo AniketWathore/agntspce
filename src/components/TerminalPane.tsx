@@ -10,6 +10,7 @@ import StartupUI from './StartupUI'
 import { copyToClipboard, readFromClipboard } from '../utils/clipboard'
 import { isAgentTypeId } from '../utils/agentTypes'
 import { createTerminalWriteScheduler, type TerminalWriteScheduler } from '../utils/terminalWriteScheduler'
+import { queuePanePtyResizeIfHeld, PANE_PTY_RESIZE_HOLD_FLUSH_EVENT } from '../utils/pane-manager/panePtyResizeHold'
 
 interface Props {
   session: SessionState
@@ -31,6 +32,7 @@ interface Props {
   onResizeMove?: (sessionId: string, edge: 'left' | 'right' | 'top' | 'bottom', x: number, y: number) => void
   onResizeEnd?: () => void
   edgeHandles?: ('left' | 'right' | 'top' | 'bottom')[]
+  isResizing?: boolean
 }
 
 // WebGL hygiene latch (Orca pattern): once an attach fails (GPU process dead,
@@ -87,8 +89,44 @@ function evictParkedTerminals(): void {
   }
 }
 
+// Orca safeFit — skip FitAddon.clear()/refresh() when drag hasn't crossed a cell
+const MIN_PANE_FIT_WIDTH_PX = 48
+const MIN_PANE_FIT_COLS = 8
+const MIN_PANE_FIT_ROWS = 4
+function getProposedDimensions(fitAddon: FitAddon): { cols: number; rows: number } | null {
+  try {
+    return fitAddon.proposeDimensions() ?? null
+  } catch {
+    return null
+  }
+}
+function canMeasurePaneForFit(paneEl: HTMLElement | null, fitAddon: FitAddon): boolean {
+  if (paneEl) {
+    const rect = paneEl.getBoundingClientRect()
+    if (rect.width < MIN_PANE_FIT_WIDTH_PX) return false
+  }
+  const dims = getProposedDimensions(fitAddon)
+  if (!dims) return false
+  return dims.cols >= MIN_PANE_FIT_COLS && dims.rows >= MIN_PANE_FIT_ROWS
+}
+function safeFit(fitAddon: FitAddon, term: Terminal, paneEl: HTMLElement | null, force: boolean = false): boolean {
+  if (!canMeasurePaneForFit(paneEl, fitAddon)) return false
+  const dims = getProposedDimensions(fitAddon)
+  if (!force && dims && dims.cols === term.cols && dims.rows === term.rows) return false
+  try {
+    fitAddon.fit()
+    return true
+  } catch {
+    return false
+  }
+}
+
+
+
 export default memo(function TerminalPane(props: Props) {
-  const { session, onInput, onResize, onResumeSession, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles } = props
+  const { session, onInput, onResize, onResumeSession, onStartAgent, onShowAgentModal, onClose, writeData, agentConfigs, style, dimmed, onTerminalOutput, layoutMode = 'grid', onLayoutChange, onResizeStart, onResizeMove, onResizeEnd, edgeHandles, isResizing } = props
+  const isResizingRef = useRef(isResizing)
+  useEffect(() => { isResizingRef.current = isResizing }, [isResizing])
   const terminalRef = useRef<HTMLDivElement>(null)
   const termInstance = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -272,7 +310,7 @@ export default memo(function TerminalPane(props: Props) {
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
     function doFit() {
-      try { fitAddon.fit() } catch { }
+      safeFit(fitAddon, term, paneRef.current)
     }
     let fitRaf = 0
     let fitAttempts = 0
@@ -292,6 +330,8 @@ export default memo(function TerminalPane(props: Props) {
     })
 
     term.onResize(({ cols, rows }) => {
+      const paneEl = paneRef.current
+      if (paneEl && queuePanePtyResizeIfHeld(paneEl, cols, rows)) return
       onResize(session.id, cols, rows)
     })
 
@@ -428,6 +468,18 @@ export default memo(function TerminalPane(props: Props) {
     }
   }, [session.id, session.restorable])
 
+  // Hold flush → only final cols/rows reach backend after drag
+  useEffect(() => {
+    const el = paneRef.current
+    if (!el) return
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ cols: number; rows: number }>).detail
+      if (detail) onResize(session.id, detail.cols, detail.rows)
+    }
+    el.addEventListener(PANE_PTY_RESIZE_HOLD_FLUSH_EVENT, handler as EventListener)
+    return () => el.removeEventListener(PANE_PTY_RESIZE_HOLD_FLUSH_EVENT, handler as EventListener)
+  }, [session.id, onResize])
+
   // Keep the scheduler's priority class in sync with focus state (dimmed =
   // background pane → slow drain; focused → parse-clocked fast drain).
   useEffect(() => {
@@ -442,9 +494,9 @@ export default memo(function TerminalPane(props: Props) {
       if (raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
-        try {
-          fitAddonRef.current?.fit()
-        } catch { }
+        const fitAddon = fitAddonRef.current
+        const term = termInstance.current
+        if (fitAddon && term) safeFit(fitAddon, term, el, !!isResizingRef.current)
       })
     })
     observer.observe(el)
@@ -453,6 +505,20 @@ export default memo(function TerminalPane(props: Props) {
       observer.disconnect()
     }
   }, [])
+
+  // After a resize drag ends, fit once to match the final container size.
+  // Uses safeFit to avoid blink when drag didn't cross a cell boundary.
+  useEffect(() => {
+    if (!isResizing) {
+      const id = requestAnimationFrame(() => {
+        const fitAddon = fitAddonRef.current
+        const term = termInstance.current
+        const el = paneRef.current
+        if (fitAddon && term) safeFit(fitAddon, term, el)
+      })
+      return () => cancelAnimationFrame(id)
+    }
+  }, [isResizing])
 
 function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.MouseEvent) {
     e.preventDefault()
@@ -485,7 +551,7 @@ function handleResizeDown(edge: 'left' | 'right' | 'top' | 'bottom', e: React.Mo
     handles.includes(edge) && onResizeStart && onResizeMove
 
   return (
-    <div className={`terminal-pane${dimmed ? ' dimmed' : ''}${session.sessionGroupId ? ' grouped' : ''}`} ref={paneRef} style={session.sessionGroupId ? { ...style, borderLeftColor: groupColor } : style}>
+    <div data-pane-id={session.id} className={`terminal-pane${dimmed ? ' dimmed' : ''}${session.sessionGroupId ? ' grouped' : ''}${isResizing ? ' is-dragging' : ''}`} ref={paneRef} style={session.sessionGroupId ? { ...style, borderLeftColor: groupColor } : style}>
       {showHandle('left') && <div className="pane-resize-handle pane-resize-left" onMouseDown={(e) => handleResizeDown('left', e)} />}
       {showHandle('right') && <div className="pane-resize-handle pane-resize-right" onMouseDown={(e) => handleResizeDown('right', e)} />}
       {showHandle('top') && <div className="pane-resize-handle pane-resize-top" onMouseDown={(e) => handleResizeDown('top', e)} />}
@@ -561,6 +627,7 @@ function areTerminalPanePropsEqual(prev: Props, next: Props): boolean {
   if (prev.dimmed !== next.dimmed) return false
   if (prev.layoutMode !== next.layoutMode) return false
   if (prev.agentConfigs !== next.agentConfigs) return false
+  if (prev.isResizing !== next.isResizing) return false
   const ps = prev.style
   const ns = next.style
   if (ps?.flex !== ns?.flex) return false
