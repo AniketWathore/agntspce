@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 // new distribution, not just an app-side change.
 const HMAC_SECRET = 'agntspce-search-integration-v1-do-not-rely-on-this-for-security'
 const TOKEN_TTL_SECS = 86400
-const SEARCH_VERSION = '0.1.0'
+const SEARCH_VERSION = '0.1.1'
 
 let _activeSearchPath: string | null = null
 let _activeSearchDir: string | null = null
@@ -213,6 +213,51 @@ function isPackageBroken(searchDir: string): boolean {
   return !hasAgntspce && !hasSemble
 }
 
+// The upstream `semble` package ships the MCP server as `FastMCP("semble")`
+// which makes tools appear as `mcp__semble__search` in clients. AgntSpce
+// must expose them as `mcp__agntspce-search__search`. Patch the installed
+// (and bundled) distribution on the fly so a downloaded 0.1.0 tarball that
+// still contains "semble" is corrected without rebuilding the tarball.
+function patchMcpServerName(searchDir: string): void {
+  const sitePkgs = getSitePackagesDir(searchDir)
+  const mcpPath = path.join(sitePkgs, 'semble', 'mcp.py')
+  if (fs.existsSync(mcpPath)) {
+    try {
+      let content = fs.readFileSync(mcpPath, 'utf-8')
+      // FastMCP("semble", ...) or FastMCP('semble', ...) → FastMCP("agntspce-search", ...)
+      if (content.includes('FastMCP("semble"') || content.includes("FastMCP('semble'")) {
+        content = content.replace(/FastMCP\(\s*["']semble["']/, 'FastMCP("agntspce-search"')
+        fs.writeFileSync(mcpPath, content, 'utf-8')
+        console.log(`[agntspce] Patched MCP server name in ${mcpPath}`)
+      }
+    } catch (e) {
+      console.warn('[agntspce] Failed to patch mcp.py:', e)
+    }
+  }
+  // Patch the installer instructions that still reference mcp__semble__*
+  // (not required for the server name, but keeps docs consistent)
+  const installerPath = path.join(sitePkgs, 'semble', 'installer', 'agents.py')
+  if (fs.existsSync(installerPath)) {
+    try {
+      let content = fs.readFileSync(installerPath, 'utf-8')
+      if (content.includes('mcp__semble__')) {
+        const before = content
+        content = content
+          .replace(/mcp__semble__/g, 'mcp__agntspce-search__')
+          .replace(/## Semble Code Search/g, '## Agntspce Search')
+          .replace(/A `semble` MCP server/g, 'A `agntspce-search` MCP server')
+          .replace(/After semble returns/g, 'After agntspce-search returns')
+        if (content !== before) {
+          fs.writeFileSync(installerPath, content, 'utf-8')
+          console.log(`[agntspce] Patched installer instructions in ${installerPath}`)
+        }
+      }
+    } catch (e) {
+      console.warn('[agntspce] Failed to patch installer:', e)
+    }
+  }
+}
+
 function installSearch(): string | null {
   const bundled = getBundledSearchDir()
   if (!bundled) {
@@ -221,6 +266,7 @@ function installSearch(): string | null {
       const installedVersion = getInstalledVersion()
       console.log(`[agntspce] Search v${installedVersion || '?'} already installed (no bundle)`)
       fixSearchBinary(installedBinary, getInstalledSearchDir())
+      patchMcpServerName(getInstalledSearchDir())
       return installedBinary
     }
     console.warn('[agntspce] Search bundle not found — skipping install')
@@ -237,6 +283,9 @@ function installSearch(): string | null {
     if (!isPackageBroken(installed)) {
       console.log(`[agntspce] Search v${bundledVersion} already installed at ${installed}`)
       fixSearchBinary(currentBinary, installed)
+      // Ensure an already-installed 0.1.1 that still contains FastMCP("semble")
+      // is corrected without requiring a version bump.
+      patchMcpServerName(installed)
       return currentBinary
     }
     console.warn(`[agntspce] Search v${bundledVersion} is broken — reinstalling`)
@@ -250,6 +299,9 @@ function installSearch(): string | null {
     }
 
     fs.cpSync(bundled, installed, { recursive: true })
+    // Patch the freshly copied bundle: the prebuilt tarball still ships
+    // FastMCP("semble") which would appear as mcp__semble__search.
+    patchMcpServerName(installed)
 
     const binPath = findInstalledBinary(getInstalledBinaryCandidates())
     if (binPath) {

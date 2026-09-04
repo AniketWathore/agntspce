@@ -13,7 +13,7 @@
  *         SEARCH_BASE_URL=...      (default: GitHub releases URL)
  */
 
-import { existsSync, mkdirSync, createWriteStream, readFileSync, copyFileSync } from 'node:fs'
+import { existsSync, mkdirSync, createWriteStream, readFileSync, copyFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -25,7 +25,7 @@ const SEARCH_DIR = join(PROJECT_DIR, 'search')
 const PACKAGES_DIR = join(PROJECT_DIR, 'packages')
 
 // ── Config ───────────────────────────────────────────────────────
-const VERSION = process.env.SEARCH_VERSION || '0.1.0'
+const VERSION = process.env.SEARCH_VERSION || '0.1.1'
 
 // Platform mapping: Node process.arch/process.platform → archive suffix
 const ARCH_MAP = {
@@ -59,6 +59,46 @@ function binaryExists(dir) {
     if (existsSync(join(dir, 'python', 'Scripts', 'agntspce-search'))) return true
   }
   return false
+}
+
+function patchDownloadedMcp(searchDir) {
+  // The upstream semble pip package ships FastMCP("semble") which appears
+  // as mcp__semble__search. Patch it to agntspce-search so the MCP is
+  // exposed as mcp__agntspce-search__search.
+  const candidates = [
+    join(searchDir, 'python', 'Lib', 'site-packages', 'semble', 'mcp.py'),
+    join(searchDir, 'python', 'lib', 'python3.13', 'site-packages', 'semble', 'mcp.py'),
+    join(searchDir, 'python', 'lib', 'python3.12', 'site-packages', 'semble', 'mcp.py'),
+  ]
+  for (const mcpPath of candidates) {
+    if (!existsSync(mcpPath)) continue
+    try {
+      let content = readFileSync(mcpPath, 'utf-8')
+      if (content.includes('FastMCP("semble"') || content.includes("FastMCP('semble'")) {
+        content = content.replace(/FastMCP\(\s*["']semble["']/, 'FastMCP("agntspce-search"')
+        writeFileSync(mcpPath, content, 'utf-8')
+        console.log(`  Patched MCP server name in ${mcpPath}`)
+      }
+    } catch {}
+  }
+  // Also patch the installer docs that still mention mcp__semble__
+  const installerCandidates = [
+    join(searchDir, 'python', 'Lib', 'site-packages', 'semble', 'installer', 'agents.py'),
+    join(searchDir, 'python', 'lib', 'python3.13', 'site-packages', 'semble', 'installer', 'agents.py'),
+  ]
+  for (const p of installerCandidates) {
+    if (!existsSync(p)) continue
+    try {
+      let c = readFileSync(p, 'utf-8')
+      if (c.includes('mcp__semble__')) {
+        c = c.replace(/mcp__semble__/g, 'mcp__agntspce-search__')
+        c = c.replace(/## Semble Code Search/g, '## Agntspce Search')
+        c = c.replace(/A `semble` MCP server/g, 'A `agntspce-search` MCP server')
+        writeFileSync(p, c, 'utf-8')
+        console.log(`  Patched installer in ${p}`)
+      }
+    } catch {}
+  }
 }
 
 async function main() {
@@ -144,6 +184,9 @@ async function main() {
     const fsP = await import('node:fs/promises')
     await fsP.rm(SEARCH_DIR, { recursive: true, force: true }).catch(() => {})
     await fsP.rename(srcDir, SEARCH_DIR)
+
+    // Patch upstream semble → agntspce-search (tarball still ships "semble")
+    try { patchDownloadedMcp(SEARCH_DIR) } catch {}
 
     // Fix permissions and create PYTHONHOME-aware wrapper
     const pythonDir = join(SEARCH_DIR, 'python')

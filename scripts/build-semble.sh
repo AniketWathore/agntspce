@@ -43,6 +43,10 @@ echo "  Python: $($PYTHON_BIN --version)"
 # ── Install search package ───────────────────────────────────────
 echo "[3/4] Installing agntspce-search + semble[mcp]..."
 "$SCRATCH/python/bin/pip" install --quiet "semble[mcp]" 2>&1 | tail -1
+# Patch upstream semble → agntspce-search so MCP appears as agntspce-search
+echo "  Patching MCP server name: semble → agntspce-search..."
+find "$SCRATCH/python" -path "*/semble/mcp.py" -exec sed -i 's/FastMCP("semble"/FastMCP("agntspce-search"/; s/FastMCP('\''semble'\''/FastMCP("agntspce-search"/' {} \; 2>/dev/null || true
+find "$SCRATCH/python" -path "*/semble/installer/agents.py" -exec sed -i 's/mcp__semble__/mcp__agntspce-search__/g; s/## Semble Code Search/## Agntspce Search/g; s/A `semble` MCP server/A `agntspce-search` MCP server/g' {} \; 2>/dev/null || true
 
 # Install the forked agntspce-search if the source is available
 AGNTSPCE_SEARCH_SRC="$PROJECT_DIR/../CodingAgents/references/agntspce-search"
@@ -75,7 +79,7 @@ WRAPPER
 fi
 
 # ── Write VERSION ────────────────────────────────────────────────
-echo "0.1.0" > "$SCRATCH/VERSION"
+echo "0.1.1" > "$SCRATCH/VERSION"
 
 # ── Move to output ───────────────────────────────────────────────
 rm -rf "$OUTPUT_DIR"

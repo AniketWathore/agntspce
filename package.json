@@ -16,7 +16,7 @@
     "test": "vitest run",
     "preview": "vite preview",
     "electron:dev": "vite",
-    "electron:build": "npm run build && electron-builder",
+    "electron:build": "npm run build && node scripts/run-electron-builder.cjs",
     "electron:preview": "vite build && electron dist-electron/main.js"
   },
   "dependencies": {
