@@ -13,7 +13,7 @@
  *         SEARCH_BASE_URL=...      (default: GitHub releases URL)
  */
 
-import { existsSync, mkdirSync, createWriteStream, readFileSync, copyFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, createWriteStream, readFileSync, copyFileSync, writeFileSync, cpSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -62,42 +62,48 @@ function binaryExists(dir) {
 }
 
 function patchDownloadedMcp(searchDir) {
-  // The upstream semble pip package ships FastMCP("semble") which appears
-  // as mcp__semble__search. Patch it to agntspce-search so the MCP is
-  // exposed as mcp__agntspce-search__search.
-  const candidates = [
-    join(searchDir, 'python', 'Lib', 'site-packages', 'semble', 'mcp.py'),
-    join(searchDir, 'python', 'lib', 'python3.13', 'site-packages', 'semble', 'mcp.py'),
-    join(searchDir, 'python', 'lib', 'python3.12', 'site-packages', 'semble', 'mcp.py'),
+  // The upstream `semble` pip package ships FastMCP("semble") which appears
+  // as mcp__semble__search. We expose it as agntspce-search. Patch the
+  // FastMCP name and also create a `agntspce_search` package copy so
+  // `from agntspce_search.mcp import serve` works (fully agntspce-search).
+  const siteCandidates = [
+    join(searchDir, 'python', 'Lib', 'site-packages'),
+    join(searchDir, 'python', 'lib', 'python3.13', 'site-packages'),
+    join(searchDir, 'python', 'lib', 'python3.12', 'site-packages'),
   ]
-  for (const mcpPath of candidates) {
-    if (!existsSync(mcpPath)) continue
-    try {
-      let content = readFileSync(mcpPath, 'utf-8')
-      if (content.includes('FastMCP("semble"') || content.includes("FastMCP('semble'")) {
-        content = content.replace(/FastMCP\(\s*["']semble["']/, 'FastMCP("agntspce-search"')
-        writeFileSync(mcpPath, content, 'utf-8')
-        console.log(`  Patched MCP server name in ${mcpPath}`)
-      }
-    } catch {}
-  }
-  // Also patch the installer docs that still mention mcp__semble__
-  const installerCandidates = [
-    join(searchDir, 'python', 'Lib', 'site-packages', 'semble', 'installer', 'agents.py'),
-    join(searchDir, 'python', 'lib', 'python3.13', 'site-packages', 'semble', 'installer', 'agents.py'),
-  ]
-  for (const p of installerCandidates) {
-    if (!existsSync(p)) continue
-    try {
-      let c = readFileSync(p, 'utf-8')
-      if (c.includes('mcp__semble__')) {
-        c = c.replace(/mcp__semble__/g, 'mcp__agntspce-search__')
-        c = c.replace(/## Semble Code Search/g, '## Agntspce Search')
-        c = c.replace(/A `semble` MCP server/g, 'A `agntspce-search` MCP server')
-        writeFileSync(p, c, 'utf-8')
-        console.log(`  Patched installer in ${p}`)
-      }
-    } catch {}
+  for (const sitePkgs of siteCandidates) {
+    const semblePath = join(sitePkgs, 'semble')
+    const agntspcePath = join(sitePkgs, 'agntspce_search')
+    if (existsSync(semblePath) && !existsSync(agntspcePath)) {
+      try {
+        cpSync(semblePath, agntspcePath, { recursive: true })
+        console.log(`  Created agntspce_search package from semble at ${agntspcePath}`)
+      } catch {}
+    }
+    for (const pkg of ['semble', 'agntspce_search']) {
+      const mcpPath = join(sitePkgs, pkg, 'mcp.py')
+      if (!existsSync(mcpPath)) continue
+      try {
+        let content = readFileSync(mcpPath, 'utf-8')
+        if (content.includes('FastMCP("semble"') || content.includes("FastMCP('semble'")) {
+          content = content.replace(/FastMCP\(\s*["']semble["']/, 'FastMCP("agntspce-search"')
+          writeFileSync(mcpPath, content, 'utf-8')
+          console.log(`  Patched MCP server name in ${mcpPath}`)
+        }
+      } catch {}
+      const installerPath = join(sitePkgs, pkg, 'installer', 'agents.py')
+      if (!existsSync(installerPath)) continue
+      try {
+        let c = readFileSync(installerPath, 'utf-8')
+        if (c.includes('mcp__semble__')) {
+          c = c.replace(/mcp__semble__/g, 'mcp__agntspce-search__')
+          c = c.replace(/## Semble Code Search/g, '## Agntspce Search')
+          c = c.replace(/A `semble` MCP server/g, 'A `agntspce-search` MCP server')
+          writeFileSync(installerPath, c, 'utf-8')
+          console.log(`  Patched installer in ${installerPath}`)
+        }
+      } catch {}
+    }
   }
 }
 

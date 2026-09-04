@@ -77,7 +77,10 @@ function getInstalledSearchDir(): string {
 // Bootstrap executed by the bundled interpreter to start the MCP stdio server.
 // The portable bundle ships no native executable entry point, so on Windows the
 // server is launched as: <bundle>/python/python.exe -c <bootstrap>.
-const MCP_BOOTSTRAP = 'import asyncio; from semble.mcp import serve; asyncio.run(serve())'
+// The bundle is built from the upstream `semble` pip package but we expose
+// it as `agntspce-search` (FastMCP name and import). The pip package is
+// copied to `agntspce_search` at install time so the import below works.
+const MCP_BOOTSTRAP = 'import asyncio; from agntspce_search.mcp import serve; asyncio.run(serve())'
 
 function getInstalledBinaryPath(): string {
   const searchDir = getInstalledSearchDir()
@@ -213,31 +216,53 @@ function isPackageBroken(searchDir: string): boolean {
   return !hasAgntspce && !hasSemble
 }
 
-// The upstream `semble` package ships the MCP server as `FastMCP("semble")`
-// which makes tools appear as `mcp__semble__search` in clients. AgntSpce
-// must expose them as `mcp__agntspce-search__search`. Patch the installed
-// (and bundled) distribution on the fly so a downloaded 0.1.0 tarball that
-// still contains "semble" is corrected without rebuilding the tarball.
+// The upstream `semble` pip package ships the MCP server as `FastMCP("semble")`
+// which makes tools appear as `mcp__semble__search`. AgntSpce exposes it as
+// `agntspce-search` (fully). The portable bundle is built from `semble` but
+// we expose it as `agntspce_search` by copying the package and patching the
+// FastMCP name. Patch both the installed and bundled distributions on the
+// fly so a 0.1.0 tarball that still contains "semble" is corrected.
 function patchMcpServerName(searchDir: string): void {
   const sitePkgs = getSitePackagesDir(searchDir)
-  const mcpPath = path.join(sitePkgs, 'semble', 'mcp.py')
-  if (fs.existsSync(mcpPath)) {
+  const semblePath = path.join(sitePkgs, 'semble')
+  const agntspcePath = path.join(sitePkgs, 'agntspce_search')
+
+  // Ensure agntspce_search package exists (copy from semble if needed).
+  // This makes `from agntspce_search.mcp import serve` work.
+  if (fs.existsSync(semblePath) && !fs.existsSync(agntspcePath)) {
+    try {
+      fs.cpSync(semblePath, agntspcePath, { recursive: true })
+      console.log(`[agntspce] Created agntspce_search package from semble at ${agntspcePath}`)
+    } catch (e) {
+      console.warn('[agntspce] Failed to copy semble → agntspce_search:', e)
+    }
+  }
+
+  // Patch both packages (semble for backwards compat, agntspce_search primary)
+  for (const pkg of ['semble', 'agntspce_search']) {
+    const mcpPath = path.join(sitePkgs, pkg, 'mcp.py')
+    if (!fs.existsSync(mcpPath)) continue
     try {
       let content = fs.readFileSync(mcpPath, 'utf-8')
-      // FastMCP("semble", ...) or FastMCP('semble', ...) → FastMCP("agntspce-search", ...)
       if (content.includes('FastMCP("semble"') || content.includes("FastMCP('semble'")) {
         content = content.replace(/FastMCP\(\s*["']semble["']/, 'FastMCP("agntspce-search"')
         fs.writeFileSync(mcpPath, content, 'utf-8')
         console.log(`[agntspce] Patched MCP server name in ${mcpPath}`)
+      } else if (content.includes('FastMCP("agntspce-search"') || content.includes("FastMCP('agntspce-search'")) {
+        // Already patched, ensure agntspce_search also has it
+      } else if (pkg === 'agntspce_search' && content.includes('FastMCP(')) {
+        // If agntspce_search was copied from semble before patch, ensure it is patched
+        if (!content.includes('"agntspce-search"')) {
+          content = content.replace(/FastMCP\(\s*["'][^"']+["']/, 'FastMCP("agntspce-search"')
+          fs.writeFileSync(mcpPath, content, 'utf-8')
+        }
       }
     } catch (e) {
-      console.warn('[agntspce] Failed to patch mcp.py:', e)
+      console.warn(`[agntspce] Failed to patch mcp.py (${pkg}):`, e)
     }
-  }
-  // Patch the installer instructions that still reference mcp__semble__*
-  // (not required for the server name, but keeps docs consistent)
-  const installerPath = path.join(sitePkgs, 'semble', 'installer', 'agents.py')
-  if (fs.existsSync(installerPath)) {
+
+    const installerPath = path.join(sitePkgs, pkg, 'installer', 'agents.py')
+    if (!fs.existsSync(installerPath)) continue
     try {
       let content = fs.readFileSync(installerPath, 'utf-8')
       if (content.includes('mcp__semble__')) {
@@ -253,7 +278,7 @@ function patchMcpServerName(searchDir: string): void {
         }
       }
     } catch (e) {
-      console.warn('[agntspce] Failed to patch installer:', e)
+      console.warn(`[agntspce] Failed to patch installer (${pkg}):`, e)
     }
   }
 }

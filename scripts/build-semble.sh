@@ -44,9 +44,20 @@ echo "  Python: $($PYTHON_BIN --version)"
 echo "[3/4] Installing agntspce-search + semble[mcp]..."
 "$SCRATCH/python/bin/pip" install --quiet "semble[mcp]" 2>&1 | tail -1
 # Patch upstream semble → agntspce-search so MCP appears as agntspce-search
+# and create agntspce_search package copy so `from agntspce_search.mcp` works
 echo "  Patching MCP server name: semble → agntspce-search..."
 find "$SCRATCH/python" -path "*/semble/mcp.py" -exec sed -i 's/FastMCP("semble"/FastMCP("agntspce-search"/; s/FastMCP('\''semble'\''/FastMCP("agntspce-search"/' {} \; 2>/dev/null || true
 find "$SCRATCH/python" -path "*/semble/installer/agents.py" -exec sed -i 's/mcp__semble__/mcp__agntspce-search__/g; s/## Semble Code Search/## Agntspce Search/g; s/A `semble` MCP server/A `agntspce-search` MCP server/g' {} \; 2>/dev/null || true
+# Create agntspce_search package from semble (fully agntspce-search, not semble)
+for site in "$SCRATCH/python/Lib/site-packages" "$SCRATCH/python/lib/python3.13/site-packages" "$SCRATCH/python/lib/python3.12/site-packages"; do
+  if [ -d "$site/semble" ] && [ ! -d "$site/agntspce_search" ]; then
+    echo "  Creating agntspce_search package from semble at $site/agntspce_search"
+    cp -r "$site/semble" "$site/agntspce_search" 2>/dev/null || true
+    # Also patch the copy
+    find "$site/agntspce_search" -name "mcp.py" -exec sed -i 's/FastMCP("semble"/FastMCP("agntspce-search"/; s/FastMCP('\''semble'\''/FastMCP("agntspce-search"/' {} \; 2>/dev/null || true
+    find "$site/agntspce_search" -path "*/installer/agents.py" -exec sed -i 's/mcp__semble__/mcp__agntspce-search__/g' {} \; 2>/dev/null || true
+  fi
+done
 
 # Install the forked agntspce-search if the source is available
 AGNTSPCE_SEARCH_SRC="$PROJECT_DIR/../CodingAgents/references/agntspce-search"
